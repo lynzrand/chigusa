@@ -1,4 +1,6 @@
 use std::{rc::Rc, cell::RefCell};
+
+/// This enum defines the variants of token in C0 language.
 pub enum TokenVariant<'a> {
     Const,
     Void,

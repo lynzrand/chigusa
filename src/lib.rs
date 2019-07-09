@@ -1,2 +1,6 @@
+/// C0 is the main library hosting tools to tokenize, generate AST from and 
+/// compile C0. It compiles C0 code into Kurumi VM Instructions.
 pub mod c0;
-pub mod kaede;
+
+/// Kurumi is a simple virtual machine for this project.
+pub mod kurumi;
