@@ -1,0 +1,75 @@
+OptionalWhitespace = [ \t]*
+
+IdentifierChar = [a-zA-Z0-9_]
+
+LineBreak = "\n" | "\r" | "\r\n"
+
+Number = [0-9]+
+
+NonTerminal = IdentifierChar+
+
+EscapedSequence = 
+    | "\\\\"
+    | "\\\""
+    | "\\\'"
+    | "\\n"
+    | "\\t"
+    | "\\b"
+    | "\\r"
+
+CharRangeExtraEscapedSequence = 
+    | "\\-"
+    | "\\^"
+    | "\\d"
+    | "\\w"
+    | "\\s"
+    | "\\D"
+    | "\\W"
+    | "\\S"
+    | "\\["
+    | "\\]"
+
+Character = [^\\]
+
+StringLiteralChar = Character | EscapedSequence
+
+StringLiteral = "\"" StringLiteralChar* "\""
+
+CharacterRangeChar = StringLiteralChar | CharRangeExtraEscapedSequence
+
+CharacterRange = CharacterRangeChar ("-" CharacterRangeChar)?
+
+CharacterSet = "[" "^"? CharacterRange+ "]"
+
+Terminal = StringLiteral | CharacterSet
+
+OneOrMoreRepetition = "+"
+
+ZeroOrMoreRepetition = "*"
+
+ZeroOrOneRepetition = "?"
+
+LimitedNumberRepetition = "{" Number "," Number "}"
+
+Grouping = "(" OptionalWhitespace Expression OptionalWhitespace ")"
+
+Element = (
+        | Grouping 
+        | Terminal 
+        | NonTerminal
+    ) (
+        | OneOrMoreRepetition 
+        | ZeroOrMoreRepetition 
+        | ZeroOrOneRepetition 
+        | LimitedNumberRepetition
+    )?
+
+ExpressionOption = (Element OptionalWhitespace)+
+
+OneLineExpression = ExpressionOption ("|" ExpressionOption)*
+
+MultiLineExpression = (LineBreak OptionalWhitespace "|" OneLineExpression)+ LineBreak?
+
+GrammarDefinition = NonTerminal "=" (OneLineExpression | MultilineExpression) "\n"+
+
+GrammarDefinitionDocument = GrammarDefinition+

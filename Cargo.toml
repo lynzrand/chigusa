@@ -4,4 +4,14 @@ version = "0.1.0"
 authors = ["Rynco Maekawa <lynzrand@outlook.com>"]
 edition = "2018"
 
+[lib]
+name = "chigusa"
+path = "src/lib.rs"
+
+# [[bin]]
+# name = "chigusa_bin"
+# path = "src/bin.rs"
+
 [dependencies]
+atty = "0.2.11"
+crossterm = "0.9.6"
