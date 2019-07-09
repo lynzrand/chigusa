@@ -1,17 +1,46 @@
-use std::vec::Vec;
+use std::{rc::Rc, cell::RefCell};
+pub enum TokenVariant<'a> {
+    Const,
+    Void,
+    If,
+    Else,
+    Int,
+    While,
+    Main,
+    Return,
+    Semicolon,
+    Negate,
+    Positive,
+    Multiply,
+    Divide,
+    Identifier(&'a str),
+    Integer(i64),
+    LParenthesis,
+    RParenthesis,
+    LCurlyBrace,
+    RCurlyBrace,
+    Assignment,
+    Comma,
+}
 
-pub enum AstNodeType {}
+pub struct Token<'a> {
+    pub var: TokenVariant<'a>,
+    pub src: &'a str,
+}
 
-pub enum AstNode {
-    List {
-        children: Box<Vec<AstNode>>,
+pub enum AstNode<'a> {
+    ConstDeclaration {
+        children: Rc<RefCell<Vec<AstNode<'a>>>>,
     },
-    Binary {
-        left_child: Box<AstNode>,
-        right_child: Box<AstNode>,
+    Variable {
+        children: Rc<RefCell<Vec<AstNode<'a>>>>,
     },
-    Unary {
-        child: Box<AstNode>,
+    Identifier {
+        ident: &'a str,
     },
-    Endpoint {},
+    Operation {
+        opcode: i8,
+        lhs: Rc<RefCell<AstNode<'a>>>,
+        rhs: Rc<RefCell<AstNode<'a>>>,
+    },
 }
