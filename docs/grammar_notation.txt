@@ -1,5 +1,7 @@
 OptionalWhitespace = [ \t]*
 
+MustWhitespace = [ \t]+
+
 IdentifierChar = [a-zA-Z0-9_]
 
 LineBreak = "\n" | "\r" | "\r\n"
@@ -68,7 +70,7 @@ ExpressionOption = (Element OptionalWhitespace)+
 
 OneLineExpression = ExpressionOption ("|" ExpressionOption)*
 
-MultiLineExpression = (LineBreak OptionalWhitespace "|" OneLineExpression)+ LineBreak?
+MultiLineExpression = (LineBreak MustWhitespace "|" OneLineExpression)+ LineBreak?
 
 GrammarDefinition = NonTerminal "=" (OneLineExpression | MultilineExpression) "\n"+
 

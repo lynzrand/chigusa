@@ -1,29 +1,85 @@
-Keywords =
-    | "const"
-    | "void"
-    | "if"
-    | "else"
-    | "int"
-    | "while"
-    | "main"
-    | "return"
-    | "printf"
-    | "scanf"
-
-Sign = [+-]
-AdditiveOp = [+-]
-MultiplicativeOp = [*/]
-RelationalOp = "<" | "<=" | "==" | "!=" | ">=" | ">"
 Letter = [_a-zA-Z]
 NonZeroDigit = [1-9]
 Digit = "0" | NonZeroDigit
 LegalChar = Letter | Digit
 
+// #region Tokens
+// Spaces are optional between tokens. They are omitted below.
+
+ConstKw = "const"
+VoidKw = "void"
+IfKw = "if"
+ElseKw = "else"
+IntKw = "int"
+WhileKw = "while"
+MainKw = "main"
+ReturnKw = "return"
+PrintfKw = "printf"
+ScanfKw = "scanf"
+
+Semicolon = ";"
+Sign = [+-]
+AdditiveOp = [+-]
+MultiplicativeOp = [*/]
+RelationalOp = "<" | "<=" | "==" | "!=" | ">=" | ">"
 Identifier = Letter LegalChar*
-
 Integer = Sign? NonZeroDigit Digit* 
+LeftParenthesis = "("
+RightParenthesis = ")"
+LeftCurlyBrace = "{"
+RightCurlyBrace = "}"
+AssignFrom = "="
+Comma = ","
 
-Program = Constants? Variables? FunctionDefinition* MainFunction
+// #endregion
+
+ConstDefinition = Identifier AssignFrom Integer
+ConstDeclaration = ConstKw ConstDefinition (Comma ConstDefinition)+ Semicolon
+Constants = ConstDeclarations+
+
+VariableDeclaration = IntKw Identifier (Comma Identifier)+ Semicolon
+Variables = VariableDeclaration+
+
+Factor =
+    | LeftParenthesis Expression RightParenthesis
+    | Integer
+    | Identifier
+    | CallExpresstion
+
+MultExpression = Factor MultiplicativeOp MultExpression | Factor
+AddExpression = MultExpression AdditiveOp AddExpresion | MultExpression
+CompareExpression = AddExpression RelationalOp CompareExpression | AddExpression
+
+Expression =
+    | LeftParenthesis Expression RightParenthesis
+    | CompareExpression
+    | CallExpression
+
+AssignStatement = Identifier AssignFrom Expression Semicolon
+
+IfStatement = IfKw LeftParenthesis CompareExpression RightParenthesis Statement (
+    ElseKw Statement
+)?
+
+WhileStatement = WhileKw LeftParenthesis CompareExpression RightParenthesis Statement
+
+Statement =
+    | IfStatement
+    | WhileStatement
+    | CallStatement
+    | ScanfStatement
+    | PrintfStatement
+    | AssignStatement
+    | Block
+    | EmptyStatement
+
+Block = LeftCurlyBrace Constants? Variables? Statements RightCurlyBrace
+
+FunctionDefinition = (IntKw | VoidKw) 
+
+FunctionDefinitions = FunctionDefinition+
+
+Program = Constants? Variables? FunctionDefinitions? MainFunction
 
 2.
 ＜程序＞ ::=  〔＜常量说明部分＞〕〔＜变量说明部分＞〕｛＜函数定义部分＞｝＜主函数＞
