@@ -33,11 +33,14 @@ Comma = ","
 
 // #endregion
 
+Type = IntKw
+NonVoidType = Type | VoidKw
+
 ConstDefinition = Identifier AssignFrom Integer
 ConstDeclaration = ConstKw ConstDefinition (Comma ConstDefinition)+ Semicolon
 Constants = ConstDeclarations+
 
-VariableDeclaration = IntKw Identifier (Comma Identifier)+ Semicolon
+VariableDeclaration = NonVoidType Identifier (Comma Identifier)+ Semicolon
 Variables = VariableDeclaration+
 
 Factor =
@@ -75,11 +78,9 @@ Statement =
 
 Block = LeftCurlyBrace Constants? Variables? Statements RightCurlyBrace
 
-FunctionDefinition = (IntKw | VoidKw) 
+FunctionDefinition = Type Identifier LeftParenthesis (Type Identifier)* RightParenthesis Block
 
-FunctionDefinitions = FunctionDefinition+
-
-Program = Constants? Variables? FunctionDefinitions? MainFunction
+Program = Constants? Variables? FunctionDefinitions* MainFunction
 
 2.
 ＜程序＞ ::=  〔＜常量说明部分＞〕〔＜变量说明部分＞〕｛＜函数定义部分＞｝＜主函数＞
