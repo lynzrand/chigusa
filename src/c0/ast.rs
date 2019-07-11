@@ -33,14 +33,11 @@ pub struct Token<'a> {
     /// its source string
     pub src: &'a str,
 
-    /// its line number
-    pub line_num: usize,
+    /// its position along source code
+    pub pos: usize,
 
-    /// its start column in line
-    pub row_start: usize,
-
-    /// its end column in line
-    pub row_end: usize,
+    /// its end position along source code
+    pub end_pos: usize,
 }
 
 pub enum AstNodeVariation<'a> {
