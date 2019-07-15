@@ -115,16 +115,24 @@ pub enum AstNodeVariation<'a> {
     IfStatement {
         checked_expression: Rc<RefCell<AstNode<'a>>>,
         has_else: bool,
-        if_block: Rc<RefCell<AstNode<'a>>>,
-        else_block: Option<Rc<RefCell<AstNode<'a>>>>,
+        if_body: Rc<RefCell<AstNode<'a>>>,
+        else_body: Option<Rc<RefCell<AstNode<'a>>>>,
     },
     WhileStatement {
         checked_expression: Rc<RefCell<AstNode<'a>>>,
-        block: Rc<RefCell<AstNode<'a>>>,
+        body: Rc<RefCell<AstNode<'a>>>,
+    },
+    Block {
+        children: Rc<RefCell<Vec<AstNode<'a>>>>,
+    },
+    Document {
+        children: Rc<RefCell<Vec<AstNode<'a>>>>,
     },
 }
 
 #[derive(Debug)]
 pub struct AstNode<'a> {
     pub var: AstNodeVariation<'a>,
+    pub start_pos: usize,
+    pub end_pos: usize,
 }

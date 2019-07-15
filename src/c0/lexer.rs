@@ -4,7 +4,6 @@ use std::collections::HashMap;
 use std::iter::{Iterator, Peekable};
 use std::str::{CharIndices, FromStr};
 
-pub struct TokenEntry {}
 
 lazy_static! {
     static ref __OP_COMBINATION: HashMap<char, Box<Vec<char>>> = {
