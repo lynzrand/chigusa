@@ -101,8 +101,6 @@ impl<'a> Lexer<'a> {
             end_index += 1;
         }
         let variation = match &self.src[start_index..end_index] {
-            "int" => TokenVariant::Int,
-            "void" => TokenVariant::Void,
             "if" => TokenVariant::If,
             "else" => TokenVariant::Else,
             "while" => TokenVariant::While,
