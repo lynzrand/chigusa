@@ -1,5 +1,6 @@
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, fmt, fmt::Display, fmt::Formatter, rc::Rc};
 
+#[derive(Debug)]
 /// This enum defines the variants of token in C0 language.
 pub enum TokenVariant<'a> {
     Const,
@@ -32,7 +33,43 @@ pub enum TokenVariant<'a> {
     Comma,
 }
 
+impl<'a> Display for TokenVariant<'a> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        use self::TokenVariant::*;
+        match self {
+            Const => write!(f, "Const"),
+            If => write!(f, "If"),
+            Else => write!(f, "Else"),
+            While => write!(f, "While"),
+            Return => write!(f, "Return"),
+            Semicolon => write!(f, ";\n"),
+            Minus => write!(f, "-"),
+            Plus => write!(f, "+"),
+            Multiply => write!(f, "*"),
+            Divide => write!(f, "/"),
+            Not => write!(f, "!"),
+            Equals => write!(f, "=="),
+            NotEquals => write!(f, "!="),
+            LessThan => write!(f, "<"),
+            LessOrEqualThan => write!(f, "<="),
+            GreaterThan => write!(f, ">"),
+            GreaterOrEqualThan => write!(f, ">="),
+            Identifier(ident) => write!(f, "Identifier({})", ident),
+            IntegerLiteral(num) => write!(f, "Integer({})", num),
+            StringLiteral(string) => write!(f, "String(\"{}\")", string),
+            LParenthesis => write!(f, "("),
+            RParenthesis => write!(f, ")"),
+            LCurlyBrace => write!(f, "{{\n"),
+            RCurlyBrace => write!(f, "\n}}\n"),
+            Assign => write!(f, "="),
+            Comma => write!(f, ","),
+            _ => write!(f, "???"),
+        }
+    }
+}
+
 /// A single token
+#[derive(Debug)]
 pub struct Token<'a> {
     /// Its variant
     pub var: TokenVariant<'a>,
@@ -47,6 +84,13 @@ pub struct Token<'a> {
     pub end_pos: usize,
 }
 
+impl<'a> Display for Token<'a> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.var)
+    }
+}
+
+#[derive(Debug)]
 pub enum AstNodeVariation<'a> {
     ConstDeclaration {
         children: Rc<RefCell<Vec<AstNode<'a>>>>,
@@ -80,6 +124,7 @@ pub enum AstNodeVariation<'a> {
     },
 }
 
+#[derive(Debug)]
 pub struct AstNode<'a> {
     pub var: AstNodeVariation<'a>,
 }

@@ -64,7 +64,7 @@ impl<'a> Lexer<'a> {
         Some(match c {
             '0'..='9' => self.lex_number(iter),
             'a'..='z' | 'A'..='Z' | '_' => self.lex_identifier(iter),
-            '+' | '-' | '*' | '/' | '<' | '>' | '=' | '!' | '(' | ')' | '{' | '}' | ',' => {
+            '+' | '-' | '*' | '/' | '<' | '>' | '=' | '!' | '(' | ')' | '{' | '}' | ',' | ';' => {
                 self.lex_operator(iter)
             }
             // TODO: Add to errors and skip this line
@@ -168,6 +168,8 @@ impl<'a> Lexer<'a> {
             ')' => TokenVariant::RParenthesis,
             '{' => TokenVariant::LCurlyBrace,
             '}' => TokenVariant::RCurlyBrace,
+            ',' => TokenVariant::Comma,
+            ';' => TokenVariant::Semicolon,
             _ => panic!(
                 "Unexpected character \'{}\' at {}",
                 &self.src[start_index..end_index],
