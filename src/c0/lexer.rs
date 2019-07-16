@@ -2,8 +2,7 @@ use lazy_static::lazy_static;
 use std::collections::HashMap;
 use std::iter::{Iterator, Peekable};
 use std::str::{CharIndices, FromStr};
-use std::{cell::RefCell, fmt, fmt::Display, fmt::Formatter, rc::Rc};
-
+use std::{cell::RefCell, fmt, fmt::Display, fmt::Formatter, rc::Rc, string::String};
 
 #[derive(Debug)]
 /// This enum defines the variants of token in C0 language.
@@ -29,7 +28,7 @@ pub enum TokenVariant<'a> {
     GreaterOrEqualThan,
     Identifier(&'a str),
     IntegerLiteral(i64),
-    StringLiteral(&'a str),
+    StringLiteral(String),
     LParenthesis,
     RParenthesis,
     LCurlyBrace,
@@ -153,6 +152,7 @@ impl<'a> Lexer<'a> {
         Some(match c {
             '0'..='9' => self.lex_number(iter),
             'a'..='z' | 'A'..='Z' | '_' => self.lex_identifier(iter),
+            '\"' => self.lex_string_literal(iter),
             '+' | '-' | '*' | '/' | '<' | '>' | '=' | '!' | '(' | ')' | '{' | '}' | ',' | ';' => {
                 self.lex_operator(iter)
             }
@@ -173,6 +173,51 @@ impl<'a> Lexer<'a> {
             var: TokenVariant::IntegerLiteral(
                 i64::from_str(&self.src[start_index..end_index]).unwrap(),
             ),
+            src: &self.src[start_index..end_index],
+            pos: start_index,
+            end_pos: end_index,
+        }
+    }
+
+    fn lex_string_literal(&mut self, iter: &mut Peekable<CharIndices>) -> Token<'a> {
+        let (start_index, start_quotation_mark) = iter.next().expect("This value should be valid");
+
+        if start_quotation_mark != '"' {
+            panic!(
+                "A string literal must start with a quotation mark! found at {}",
+                start_index
+            );
+        }
+
+        let end_index: usize;
+        let mut tgt_string = String::new();
+
+        loop {
+            let (this_index, this_char) = iter.next().expect("Unexpected EOF in string literal");
+            if this_char == '\\' {
+                // Deal with escaping stuff
+                let pushed_char = match this_char {
+                    'n' => '\n',
+                    't' => '\t',
+                    'r' => '\r',
+                    '"' => '"',
+                    // 'u'=>,
+                    _ => panic!(
+                        "Invalid escape sequence '\\{}' at {}",
+                        this_char, this_index
+                    ),
+                };
+                tgt_string.push(pushed_char);
+            } else if this_char == '"' {
+                end_index = this_index + 1;
+                break;
+            } else {
+                tgt_string.push(this_char);
+            }
+        }
+
+        Token {
+            var: TokenVariant::StringLiteral(tgt_string),
             src: &self.src[start_index..end_index],
             pos: start_index,
             end_pos: end_index,
