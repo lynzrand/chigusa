@@ -2,7 +2,16 @@
 
 ![logo](res/img/chigusa_the_c0_compiler.png)
 
-Chigusa is a C0 compiler written in Rust. This compiler is a homework of the _Compilation Principle_ class in BUAA. This project also features a custom virtual machine called Kurumi.
+Chigusa is an unfinished C0 compiler written in Rust. This compiler is a homework of the _Compilation Principle_ class in BUAA. This project also features a custom virtual machine called Kurumi.
+
+## Progress
+
+- [x] Tokenizer
+- [ ] Parser
+- [ ] Compiler
+- [ ] VM Specs
+- [ ] VM
+- [ ] CLI
 
 ## About C0
 
