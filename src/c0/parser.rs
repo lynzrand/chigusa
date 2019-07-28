@@ -1,4 +1,5 @@
 use crate::c0::lexer::*;
+use lazy_static::lazy_static;
 use std::collections::*;
 use std::{cell::RefCell, fmt, fmt::Display, fmt::Formatter, rc::Rc};
 
@@ -8,13 +9,28 @@ pub trait IntoParser<'a> {
 
 impl<'a> IntoParser<'a> for dyn Iterator<Item = Token<'a>> {
     fn into_parser(self: Box<Self>) -> Parser<'a> {
-        unimplemented!()
+        Parser::new(self)
     }
 }
 
 pub struct Parser<'a> {
-    pub lexer: Box<dyn Iterator<Item = Token<'a>>>,
+    lexer: Box<dyn Iterator<Item = Token<'a>>>,
+    stack: VecDeque<AstNode<'a>>,
 }
+
+impl<'a> Parser<'a> {
+    pub fn new(lexer: Box<dyn Iterator<Item = Token<'a>>>) -> Parser<'a> {
+        Parser {
+            lexer,
+            stack: VecDeque::new(),
+        }
+    }
+
+    pub fn parse(&mut self) -> AstNode<'a> {
+        unimplemented!()
+    }
+}
+
 pub enum TokenEntry<'a> {
     Variable {
         is_const: bool,
@@ -31,7 +47,7 @@ pub struct Scope<'a> {
     pub token_table: HashMap<&'a str, TokenEntry<'a>>,
 }
 
-type ClassRef<T> = Rc<RefCell<Box<T>>>;
+type ClassRef<T> = Rc<RefCell<T>>;
 
 #[derive(Debug)]
 pub enum AstNodeVariation<'a> {

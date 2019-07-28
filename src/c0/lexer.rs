@@ -5,7 +5,8 @@ use std::str::{CharIndices, FromStr};
 use std::{cell::RefCell, fmt, fmt::Display, fmt::Formatter, rc::Rc, string::String};
 
 #[derive(Debug)]
-/// This enum defines the variants of token in C0 language.
+/// This enum defines the variants of token in C0 language. Variants are pretty
+/// self-explanatory.
 pub enum TokenVariant<'a> {
     Const,
     Void,
@@ -35,6 +36,7 @@ pub enum TokenVariant<'a> {
     RCurlyBrace,
     Assign,
     Comma,
+    EndOfFile,
 }
 
 impl<'a> Display for TokenVariant<'a> {
@@ -110,6 +112,7 @@ lazy_static! {
 
 pub struct Lexer<'a> {
     src: &'a str,
+    completed: bool,
 }
 
 pub struct LexerIterator<'a> {
@@ -137,9 +140,16 @@ impl<'a> Iterator for LexerIterator<'a> {
 
 impl<'a> Lexer<'a> {
     pub fn new(src: &'a str) -> Lexer<'a> {
-        Self { src }
+        Self {
+            src,
+            completed: false,
+        }
     }
 
+    /// **Not Intended For Direct Use.**
+    ///
+    /// This method requires creating a character index iterator for the `src`
+    /// field. Thus it must be used inside an `LexerIterator`.
     pub fn get_next_token(&mut self, iter: &mut Peekable<CharIndices>) -> Option<Token<'a>> {
         Self::skip_spaces(iter);
         // the first character of next token
@@ -161,6 +171,7 @@ impl<'a> Lexer<'a> {
         })
     }
 
+    /// Lex a number
     fn lex_number(&mut self, iter: &mut Peekable<CharIndices>) -> Token<'a> {
         let start_index = iter.peek().expect("This value should be valid").0;
         let mut end_index = start_index;
@@ -179,6 +190,7 @@ impl<'a> Lexer<'a> {
         }
     }
 
+    /// Lex a string literal.
     fn lex_string_literal(&mut self, iter: &mut Peekable<CharIndices>) -> Token<'a> {
         let (start_index, start_quotation_mark) = iter.next().expect("This value should be valid");
 
@@ -224,6 +236,7 @@ impl<'a> Lexer<'a> {
         }
     }
 
+    /// Lex an identifier.
     fn lex_identifier(&mut self, iter: &mut Peekable<CharIndices>) -> Token<'a> {
         let start_index = iter.peek().expect("This value should be valid").0;
         let mut end_index = start_index;
@@ -251,6 +264,7 @@ impl<'a> Lexer<'a> {
         }
     }
 
+    /// Lex an operator.
     fn lex_operator(&mut self, iter: &mut Peekable<CharIndices>) -> Token<'a> {
         let (start_index, first_char) = iter.next().expect("This value should be valid");
         let mut end_index = start_index + 1;
@@ -317,6 +331,7 @@ impl<'a> Lexer<'a> {
         }
     }
 
+    /// Skip spaces and stop before the next non-space character.
     fn skip_spaces(iter: &mut Peekable<CharIndices>) {
         while match iter.peek() {
             None => false,
