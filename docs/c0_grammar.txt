@@ -1,44 +1,44 @@
-Letter = [_a-zA-Z]
-NonZeroDigit = [1-9]
-Digit = "0" | NonZeroDigit
-LegalChar = Letter | Digit
+Letter -> [_a-zA-Z]
+NonZeroDigit -> [1-9]
+Digit -> "0" | NonZeroDigit
+LegalChar -> Letter | Digit
 
 // #region Tokens
 // Spaces are optional between tokens. They are omitted below.
 
-ConstKw = "const"
-VoidKw = "void"
-IfKw = "if"
-ElseKw = "else"
-IntKw = "int"
-WhileKw = "while"
-ReturnKw = "return"
+ConstKw -> "const"
+VoidKw -> "void"
+IfKw -> "if"
+ElseKw -> "else"
+IntKw -> "int"
+WhileKw -> "while"
+ReturnKw -> "return"
 
-Semicolon = ";"
-Sign = [+-]
-AdditiveOp = [+-]
-MultiplicativeOp = [*/]
-RelationalOp = "<" | "<=" | "==" | "!=" | ">=" | ">"
-Identifier = Letter LegalChar*
-Integer = Sign? NonZeroDigit Digit* 
-LeftParenthesis = "("
-RightParenthesis = ")"
-LeftCurlyBrace = "{"
-RightCurlyBrace = "}"
-AssignFrom = "="
-Comma = ","
+Semicolon -> ";"
+Sign -> [+-]
+AdditiveOp -> [+-]
+MultiplicativeOp -> [*/]
+RelationalOp -> "<" | "<=" | "==" | "!=" | ">=" | ">"
+Identifier -> Letter LegalChar*
+Integer -> Sign? NonZeroDigit Digit* 
+LeftParenthesis -> "("
+RightParenthesis -> ")"
+LeftCurlyBrace -> "{"
+RightCurlyBrace -> "}"
+AssignFrom -> "="
+Comma -> ","
 
 // #endregion
 
-Type = IntKw
-NonVoidType = Type | VoidKw
+Type -> IntKw
+NonVoidType -> Type | VoidKw
 
-ConstDefinition = Identifier AssignFrom Integer
-ConstDeclaration = ConstKw ConstDefinition (Comma ConstDefinition)+ Semicolon
-Constants = ConstDeclarations+
+ConstDefinition -> Identifier AssignFrom Integer
+ConstDeclaration -> ConstKw ConstDefinition (Comma ConstDefinition)+ Semicolon
+Constants -> ConstDeclarations+
 
-VariableDeclaration = NonVoidType Identifier (Comma Identifier)+ Semicolon
-Variables = VariableDeclaration+
+VariableDeclaration -> NonVoidType Identifier (Comma Identifier)+ Semicolon
+Variables -> VariableDeclaration+
 
 Factor =
     | LeftParenthesis Expression RightParenthesis
@@ -46,22 +46,22 @@ Factor =
     | Identifier
     | CallExpresstion
 
-MultExpression = Factor MultiplicativeOp MultExpression | Factor
-AddExpression = MultExpression AdditiveOp AddExpresion | MultExpression
-CompareExpression = AddExpression RelationalOp CompareExpression | AddExpression
+MultExpression -> Factor MultiplicativeOp MultExpression | Factor
+AddExpression -> MultExpression AdditiveOp AddExpresion | MultExpression
+CompareExpression -> AddExpression RelationalOp CompareExpression | AddExpression
 
 Expression =
     | LeftParenthesis Expression RightParenthesis
     | CompareExpression
     | CallExpression
 
-AssignStatement = Identifier AssignFrom Expression Semicolon
+AssignStatement -> Identifier AssignFrom Expression Semicolon
 
-IfStatement = IfKw LeftParenthesis CompareExpression RightParenthesis Statement (
+IfStatement -> IfKw LeftParenthesis CompareExpression RightParenthesis Statement (
     ElseKw Statement
 )?
 
-WhileStatement = WhileKw LeftParenthesis CompareExpression RightParenthesis Statement
+WhileStatement -> WhileKw LeftParenthesis CompareExpression RightParenthesis Statement
 
 Statement =
     | IfStatement
@@ -71,14 +71,14 @@ Statement =
     | Block
     | EmptyStatement
 
-Block = LeftCurlyBrace Constants? Variables? Statements RightCurlyBrace
+Block -> LeftCurlyBrace Constants? Variables? Statements RightCurlyBrace
 
-FunctionParams = LeftParenthesis (NonVoidType Identifier (Comma NonVoidType Identifier)+)? RightParenthsis
-FunctionDefinition = Type Identifier FunctionParams Block
-FunctionDefinitions = FunctionDefinition+
+FunctionParams -> LeftParenthesis (NonVoidType Identifier (Comma NonVoidType Identifier)+)? RightParenthsis
+FunctionDefinition -> Type Identifier FunctionParams Block
+FunctionDefinitions -> FunctionDefinition+
 
 // Main function is just a function with name "main". Nothing special.
-Program = Constants? Variables? FunctionDefinitions+
+Program -> Constants? Variables? FunctionDefinitions+
 
 2.
 ＜程序＞ ::=  〔＜常量说明部分＞〕〔＜变量说明部分＞〕｛＜函数定义部分＞｝＜主函数＞

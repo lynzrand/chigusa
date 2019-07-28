@@ -1,16 +1,16 @@
-OptionalWhitespace = [ \t]*
+OptionalWhitespace -> [ \t]*
 
-MustWhitespace = [ \t]+
+MustWhitespace -> [ \t]+
 
-IdentifierChar = [a-zA-Z0-9_]
+IdentifierChar -> [a-zA-Z0-9_]
 
-LineBreak = "\n" | "\r" | "\r\n"
+LineBreak -> "\n" | "\r" | "\r\n"
 
-Number = [0-9]+
+Number -> [0-9]+
 
-NonTerminal = IdentifierChar+
+NonTerminal -> IdentifierChar+
 
-EscapedSequence = 
+EscapedSequence -> 
     | "\\\\"
     | "\\\""
     | "\\\'"
@@ -19,7 +19,7 @@ EscapedSequence =
     | "\\b"
     | "\\r"
 
-CharRangeExtraEscapedSequence = 
+CharRangeExtraEscapedSequence -> 
     | "\\-"
     | "\\^"
     | "\\d"
@@ -31,31 +31,31 @@ CharRangeExtraEscapedSequence =
     | "\\["
     | "\\]"
 
-Character = [^\\]
+Character -> [^\\]
 
-StringLiteralChar = Character | EscapedSequence
+StringLiteralChar -> Character | EscapedSequence
 
-StringLiteral = "\"" StringLiteralChar* "\""
+StringLiteral -> "\"" StringLiteralChar* "\""
 
-CharacterRangeChar = StringLiteralChar | CharRangeExtraEscapedSequence
+CharacterRangeChar -> StringLiteralChar | CharRangeExtraEscapedSequence
 
-CharacterRange = CharacterRangeChar ("-" CharacterRangeChar)?
+CharacterRange -> CharacterRangeChar ("-" CharacterRangeChar)?
 
-CharacterSet = "[" "^"? CharacterRange+ "]"
+CharacterSet -> "[" "^"? CharacterRange+ "]"
 
-Terminal = StringLiteral | CharacterSet
+Terminal -> StringLiteral | CharacterSet
 
-OneOrMoreRepetition = "+"
+OneOrMoreRepetition -> "+"
 
-ZeroOrMoreRepetition = "*"
+ZeroOrMoreRepetition -> "*"
 
-ZeroOrOneRepetition = "?"
+ZeroOrOneRepetition -> "?"
 
-LimitedNumberRepetition = "{" Number "," Number "}"
+LimitedNumberRepetition -> "{" Number "," Number "}"
 
-Grouping = "(" OptionalWhitespace Expression OptionalWhitespace ")"
+Grouping -> "(" OptionalWhitespace Expression OptionalWhitespace ")"
 
-Element = (
+Element -> (
         | Grouping 
         | Terminal 
         | NonTerminal
@@ -66,12 +66,12 @@ Element = (
         | LimitedNumberRepetition
     )?
 
-ExpressionOption = (Element OptionalWhitespace)+
+ExpressionOption -> (Element OptionalWhitespace)+
 
-OneLineExpression = ExpressionOption ("|" ExpressionOption)*
+OneLineExpression -> ExpressionOption ("|" ExpressionOption)*
 
-MultiLineExpression = (LineBreak MustWhitespace "|" OneLineExpression)+ LineBreak?
+MultiLineExpression -> (LineBreak MustWhitespace "|" OneLineExpression)+ LineBreak?
 
-GrammarDefinition = NonTerminal "=" (OneLineExpression | MultilineExpression) "\n"+
+GrammarDefinition -> NonTerminal "->" (OneLineExpression | MultilineExpression) "\n"+
 
-GrammarDefinitionDocument = GrammarDefinition+
+GrammarDefinitionDocument -> GrammarDefinition+
