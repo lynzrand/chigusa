@@ -3,17 +3,30 @@
     https://github.com/rust-lang/rust/blob/master/src/libsyntax/ast.rs
 */
 
-use std::cell::RefCell;
+use indexmap::IndexMap;
+use std::cell::{Ref, RefCell, RefMut};
 use std::collections::HashMap;
 use std::iter::Iterator;
 use std::ops::{Deref, DerefMut};
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 
 pub struct Ptr<T>(Rc<RefCell<T>>);
 
 impl<T> Ptr<T> {
     pub fn new(val: T) -> Ptr<T> {
         Ptr(Rc::new(RefCell::new(val)))
+    }
+
+    pub fn borrow(&self) -> Ref<T> {
+        self.0.borrow()
+    }
+
+    pub fn borrow_mut(&self) -> RefMut<T> {
+        self.0.borrow_mut()
+    }
+
+    pub fn downgrade(self) -> Weak<RefCell<T>> {
+        std::rc::Rc::downgrade(&self.0)
     }
 }
 
@@ -23,10 +36,18 @@ impl<T> Clone for Ptr<T> {
     }
 }
 
+pub trait IntoPtr<T> {
+    fn into_ptr(self) -> Ptr<T>;
+}
+
+impl<T> IntoPtr<T> for Rc<RefCell<T>> {
+    fn into_ptr(self) -> Ptr<T> {
+        Ptr(self)
+    }
+}
+
 pub struct Program {
     pub scope: Ptr<Scope>,
-    pub decl: Vec<Ptr<VarDecalaration>>,
-    pub fns: Vec<Ptr<FnDeclaration>>,
 }
 
 pub struct FnDeclaration {
@@ -45,30 +66,80 @@ pub struct Block {
 pub enum TokenEntry {
     Variable {
         is_const: bool,
-        var_type: String,
-        decl: Ptr<VarDecalaration>,
+        var_type: Ptr<TokenEntry>,
     },
     Type {
         is_primitive: bool,
         occupy_bytes: usize,
     },
     Function {
-        return_type: String,
-        params_type: Vec<String>,
-        decl: Ptr<FnDeclaration>,
+        returns_type: Ptr<TokenEntry>,
+        params: Vec<Ptr<TokenEntry>>,
+        decl: FnDeclaration,
     },
 }
 
 pub struct Scope {
-    pub parent: Option<Ptr<Scope>>,
-    pub token_table: HashMap<String, TokenEntry>,
+    pub parent: Option<Weak<RefCell<Scope>>>,
+    pub token_table: IndexMap<String, Ptr<TokenEntry>>,
 }
 
 impl Scope {
     pub fn new(parent: Option<Ptr<Scope>>) -> Scope {
+        let weak_parent = parent.map(|x| x.downgrade());
         Scope {
-            parent,
-            token_table: HashMap::new(),
+            parent: weak_parent,
+            token_table: IndexMap::new(),
+        }
+    }
+
+    pub fn parent(&self) -> Option<Ptr<Scope>> {
+        self.parent
+            .and_then(|weak_ptr| weak_ptr.upgrade().map(|rc| rc.into_ptr()))
+    }
+
+    pub fn try_insert(&mut self, token: &str, entry: Ptr<TokenEntry>) -> bool {
+        match self.token_table.entry(token.to_owned()) {
+            indexmap::map::Entry::Vacant(vacant_entry) => {
+                vacant_entry.insert(entry);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    pub fn try_insert_or_replace_same(&mut self, token: &str, entry: Ptr<TokenEntry>) -> bool {
+        match self.token_table.entry(token.to_owned()) {
+            indexmap::map::Entry::Vacant(vacant_entry) => {
+                vacant_entry.insert(entry);
+                true
+            }
+            indexmap::map::Entry::Occupied(occupied_entry) => {
+                let val = occupied_entry.get_mut();
+                // TODO: check if entries are same and replace when needed
+                false
+            }
+        }
+    }
+
+    pub fn find_definition_self(&self, token: &str) -> Option<Ptr<TokenEntry>> {
+        self.token_table.get(token).map(|x| x.clone())
+    }
+
+    pub fn find_definition(&self, token: &str) -> Option<Ptr<TokenEntry>> {
+        self.find_definition_self(token).or_else(|| {
+            self.parent()
+                .as_ref()
+                .and_then(|p| p.borrow().find_definition(token))
+        })
+    }
+
+    pub fn find_definition_skip(&self, token: &str, skip: usize) -> Option<Ptr<TokenEntry>> {
+        if skip <= 0 {
+            self.find_definition(token)
+        } else {
+            self.parent()
+                .and_then(|p| p.borrow().find_definition_skip(token, skip - 1))
         }
     }
 }
@@ -78,6 +149,10 @@ pub enum Statement {
     While(WhileStatement),
     Expr(Expr),
     Block(Block),
+}
+
+pub struct ReturnStatement {
+    pub return_val: Option<Ptr<TokenEntry>>,
 }
 
 pub struct IfStatement {
@@ -92,9 +167,8 @@ pub struct WhileStatement {
 }
 
 pub struct VarDecalaration {
-    pub ident: Identifier,
-    pub typ: Identifier,
     pub is_const: bool,
+    pub symbol: Ptr<TokenEntry>,
     pub val: Option<Ptr<Expr>>,
 }
 
@@ -110,9 +184,10 @@ pub enum Expr {
     UnaOp(UnaryOp),
     Ident(Identifier),
     Assign(Assignment),
+    FnCall(FuncCall),
 }
 
-pub struct Identifier {}
+pub struct Identifier(pub Ptr<TokenEntry>);
 
 pub struct FuncCall {
     pub fn_name: Identifier,
@@ -120,29 +195,26 @@ pub struct FuncCall {
 }
 
 /// An integer literal
-pub struct IntegerLiteral {
-    pub val: i64,
-}
+pub struct IntegerLiteral(pub i64);
 
 /// A String Literal
-pub struct StringLiteral {
-    pub val: String,
-}
+pub struct StringLiteral(pub String);
 
 /// A binary operator
 pub struct BinaryOp {
-    pub var: BinaryOpVar,
+    pub var: OpVar,
     pub lhs: Ptr<Expr>,
     pub rhs: Ptr<Expr>,
 }
 
 /// An unary operator
 pub struct UnaryOp {
-    pub var: UnaryOpVar,
+    pub var: OpVar,
     pub val: Ptr<Expr>,
 }
 
-pub enum BinaryOpVar {
+pub enum OpVar {
+    // Binary
     /// `+`, Addition
     Add,
     /// `-`, Subtraction
@@ -163,9 +235,8 @@ pub enum BinaryOpVar {
     Lte,
     /// `!=`, Not equal to
     Neq,
-}
 
-pub enum UnaryOpVar {
+    // Unary
     /// `-`, Negate
     Neg,
     /// `!`, Boolean Inverse
@@ -176,4 +247,8 @@ pub enum UnaryOpVar {
     Ref,
     /// `*`, Deref
     Der,
+
+    // Code uses
+    /// Left parenthesis, should only appear in parser expression stack
+    _Lpr,
 }

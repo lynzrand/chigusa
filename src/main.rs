@@ -1,6 +1,6 @@
 use chigusa::c0::lexer;
 use crossterm;
-use crossterm::{cursor, Color, Colored};
+// use crossterm::{cursor, Color, Colored};
 
 const __INPUT_CODE: &'static str = r#"
 int x, y;
