@@ -235,41 +235,43 @@ impl<'a> Parser<'a> {
 
     fn parse_expr(&mut self, scope: Ptr<Scope>) -> ParseResult<'a, Ptr<Expr>> {
         let mut op_stack = Vec::new();
-        let mut expr_root = match self.lexer.peek().ok_or(ParseError::EarlyEof)?.var {
-            TokenVariant::IntegerLiteral(i) => Ptr::new(Expr::Int(IntegerLiteral(i))),
-            TokenVariant::LParenthesis => {
-                op_stack.push(OpVar::_Lpr);
-                self.parse_expr(scope)?
-            }
-            TokenVariant::Identifier(i) => {
-                self.lexer.next();
-                let ident = scope
-                    .borrow()
-                    .find_definition(i)
-                    .ok_or(ParseError::CannotFindVar(i))?;
-                match *ident.borrow() {
-                    TokenEntry::Variable { .. } => {
-                        // This is a variable, stop and add as root
-                        Ptr::new(Expr::Ident(Identifier(ident)))
-                    }
-                    TokenEntry::Function { .. } => {
-                        // This is a function call, parse all params
-                        let params = self.parse_fn_call_params(scope)?;
-                        Ptr::new(Expr::FnCall(FuncCall {
-                            fn_name: Identifier(ident),
-                            params,
-                        }))
-                    }
-                    _ => Err(ParseError::CannotCallType(i))?,
-                }
-            }
-            token @ _ => Err(ParseError::UnexpectedToken(token))?,
-        };
+        let mut expr_root = None;
 
         while !self.lexer.try_consume(TokenVariant::Semicolon)
             && !self.lexer.try_consume(TokenVariant::RParenthesis)
             && !self.lexer.try_consume(TokenVariant::Comma)
-        {}
+        {
+            let expr = match self.lexer.peek().ok_or(ParseError::EarlyEof)?.var {
+                TokenVariant::IntegerLiteral(i) => Ptr::new(Expr::Int(IntegerLiteral(i))),
+                TokenVariant::LParenthesis => {
+                    op_stack.push(OpVar::_Lpr);
+                    self.parse_expr(scope)?
+                }
+                TokenVariant::Identifier(i) => {
+                    self.lexer.next();
+                    let ident = scope
+                        .borrow()
+                        .find_definition(i)
+                        .ok_or(ParseError::CannotFindVar(i))?;
+                    match *ident.borrow() {
+                        TokenEntry::Variable { .. } => {
+                            // This is a variable, stop and add as root
+                            Ptr::new(Expr::Ident(Identifier(ident)))
+                        }
+                        TokenEntry::Function { .. } => {
+                            // This is a function call, parse all params
+                            let params = self.parse_fn_call_params(scope)?;
+                            Ptr::new(Expr::FnCall(FuncCall {
+                                fn_name: Identifier(ident),
+                                params,
+                            }))
+                        }
+                        _ => Err(ParseError::CannotCallType(i))?,
+                    }
+                }
+                token @ _ => Err(ParseError::UnexpectedToken(token))?,
+            };
+        }
 
         unimplemented!()
     }
