@@ -230,10 +230,41 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_stmt(&mut self, scope: Ptr<Scope>) -> ParseResult<'a, Statement> {
-        unimplemented!()
+        match self.lexer.peek().ok_or(ParseError::EarlyEof)?.var {
+            TokenVariant::If => {
+                // todo: parse If statement
+                unimplemented!()
+            }
+            TokenVariant::While => {
+                // todo: parse while statement
+                unimplemented!()
+            }
+            TokenVariant::LCurlyBrace => {
+                // todo: parse block
+                unimplemented!()
+            }
+            TokenVariant::Semicolon => Ok(Statement::Empty),
+            _ => {
+                // todo: parse expression
+                unimplemented!()
+            }
+        }
     }
 
     fn parse_expr(&mut self, scope: Ptr<Scope>) -> ParseResult<'a, Ptr<Expr>> {
+        /*
+            The whole process is like this:
+                token iter
+                -> expression part iter (inverse-poland expression stream)
+                -> expression tree
+        */
+        let mut op_stack = Vec::new();
+        let mut expr_stack = Vec::new();
+
+        unimplemented!()
+    }
+
+    fn __old_parse_expr(&mut self, scope: Ptr<Scope>) -> ParseResult<'a, Ptr<Expr>> {
         let mut op_stack = Vec::new();
         let mut expr_root = None;
 
@@ -249,7 +280,7 @@ impl<'a> Parser<'a> {
                     match *ident.borrow() {
                         TokenEntry::Variable { .. } => {
                             // This is a variable, stop and add as root
-                            Ptr::new(Expr::Ident(Identifier(ident)))
+                            Ptr::new(Expr::Var(Identifier(ident)))
                         }
                         TokenEntry::Function { .. } => {
                             // This is a function call, parse all params
@@ -280,9 +311,14 @@ impl<'a> Parser<'a> {
     }
 }
 
-struct ExprParser {}
-
-impl ExprParser {}
+///
+enum ExprPart {
+    Int(IntegerLiteral),
+    Str(StringLiteral),
+    FnCall(Identifier),
+    Var(Identifier),
+    Op(OpVar),
+}
 
 pub enum ParseError<'a> {
     ExpectToken(TokenVariant<'a>),

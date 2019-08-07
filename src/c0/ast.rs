@@ -149,6 +149,7 @@ pub enum Statement {
     While(WhileStatement),
     Expr(Expr),
     Block(Block),
+    Empty,
 }
 
 pub struct ReturnStatement {
@@ -182,9 +183,10 @@ pub enum Expr {
     Str(StringLiteral),
     BinOp(BinaryOp),
     UnaOp(UnaryOp),
-    Ident(Identifier),
+    Var(Identifier),
     Assign(Assignment),
     FnCall(FuncCall),
+    Empty,
 }
 
 pub struct Identifier(pub Ptr<TokenEntry>);
@@ -259,4 +261,28 @@ pub enum OpVar {
     // Code uses
     /// Left parenthesis, should only appear in parser expression stack
     _Lpr,
+    /// Right parenthesis
+    _Rpr,
+    /// Assignment
+    _Asn,
+}
+
+impl OpVar {
+    /// Is this operator a binary operator?
+    pub fn is_binary(&self) -> bool {
+        use self::OpVar::*;
+        match self {
+            Add | Sub | Mul | Div | Gt | Lt | Eq | Gte | Lte | Neq => true,
+            _ => false,
+        }
+    }
+
+    /// Is this operator a unary operator?
+    pub fn is_unary(&self) -> bool {
+        use self::OpVar::*;
+        match self {
+            Neg | Inv | Bin | Ref | Der | Ina | Inb | Dea | Deb => true,
+            _ => false,
+        }
+    }
 }
