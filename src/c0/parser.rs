@@ -237,16 +237,9 @@ impl<'a> Parser<'a> {
         let mut op_stack = Vec::new();
         let mut expr_root = None;
 
-        while !self.lexer.try_consume(TokenVariant::Semicolon)
-            && !self.lexer.try_consume(TokenVariant::RParenthesis)
-            && !self.lexer.try_consume(TokenVariant::Comma)
-        {
-            let expr = match self.lexer.peek().ok_or(ParseError::EarlyEof)?.var {
+        while !self.lexer.try_consume(TokenVariant::Semicolon) {
+            let item: Ptr<Expr> = match self.lexer.peek().ok_or(ParseError::EarlyEof)?.var {
                 TokenVariant::IntegerLiteral(i) => Ptr::new(Expr::Int(IntegerLiteral(i))),
-                TokenVariant::LParenthesis => {
-                    op_stack.push(OpVar::_Lpr);
-                    self.parse_expr(scope)?
-                }
                 TokenVariant::Identifier(i) => {
                     self.lexer.next();
                     let ident = scope
@@ -269,6 +262,12 @@ impl<'a> Parser<'a> {
                         _ => Err(ParseError::CannotCallType(i))?,
                     }
                 }
+                TokenVariant::LParenthesis => {
+                    op_stack.push(OpVar::_Lpr);
+                    continue;
+                }
+                TokenVariant::RParenthesis => unimplemented!(),
+                // token@TokenVariant::
                 token @ _ => Err(ParseError::UnexpectedToken(token))?,
             };
         }
@@ -280,6 +279,10 @@ impl<'a> Parser<'a> {
         unimplemented!()
     }
 }
+
+struct ExprParser {}
+
+impl ExprParser {}
 
 pub enum ParseError<'a> {
     ExpectToken(TokenVariant<'a>),

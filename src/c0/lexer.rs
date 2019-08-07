@@ -21,6 +21,8 @@ pub enum TokenVariant<'a> {
     Multiply,
     Divide,
     Not,
+    Increase,
+    Decrease,
     Equals,
     NotEquals,
     LessThan,
@@ -54,6 +56,8 @@ impl<'a> Display for TokenVariant<'a> {
             Multiply => write!(f, "*"),
             Divide => write!(f, "/"),
             Not => write!(f, "!"),
+            Increase => write!(f, "++"),
+            Decrease => write!(f, "--"),
             Equals => write!(f, "=="),
             NotEquals => write!(f, "!="),
             LessThan => write!(f, "<"),
@@ -112,6 +116,8 @@ lazy_static! {
             ('>', Box::new(vec!['='])),
             ('=', Box::new(vec!['='])),
             ('!', Box::new(vec!['='])),
+            ('+', Box::new(vec!['+'])),
+            ('-', Box::new(vec!['-'])),
         ]
         .iter()
         .cloned()
@@ -295,8 +301,16 @@ impl<'a> Lexer<'a> {
         }
 
         let variation = match first_char {
-            '+' => TokenVariant::Plus,
-            '-' => TokenVariant::Minus,
+            '+' => match second_char {
+                None => TokenVariant::Plus,
+                Some('+') => TokenVariant::Increase,
+                _ => panic!(),
+            },
+            '-' => match second_char {
+                None => TokenVariant::Minus,
+                Some('-') => TokenVariant::Decrease,
+                _ => panic!(),
+            },
             '*' => TokenVariant::Multiply,
             '/' => TokenVariant::Divide,
             '=' => match second_char {

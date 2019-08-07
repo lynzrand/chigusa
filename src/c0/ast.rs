@@ -247,6 +247,14 @@ pub enum OpVar {
     Ref,
     /// `*`, Deref
     Der,
+    /// `x++`, Increase After
+    Ina,
+    /// `++x`, Increase Before
+    Inb,
+    /// `x--`, Decrease After
+    Dea,
+    /// `--x`, Decrease Before
+    Deb,
 
     // Code uses
     /// Left parenthesis, should only appear in parser expression stack
