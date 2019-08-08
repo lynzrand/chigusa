@@ -62,10 +62,12 @@ pub trait TokenIterator<'a>: Iterator<Item = Token<'a>> {
     }
 }
 
-impl<'a> TokenIterator<'a> for Peekable<Box<dyn Iterator<Item = Token<'a>>>> {}
+type Lexer<'a> = Peekable<Box<dyn Iterator<Item = Token<'a>>>>;
+
+impl<'a> TokenIterator<'a> for Lexer<'a> {}
 
 pub struct Parser<'a> {
-    lexer: Peekable<Box<dyn Iterator<Item = Token<'a>>>>,
+    lexer: Lexer<'a>,
 }
 
 impl<'a> Parser<'a> {
@@ -83,8 +85,8 @@ impl<'a> Parser<'a> {
 
     fn parse_program(&mut self) -> ParseResult<'a, Program> {
         let scope = Ptr::new(Scope::new(None));
-        let mut fns = vec![];
-        let mut vars = vec![];
+        // let mut fns = vec![];
+        // let mut vars = vec![];
         while self.lexer.peek().is_some() {
             self.parse_decl(scope.clone())?
         }
@@ -258,56 +260,122 @@ impl<'a> Parser<'a> {
                 -> expression part iter (inverse-poland expression stream)
                 -> expression tree
         */
-        let mut op_stack = Vec::new();
-        let mut expr_stack = Vec::new();
+
+        // let mut op_stack = Vec::new();
+        // let mut expr_stack = Vec::new();
 
         unimplemented!()
     }
 
-    fn __old_parse_expr(&mut self, scope: Ptr<Scope>) -> ParseResult<'a, Ptr<Expr>> {
-        let mut op_stack = Vec::new();
-        let mut expr_root = None;
+    /*
+        fn __old_parse_expr(&mut self, scope: Ptr<Scope>) -> ParseResult<'a, Ptr<Expr>> {
+            let mut op_stack = Vec::new();
+            let mut expr_root = None;
 
-        while !self.lexer.try_consume(TokenVariant::Semicolon) {
-            let item: Ptr<Expr> = match self.lexer.peek().ok_or(ParseError::EarlyEof)?.var {
-                TokenVariant::IntegerLiteral(i) => Ptr::new(Expr::Int(IntegerLiteral(i))),
-                TokenVariant::Identifier(i) => {
-                    self.lexer.next();
-                    let ident = scope
-                        .borrow()
-                        .find_definition(i)
-                        .ok_or(ParseError::CannotFindVar(i))?;
-                    match *ident.borrow() {
-                        TokenEntry::Variable { .. } => {
-                            // This is a variable, stop and add as root
-                            Ptr::new(Expr::Var(Identifier(ident)))
+            while !self.lexer.try_consume(TokenVariant::Semicolon) {
+                let item: Ptr<Expr> = match self.lexer.peek().ok_or(ParseError::EarlyEof)?.var {
+                    TokenVariant::IntegerLiteral(i) => Ptr::new(Expr::Int(IntegerLiteral(i))),
+                    TokenVariant::Identifier(i) => {
+                        self.lexer.next();
+                        let ident = scope
+                            .borrow()
+                            .find_definition(i)
+                            .ok_or(ParseError::CannotFindVar(i))?;
+                        match *ident.borrow() {
+                            TokenEntry::Variable { .. } => {
+                                // This is a variable, stop and add as root
+                                Ptr::new(Expr::Var(Identifier(ident)))
+                            }
+                            TokenEntry::Function { .. } => {
+                                // This is a function call, parse all params
+                                let params = self.parse_fn_call_params(scope)?;
+                                Ptr::new(Expr::FnCall(FuncCall {
+                                    fn_name: Identifier(ident),
+                                    params,
+                                }))
+                            }
+                            _ => Err(ParseError::CannotCallType(i))?,
                         }
-                        TokenEntry::Function { .. } => {
-                            // This is a function call, parse all params
-                            let params = self.parse_fn_call_params(scope)?;
-                            Ptr::new(Expr::FnCall(FuncCall {
-                                fn_name: Identifier(ident),
-                                params,
-                            }))
-                        }
-                        _ => Err(ParseError::CannotCallType(i))?,
                     }
-                }
-                TokenVariant::LParenthesis => {
-                    op_stack.push(OpVar::_Lpr);
-                    continue;
-                }
-                TokenVariant::RParenthesis => unimplemented!(),
-                // token@TokenVariant::
-                token @ _ => Err(ParseError::UnexpectedToken(token))?,
-            };
-        }
+                    TokenVariant::LParenthesis => {
+                        op_stack.push(OpVar::_Lpr);
+                        continue;
+                    }
+                    TokenVariant::RParenthesis => unimplemented!(),
+                    // token@TokenVariant::
+                    token @ _ => Err(ParseError::UnexpectedToken(token))?,
+                };
+            }
 
-        unimplemented!()
-    }
+            unimplemented!()
+        }
+    */
 
     fn parse_fn_call_params(&mut self, scope: Ptr<Scope>) -> ParseResult<'a, Vec<Ptr<Expr>>> {
         unimplemented!()
+    }
+}
+
+struct ExprParser<'a> {
+    lexer: &'a Lexer<'a>,
+    scope: &'a Scope,
+    lexer_ended: bool,
+    op_stack: Vec<ExprPart>,
+}
+
+impl<'a> ExprParser<'a> {
+    pub fn new(lexer: &'a Lexer<'a>, scope: &'a Scope) -> ExprParser<'a> {
+        ExprParser {
+            lexer,
+            scope,
+            lexer_ended: false,
+            op_stack: Vec::new(),
+        }
+    }
+}
+
+impl<'a> Iterator for ExprParser<'a> {
+    type Item = ExprPart;
+
+    fn next(&mut self) -> Option<ExprPart> {
+        if self.lexer_ended {
+            self.op_stack.pop()
+        } else {
+            let next = self.lexer.next()?;
+            match next.var {
+                TokenVariant::IntegerLiteral(num) => Some(ExprPart::Int(IntegerLiteral(num))),
+                _ => unimplemented!(),
+            }
+        }
+    }
+}
+
+fn is_op<'a>(token: &Token<'a>) -> bool {
+    use TokenVariant::*;
+    match token.var {
+        Minus | Plus | Multiply | Divide | Not | Increase | Decrease | Equals | NotEquals
+        | LessThan | GreaterThan | LessOrEqualThan | GreaterOrEqualThan | Assign | Comma
+        | LParenthesis | RParenthesis => true,
+        _ => false,
+    }
+}
+
+trait Operator {
+    fn priority(&self) -> isize;
+}
+
+impl Operator for OpVar {
+    fn priority(&self) -> isize {
+        use OpVar::*;
+        match self {
+            _Lpr => -10,
+            _Asn => -5,
+            Gt | Lt | Eq | Gte | Lte | Neq => 5,
+            Add | Sub => 10,
+            Mul | Div => 20,
+            Neg | Inv | Bin | Ref | Der => 30,
+            Ina | Inb | Dea | Deb => 40,
+        }
     }
 }
 
@@ -328,6 +396,7 @@ pub enum ParseError<'a> {
     CannotFindVar(&'a str),
     CannotFindFn(&'a str),
     CannotCallType(&'a str),
+    UnsupportedToken(TokenVariant<'a>),
     EarlyEof,
     InternalErr,
 }

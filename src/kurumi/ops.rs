@@ -1,4 +1,1 @@
-
-enum Op{
-    
-}
+enum Op {}
