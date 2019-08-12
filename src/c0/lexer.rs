@@ -95,7 +95,7 @@ pub struct Token<'a> {
 }
 
 impl<'a> Token<'a> {
-    pub fn get_ident(&self) -> Result<&str, ()> {
+    pub fn get_ident(&self) -> Result<&'a str, ()> {
         match self.var {
             TokenVariant::Identifier(s) => Ok(s),
             _ => Err(()),

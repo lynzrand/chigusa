@@ -10,6 +10,41 @@ fn variant_eq<T>(a: &T, b: &T) -> bool {
     std::mem::discriminant(a) == std::mem::discriminant(b)
 }
 
+enum LoopCtrl<T> {
+    Stop(T),
+    Continue,
+}
+
+use self::LoopCtrl::*;
+
+impl<T> LoopCtrl<T> {
+    pub fn unwrap(self) -> T {
+        match self {
+            LoopCtrl::Stop(x) => x,
+            _ => panic!("Cannot unwrap a LoopCtrl with Continue statement"),
+        }
+    }
+
+    pub fn is_continue(&self) -> bool {
+        match self {
+            LoopCtrl::Continue => true,
+            _ => false,
+        }
+    }
+}
+
+fn loop_while<F, T>(mut f: F) -> T
+where
+    F: FnMut() -> LoopCtrl<T>,
+{
+    let mut x: LoopCtrl<T> = Continue;
+    while x.is_continue() {
+        x = f();
+    }
+    // the following unwrap CANNOT panic because x is garanteed to be Some.
+    x.unwrap()
+}
+
 pub trait IntoParser<'a> {
     fn into_parser(self: Box<Self>) -> Parser<'a>;
 }
@@ -129,10 +164,11 @@ impl<'a> Parser<'a> {
         } else {
             while !self.lexer.try_consume(TokenVariant::Semicolon) {
                 let entry = Ptr::new(self.parse_single_var_decl(scope.clone())?);
-                scope
-                    .borrow_mut()
-                    .token_table
-                    .insert(identifier_owned, entry);
+                // TODO: write parser for single entries
+                // scope
+                //     .borrow_mut()
+                //     .token_table
+                //     .insert(identifier_owned, entry);
             }
             unimplemented!()
         }
@@ -197,7 +233,7 @@ impl<'a> Parser<'a> {
             let token_entry = Ptr::new(TokenEntry::Variable { is_const, var_type });
             let var_decl = Ptr::new(VarDecalaration {
                 is_const,
-                symbol: token_entry,
+                symbol: token_entry.clone(),
                 val: None,
             });
 
@@ -317,14 +353,14 @@ impl<'a> Parser<'a> {
 }
 
 struct ExprParser<'a> {
-    lexer: &'a Lexer<'a>,
+    lexer: &'a mut Lexer<'a>,
     scope: &'a Scope,
     lexer_ended: bool,
     op_stack: Vec<ExprPart>,
 }
 
 impl<'a> ExprParser<'a> {
-    pub fn new(lexer: &'a Lexer<'a>, scope: &'a Scope) -> ExprParser<'a> {
+    pub fn new(lexer: &'a mut Lexer<'a>, scope: &'a Scope) -> ExprParser<'a> {
         ExprParser {
             lexer,
             scope,
@@ -332,31 +368,127 @@ impl<'a> ExprParser<'a> {
             op_stack: Vec::new(),
         }
     }
+
+    fn end_lexer<T>(&mut self) -> LoopCtrl<T> {
+        self.lexer_ended = true;
+        Continue
+    }
+
+    fn is_stack_top_higher_than(&self, op: &impl Operator) -> bool {
+        self.op_stack
+            .last()
+            .map(|stack_op| stack_op.priority() >= op.priority())
+            .unwrap_or(false)
+    }
+
+    /*
+        Design idea:
+
+        # push-type pipeline
+
+        new token arriving
+        |> is operator? (function calls are considered as operator)
+        - false => pass on
+        - true =>
+            |> is priority higher than stack top (if any)?
+            - false => pop until meeting that of same or lower priority
+            - true => push onto stack
+
+        For function calls, transform `f(x, y)` into (f (x) (y)) and push as usual
+
+        # converting to pull pipeline
+
+        next() being called
+        WHILE we cannot return token
+            can lexer provide another token? (peek, false if EOF or semicolon)
+            - true =>
+                is the next token an operator?
+                - false =>
+                    CONSUME the token, store it
+                    is the **next** upcoming token LParenthesis? (check if is function call)
+                    - true => PUSH _Lpr FnCall(ident), CONSUME LParenthesis
+                    - false => RETURN corresponding ExprPart
+                - true =>
+                    is the next token LParenthesis?
+                    - true => CONSUME, PUSH _Lpr, CONTINUE
+                    - false =>
+                        does stack top operator have higher priority than current one?
+                        - true => POP, RETRUN stack top
+                        - false =>
+                            what is this token?
+                            - RParenthesis =>
+                                is stack top LParenthesis?
+                                - true => CONSUME, POP, CONTINUE
+                                - false => ERROR unbalanced parenthesis
+                            - Comma => CONSUME, CONTINUE
+                            - other => PUSH, CONTINUE
+            - false =>
+                is stack empty?
+                - true => RETURN None
+                - false => POP, RETURN
+    */
+
+    fn _next(&mut self) -> Option<ExprPart> {
+        loop_while(|| {
+            if self.lexer_ended {
+                if self.op_stack.is_empty() {
+                    Stop(None)
+                } else {
+                    Stop(self.op_stack.pop())
+                }
+            } else {
+                match self.lexer.peek() {
+                    None => self.end_lexer(),
+                    Some(token) => match &token.var {
+                        TokenVariant::EndOfFile | TokenVariant::Semicolon => self.end_lexer(),
+                        op @ _ if token.is_op() => {
+                            // TODO: Convert TokenVariant into OpVar
+                            let op: OpVar = unimplemented!();
+                            if self.is_stack_top_higher_than(op) {
+                                Stop(self.op_stack.pop())
+                            } else {
+                                self.op_stack.push(unimplemented!());
+                                Continue
+                            }
+                        }
+                        _ => {
+                            // TODO: consume and check function
+                            unimplemented!()
+                        }
+                    },
+                }
+            }
+        })
+    }
 }
 
 impl<'a> Iterator for ExprParser<'a> {
     type Item = ExprPart;
 
     fn next(&mut self) -> Option<ExprPart> {
-        if self.lexer_ended {
-            self.op_stack.pop()
-        } else {
-            let next = self.lexer.next()?;
-            match next.var {
-                TokenVariant::IntegerLiteral(num) => Some(ExprPart::Int(IntegerLiteral(num))),
-                _ => unimplemented!(),
-            }
-        }
+        self._next()
     }
 }
 
-fn is_op<'a>(token: &Token<'a>) -> bool {
-    use TokenVariant::*;
-    match token.var {
-        Minus | Plus | Multiply | Divide | Not | Increase | Decrease | Equals | NotEquals
-        | LessThan | GreaterThan | LessOrEqualThan | GreaterOrEqualThan | Assign | Comma
-        | LParenthesis | RParenthesis => true,
-        _ => false,
+trait OptionalOperator {
+    fn is_op(&self) -> bool;
+}
+
+impl OptionalOperator for Token<'_> {
+    fn is_op(&self) -> bool {
+        self.var.is_op()
+    }
+}
+
+impl OptionalOperator for TokenVariant<'_> {
+    fn is_op(&self) -> bool {
+        use TokenVariant::*;
+        match self {
+            Minus | Plus | Multiply | Divide | Not | Increase | Decrease | Equals | NotEquals
+            | LessThan | GreaterThan | LessOrEqualThan | GreaterOrEqualThan | Assign | Comma
+            | LParenthesis | RParenthesis => true,
+            _ => false,
+        }
     }
 }
 
@@ -368,8 +500,9 @@ impl Operator for OpVar {
     fn priority(&self) -> isize {
         use OpVar::*;
         match self {
-            _Lpr => -10,
-            _Asn => -5,
+            _Lpr | _Rpr => -10,
+            _Com => -4,
+            _Asn => 0,
             Gt | Lt | Eq | Gte | Lte | Neq => 5,
             Add | Sub => 10,
             Mul | Div => 20,
@@ -386,6 +519,25 @@ enum ExprPart {
     FnCall(Identifier),
     Var(Identifier),
     Op(OpVar),
+}
+
+impl OptionalOperator for ExprPart {
+    fn is_op(&self) -> bool {
+        match self {
+            ExprPart::Op(..) | ExprPart::FnCall(..) => true,
+            _ => false,
+        }
+    }
+}
+
+impl Operator for ExprPart {
+    fn priority(&self) -> isize {
+        match self {
+            ExprPart::Op(op) => op.priority(),
+            ExprPart::FnCall(..) => -5,
+            _ => panic!("Cannot use trait Operator on expression parts that are not operator!"),
+        }
+    }
 }
 
 pub enum ParseError<'a> {
@@ -412,13 +564,13 @@ impl<'a> ParseError<'a> {
         }
     }
 
-    pub fn get_err_desc(&self) -> &str {
+    pub fn get_err_desc(&self) -> String {
         use self::ParseError::*;
         match self {
             ExpectToken(token) => format!("Expected {}", token),
-            NoConstFns => "Functions cannot be marked as constant",
-            InternalErr => "Something went wrong inside the compiler",
-            _ => "Unknown Error",
+            NoConstFns => "Functions cannot be marked as constant".to_string(),
+            InternalErr => "Something went wrong inside the compiler".to_string(),
+            _ => "Unknown Error".to_string(),
         }
     }
 }

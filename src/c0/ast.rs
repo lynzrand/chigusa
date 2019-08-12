@@ -95,6 +95,7 @@ impl Scope {
 
     pub fn parent(&self) -> Option<Ptr<Scope>> {
         self.parent
+            .as_ref()
             .and_then(|weak_ptr| weak_ptr.upgrade().map(|rc| rc.into_ptr()))
     }
 
@@ -114,7 +115,7 @@ impl Scope {
                 vacant_entry.insert(entry);
                 true
             }
-            indexmap::map::Entry::Occupied(occupied_entry) => {
+            indexmap::map::Entry::Occupied(mut occupied_entry) => {
                 let val = occupied_entry.get_mut();
                 // TODO: check if entries are same and replace when needed
                 false
@@ -263,6 +264,8 @@ pub enum OpVar {
     _Lpr,
     /// Right parenthesis
     _Rpr,
+    /// Comma
+    _Com,
     /// Assignment
     _Asn,
 }
