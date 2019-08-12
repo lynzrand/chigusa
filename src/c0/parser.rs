@@ -303,50 +303,6 @@ impl<'a> Parser<'a> {
         unimplemented!()
     }
 
-    /*
-        fn __old_parse_expr(&mut self, scope: Ptr<Scope>) -> ParseResult<'a, Ptr<Expr>> {
-            let mut op_stack = Vec::new();
-            let mut expr_root = None;
-
-            while !self.lexer.try_consume(TokenVariant::Semicolon) {
-                let item: Ptr<Expr> = match self.lexer.peek().ok_or(ParseError::EarlyEof)?.var {
-                    TokenVariant::IntegerLiteral(i) => Ptr::new(Expr::Int(IntegerLiteral(i))),
-                    TokenVariant::Identifier(i) => {
-                        self.lexer.next();
-                        let ident = scope
-                            .borrow()
-                            .find_definition(i)
-                            .ok_or(ParseError::CannotFindVar(i))?;
-                        match *ident.borrow() {
-                            TokenEntry::Variable { .. } => {
-                                // This is a variable, stop and add as root
-                                Ptr::new(Expr::Var(Identifier(ident)))
-                            }
-                            TokenEntry::Function { .. } => {
-                                // This is a function call, parse all params
-                                let params = self.parse_fn_call_params(scope)?;
-                                Ptr::new(Expr::FnCall(FuncCall {
-                                    fn_name: Identifier(ident),
-                                    params,
-                                }))
-                            }
-                            _ => Err(ParseError::CannotCallType(i))?,
-                        }
-                    }
-                    TokenVariant::LParenthesis => {
-                        op_stack.push(OpVar::_Lpr);
-                        continue;
-                    }
-                    TokenVariant::RParenthesis => unimplemented!(),
-                    // token@TokenVariant::
-                    token @ _ => Err(ParseError::UnexpectedToken(token))?,
-                };
-            }
-
-            unimplemented!()
-        }
-    */
-
     fn parse_fn_call_params(&mut self, scope: Ptr<Scope>) -> ParseResult<'a, Vec<Ptr<Expr>>> {
         unimplemented!()
     }
@@ -356,6 +312,9 @@ struct ExprParser<'a> {
     lexer: &'a mut Lexer<'a>,
     scope: &'a Scope,
     lexer_ended: bool,
+    suggest_unary: bool,
+    err_fuse: bool,
+    err: Option<ParseError<'a>>,
     op_stack: Vec<ExprPart>,
 }
 
@@ -365,8 +324,17 @@ impl<'a> ExprParser<'a> {
             lexer,
             scope,
             lexer_ended: false,
+            suggest_unary: true,
+            err_fuse: false,
+            err: None,
             op_stack: Vec::new(),
         }
+    }
+
+    fn meltdown<T>(&mut self, err: ParseError<'a>) -> LoopCtrl<Option<T>> {
+        self.err = Some(err);
+        self.err_fuse = true;
+        Stop(None)
     }
 
     fn end_lexer<T>(&mut self) -> LoopCtrl<T> {
@@ -377,7 +345,13 @@ impl<'a> ExprParser<'a> {
     fn is_stack_top_higher_than(&self, op: &impl Operator) -> bool {
         self.op_stack
             .last()
-            .map(|stack_op| stack_op.priority() >= op.priority())
+            .map(|stack_op| {
+                if op.is_right_associative() {
+                    stack_op.priority() > op.priority()
+                } else {
+                    stack_op.priority() >= op.priority()
+                }
+            })
             .unwrap_or(false)
     }
 
@@ -397,6 +371,8 @@ impl<'a> ExprParser<'a> {
         For function calls, transform `f(x, y)` into (f (x) (y)) and push as usual
 
         # converting to pull pipeline
+
+        https://cp-algorithms.com/string/expression_parsing.html
 
         next() being called
         WHILE we cannot return token
@@ -421,7 +397,7 @@ impl<'a> ExprParser<'a> {
                                 - true => CONSUME, POP, CONTINUE
                                 - false => ERROR unbalanced parenthesis
                             - Comma => CONSUME, CONTINUE
-                            - other => PUSH, CONTINUE
+                            - other => PUSH, suggest unary, CONTINUE
             - false =>
                 is stack empty?
                 - true => RETURN None
@@ -429,36 +405,59 @@ impl<'a> ExprParser<'a> {
     */
 
     fn _next(&mut self) -> Option<ExprPart> {
-        loop_while(|| {
-            if self.lexer_ended {
-                if self.op_stack.is_empty() {
-                    Stop(None)
+        if self.err_fuse {
+            None
+        } else {
+            loop_while(|| {
+                if self.lexer_ended {
+                    if self.op_stack.is_empty() {
+                        Stop(None)
+                    } else {
+                        Stop(self.op_stack.pop())
+                    }
                 } else {
-                    Stop(self.op_stack.pop())
-                }
-            } else {
-                match self.lexer.peek() {
-                    None => self.end_lexer(),
-                    Some(token) => match &token.var {
-                        TokenVariant::EndOfFile | TokenVariant::Semicolon => self.end_lexer(),
-                        op @ _ if token.is_op() => {
-                            // TODO: Convert TokenVariant into OpVar
-                            let op: OpVar = unimplemented!();
-                            if self.is_stack_top_higher_than(op) {
-                                Stop(self.op_stack.pop())
+                    match self.lexer.peek() {
+                        None
+                        | Some(Token {
+                            var: TokenVariant::EndOfFile,
+                            ..
+                        })
+                        | Some(Token {
+                            var: TokenVariant::Semicolon,
+                            ..
+                        }) => self.end_lexer(),
+                        Some(token) => {
+                            if token.is_op() {
+                                let op: OpVar = token.var.into_op(self.suggest_unary).unwrap();
+                                if self.is_stack_top_higher_than(&op) {
+                                    Stop(self.op_stack.pop())
+                                } else {
+                                    self.op_stack.push(ExprPart::Op(op));
+                                    Continue
+                                }
                             } else {
-                                self.op_stack.push(unimplemented!());
-                                Continue
+                                // consume and check function
+                                let t: TokenVariant = self.lexer.next().unwrap().var;
+                                match t {
+                                    TokenVariant::IntegerLiteral(i) => {
+                                        Stop(Some(ExprPart::Int(IntegerLiteral(i))))
+                                    }
+                                    TokenVariant::StringLiteral(s) => {
+                                        Stop(Some(ExprPart::Str(StringLiteral(s))))
+                                    }
+                                    TokenVariant::Identifier(ident) => {
+                                        let is_fn =
+                                            self.lexer.try_consume(TokenVariant::LParenthesis);
+                                        unimplemented!()
+                                    }
+                                    token @ _ => self.meltdown(ParseError::UnexpectedToken(token)),
+                                }
                             }
                         }
-                        _ => {
-                            // TODO: consume and check function
-                            unimplemented!()
-                        }
-                    },
+                    }
                 }
-            }
-        })
+            })
+        }
     }
 }
 
@@ -492,22 +491,94 @@ impl OptionalOperator for TokenVariant<'_> {
     }
 }
 
+trait IntoOperator {
+    fn into_op(&self, suggest_unary: bool) -> Option<OpVar>;
+}
+
+impl IntoOperator for TokenVariant<'_> {
+    fn into_op(&self, suggest_unary: bool) -> Option<OpVar> {
+        use OpVar::*;
+        use TokenVariant::*;
+        match self {
+            Minus => {
+                if suggest_unary {
+                    Some(Neg)
+                } else {
+                    Some(Sub)
+                }
+            }
+            Plus => Some(Add),
+            Multiply => {
+                if suggest_unary {
+                    Some(Der)
+                } else {
+                    Some(Mul)
+                }
+            }
+            Divide => Some(Div),
+            Not => Some(Inv),
+            BinaryAnd => {
+                if suggest_unary {
+                    Some(Ref)
+                } else {
+                    Some(Ban)
+                }
+            }
+            BinaryOr => Some(Bor),
+            TokenVariant::And => Some(OpVar::And),
+            TokenVariant::Or => Some(OpVar::Or),
+            TokenVariant::Xor => Some(OpVar::Xor),
+            Increase => Some(Ina),
+            Decrease => Some(Dea),
+            Equals => Some(Eq),
+            NotEquals => Some(Neq),
+            LessThan => Some(Lt),
+            GreaterThan => Some(Gt),
+            LessOrEqualThan => Some(Lte),
+            GreaterOrEqualThan => Some(Gte),
+            Assign => Some(_Asn),
+            Comma => Some(_Com),
+            LParenthesis => Some(_Lpr),
+            RParenthesis => Some(_Rpr),
+            _ => None,
+        }
+    }
+}
+
 trait Operator {
     fn priority(&self) -> isize;
+    fn is_right_associative(&self) -> bool;
+    fn is_left_associative(&self) -> bool {
+        !self.is_right_associative()
+    }
 }
 
 impl Operator for OpVar {
     fn priority(&self) -> isize {
+        // According to https://zh.cppreference.com/w/cpp/language/operator_precedence
         use OpVar::*;
         match self {
             _Lpr | _Rpr => -10,
             _Com => -4,
             _Asn => 0,
-            Gt | Lt | Eq | Gte | Lte | Neq => 5,
-            Add | Sub => 10,
+            Eq | Neq => 2,
+            Gt | Lt | Gte | Lte => 3,
+            Or => 4,
+            And => 5,
+            Bor => 6,
+            Xor => 7,
+            Ban => 8,
+            Add | Sub => 15,
             Mul | Div => 20,
-            Neg | Inv | Bin | Ref | Der => 30,
-            Ina | Inb | Dea | Deb => 40,
+            Neg | Inv | Bin | Ref | Der | Ina | Inb | Dea | Deb => 40,
+        }
+    }
+
+    fn is_right_associative(&self) -> bool {
+        use OpVar::*;
+        match self {
+            Neg | Inv | Bin | Ref | Der | _Asn => true,
+            _ => false,
         }
     }
 }
@@ -535,6 +606,14 @@ impl Operator for ExprPart {
         match self {
             ExprPart::Op(op) => op.priority(),
             ExprPart::FnCall(..) => -5,
+            _ => panic!("Cannot use trait Operator on expression parts that are not operator!"),
+        }
+    }
+
+    fn is_right_associative(&self) -> bool {
+        match self {
+            ExprPart::Op(op) => op.is_right_associative(),
+            ExprPart::FnCall(..) => true,
             _ => panic!("Cannot use trait Operator on expression parts that are not operator!"),
         }
     }

@@ -226,6 +226,16 @@ pub enum OpVar {
     Mul,
     /// `/`, Division
     Div,
+    /// `&&`  And
+    And,
+    /// `||`, Or
+    Or,
+    /// `^`, Xor
+    Xor,
+    /// `&`, Binary And
+    Ban,
+    /// `|`, Binary Or
+    Bor,
     /// `>`, Greater than
     Gt,
     /// `<`, Less than

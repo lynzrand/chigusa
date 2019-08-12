@@ -9,10 +9,8 @@ use std::{cell::RefCell, fmt, fmt::Display, fmt::Formatter, rc::Rc, string::Stri
 /// self-explanatory.
 pub enum TokenVariant<'a> {
     Const,
-    Void,
     If,
     Else,
-    Int,
     While,
     Return,
     Semicolon,
@@ -21,6 +19,11 @@ pub enum TokenVariant<'a> {
     Multiply,
     Divide,
     Not,
+    BinaryAnd,
+    BinaryOr,
+    And,
+    Or,
+    Xor,
     Increase,
     Decrease,
     Equals,
@@ -56,6 +59,11 @@ impl<'a> Display for TokenVariant<'a> {
             Multiply => write!(f, "*"),
             Divide => write!(f, "/"),
             Not => write!(f, "!"),
+            BinaryAnd => write!(f, "&"),
+            BinaryOr => write!(f, "|"),
+            And => write!(f, "&&"),
+            Or => write!(f, "||"),
+            Xor => write!(f, "^"),
             Increase => write!(f, "++"),
             Decrease => write!(f, "--"),
             Equals => write!(f, "=="),
@@ -73,7 +81,8 @@ impl<'a> Display for TokenVariant<'a> {
             RCurlyBrace => write!(f, "\n}}\n"),
             Assign => write!(f, "="),
             Comma => write!(f, ","),
-            _ => write!(f, "???"),
+            EndOfFile => write!(f, "#"),
+            // _ => write!(f, "???"),
         }
     }
 }
@@ -118,6 +127,8 @@ lazy_static! {
             ('!', Box::new(vec!['='])),
             ('+', Box::new(vec!['+'])),
             ('-', Box::new(vec!['-'])),
+            ('&', Box::new(vec!['&'])),
+            ('|', Box::new(vec!['|'])),
         ]
         .iter()
         .cloned()
@@ -178,9 +189,8 @@ impl<'a> Lexer<'a> {
             '0'..='9' => self.lex_number(iter),
             'a'..='z' | 'A'..='Z' | '_' => self.lex_identifier(iter),
             '\"' => self.lex_string_literal(iter),
-            '+' | '-' | '*' | '/' | '<' | '>' | '=' | '!' | '(' | ')' | '{' | '}' | ',' | ';' => {
-                self.lex_operator(iter)
-            }
+            '+' | '-' | '*' | '/' | '<' | '>' | '=' | '!' | '|' | '&' | '^' | '(' | ')' | '{'
+            | '}' | ',' | ';' => self.lex_operator(iter),
             // TODO: Add to errors and skip this line
             _ => panic!("Unexpected character '{}'", c),
         })
@@ -333,6 +343,17 @@ impl<'a> Lexer<'a> {
                 Some('=') => TokenVariant::NotEquals,
                 _ => panic!(),
             },
+            '|' => match second_char {
+                None => TokenVariant::BinaryOr,
+                Some('|') => TokenVariant::Or,
+                _ => panic!(),
+            },
+            '&' => match second_char {
+                None => TokenVariant::BinaryAnd,
+                Some('&') => TokenVariant::And,
+                _ => panic!(),
+            },
+            '^' => TokenVariant::Xor,
             '(' => TokenVariant::LParenthesis,
             ')' => TokenVariant::RParenthesis,
             '{' => TokenVariant::LCurlyBrace,
