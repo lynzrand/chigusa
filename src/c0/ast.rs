@@ -59,7 +59,7 @@ pub struct FnDeclaration {
 
 pub struct Block {
     pub scope: Ptr<Scope>,
-    pub decl: Vec<Ptr<VarDecalaration>>,
+    // pub decl: Vec<Ptr<VarDecalaration>>,
     pub stmt: Vec<Statement>,
 }
 

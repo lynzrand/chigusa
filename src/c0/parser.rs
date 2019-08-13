@@ -264,7 +264,12 @@ impl<'a> Parser<'a> {
             let stmt = self.parse_stmt(scope.clone())?;
             block_statements.push(stmt);
         }
-        unimplemented!()
+
+        Ok(Block {
+            scope: scope.clone(),
+            // decl: block_statements,
+            stmt: block_statements,
+        })
     }
 
     fn parse_stmt(&mut self, scope: Ptr<Scope>) -> ParseResult<'a, Statement> {
@@ -277,40 +282,20 @@ impl<'a> Parser<'a> {
                 // todo: parse while statement
                 unimplemented!()
             }
-            TokenVariant::LCurlyBrace => {
-                // todo: parse block
-                unimplemented!()
-            }
+            TokenVariant::LCurlyBrace => Ok(Statement::Block(self.parse_block(scope)?)),
             TokenVariant::Semicolon => Ok(Statement::Empty),
-            _ => {
-                // todo: parse expression
-                unimplemented!()
-            }
+            _ => Ok(Statement::Expr(self.parse_expr(scope)?)),
         }
     }
 
-    fn parse_expr(&mut self, scope: Ptr<Scope>) -> ParseResult<'a, Ptr<Expr>> {
-        /*
-            The whole process is like this:
-                token iter
-                -> expression part iter (inverse-poland expression stream)
-                -> expression tree
-        */
-
-        // let mut op_stack = Vec::new();
-        // let mut expr_stack = Vec::new();
-
-        unimplemented!()
-    }
-
-    fn parse_fn_call_params(&mut self, scope: Ptr<Scope>) -> ParseResult<'a, Vec<Ptr<Expr>>> {
-        unimplemented!()
+    fn parse_expr(&mut self, scope: Ptr<Scope>) -> ParseResult<'a, Expr> {
+        Ok(ExprParser::new(&mut self.lexer, &*scope.borrow()).collect()?)
     }
 }
 
-struct ExprParser<'a> {
-    lexer: &'a mut Lexer<'a>,
-    scope: &'a Scope,
+struct ExprParser<'a, 'b> {
+    lexer: &'b mut Lexer<'a>,
+    scope: &'b Scope,
     lexer_ended: bool,
     suggest_unary: bool,
     err_fuse: bool,
@@ -318,8 +303,8 @@ struct ExprParser<'a> {
     op_stack: Vec<ExprPart>,
 }
 
-impl<'a> ExprParser<'a> {
-    pub fn new(lexer: &'a mut Lexer<'a>, scope: &'a Scope) -> ExprParser<'a> {
+impl<'a, 'b> ExprParser<'a, 'b> {
+    pub fn new(lexer: &'b mut Lexer<'a>, scope: &'b Scope) -> ExprParser<'a, 'b> {
         ExprParser {
             lexer,
             scope,
@@ -440,7 +425,7 @@ impl<'a> ExprParser<'a> {
         }
     }
 
-    fn parse_op<'b>(&mut self) -> LoopCtrl<Option<ExprPart>> {
+    fn parse_op(&mut self) -> LoopCtrl<Option<ExprPart>> {
         let token = self.lexer.peek().unwrap();
         match token.var.into_op(self.suggest_unary) {
             Some(op) => {
@@ -599,7 +584,7 @@ impl<'a> ExprParser<'a> {
     }
 }
 
-impl<'a> Iterator for ExprParser<'a> {
+impl<'a, 'b> Iterator for ExprParser<'a, 'b> {
     type Item = ExprPart;
 
     fn next(&mut self) -> Option<ExprPart> {
