@@ -58,6 +58,20 @@ impl<'a> IntoParser<'a> for dyn Iterator<Item = Token<'a>> {
 
 type ParseResult<'a, T> = Result<T, ParseError<'a>>;
 
+macro_rules! set {
+    ( $( $x:expr ),* ) => {  // Match zero or more comma delimited items
+        {
+            let mut temp_set = HashSet::new();  // Create a mutable HashSet
+            $(
+                temp_set.insert($x); // Insert each item matched into the HashSet
+            )*
+            temp_set // Return the populated HashSet
+        }
+    };
+}
+
+// ====================
+
 pub trait TokenIterator<'a>: Iterator<Item = Token<'a>> {
     fn expect(&mut self, token: TokenVariant<'a>) -> ParseResult<'a, Token<'a>> {
         self.next()
@@ -106,19 +120,20 @@ pub struct Parser<'a> {
     lexer: Lexer<'a>,
 }
 
-static STMT_END_ON: HashSet<TokenVariant<'static>> = hashset! {
-    TokenVariant::RCurlyBrace,
-    TokenVariant::EndOfFile,
-    TokenVariant::Semicolon,
-};
-
-static PARAM_END_ON: HashSet<TokenVariant<'static>> = hashset! {
-    TokenVariant::RCurlyBrace,
-    TokenVariant::RParenthesis,
-    TokenVariant::EndOfFile,
-    TokenVariant::Semicolon,
-    TokenVariant::Comma,
-};
+lazy_static! {
+    static ref STMT_END_ON: HashSet<TokenVariant<'static>> = set![
+        TokenVariant::RCurlyBrace,
+        TokenVariant::EndOfFile,
+        TokenVariant::Semicolon
+    ];
+    static ref PARAM_END_ON: HashSet<TokenVariant<'static>> = set![
+        TokenVariant::RCurlyBrace,
+        TokenVariant::RParenthesis,
+        TokenVariant::EndOfFile,
+        TokenVariant::Semicolon,
+        TokenVariant::Comma
+    ];
+}
 
 impl<'a> Parser<'a> {
     pub fn new(lexer: Box<dyn Iterator<Item = Token<'a>>>) -> Parser<'a> {
