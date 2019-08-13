@@ -2,9 +2,9 @@ use lazy_static::lazy_static;
 use std::collections::HashMap;
 use std::iter::{Iterator, Peekable};
 use std::str::{CharIndices, FromStr};
-use std::{cell::RefCell, fmt, fmt::Display, fmt::Formatter, rc::Rc, string::String};
+use std::{cell::RefCell, fmt, fmt::Display, fmt::Formatter, hash::Hash, rc::Rc, string::String};
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Hash)]
 /// This enum defines the variants of token in C0 language. Variants are pretty
 /// self-explanatory.
 pub enum TokenVariant<'a> {

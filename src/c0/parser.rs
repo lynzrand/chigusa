@@ -2,6 +2,7 @@ use crate::c0::ast::*;
 use crate::c0::lexer::*;
 use itertools::Itertools;
 use lazy_static::lazy_static;
+use maplit::*;
 use std::collections::*;
 use std::iter::{Iterator, Peekable};
 use std::{cell::RefCell, fmt, fmt::Display, fmt::Formatter, rc::Rc};
@@ -104,6 +105,20 @@ impl<'a> TokenIterator<'a> for Lexer<'a> {}
 pub struct Parser<'a> {
     lexer: Lexer<'a>,
 }
+
+static STMT_END_ON: HashSet<TokenVariant<'static>> = hashset! {
+    TokenVariant::RCurlyBrace,
+    TokenVariant::EndOfFile,
+    TokenVariant::Semicolon,
+};
+
+static PARAM_END_ON: HashSet<TokenVariant<'static>> = hashset! {
+    TokenVariant::RCurlyBrace,
+    TokenVariant::RParenthesis,
+    TokenVariant::EndOfFile,
+    TokenVariant::Semicolon,
+    TokenVariant::Comma,
+};
 
 impl<'a> Parser<'a> {
     pub fn new(lexer: Box<dyn Iterator<Item = Token<'a>>>) -> Parser<'a> {
@@ -274,22 +289,63 @@ impl<'a> Parser<'a> {
 
     fn parse_stmt(&mut self, scope: Ptr<Scope>) -> ParseResult<'a, Statement> {
         match self.lexer.peek().ok_or(ParseError::EarlyEof)?.var {
-            TokenVariant::If => {
-                // todo: parse If statement
-                unimplemented!()
-            }
-            TokenVariant::While => {
-                // todo: parse while statement
-                unimplemented!()
-            }
+            TokenVariant::If => Ok(Statement::If(self.parse_if(scope)?)),
+            TokenVariant::While => Ok(Statement::While(self.parse_while(scope)?)),
             TokenVariant::LCurlyBrace => Ok(Statement::Block(self.parse_block(scope)?)),
             TokenVariant::Semicolon => Ok(Statement::Empty),
-            _ => Ok(Statement::Expr(self.parse_expr(scope)?)),
+            _ => Ok(Statement::Expr({
+                let expr = self.parse_expr(scope, &STMT_END_ON)?;
+                self.lexer.expect(TokenVariant::Semicolon)?;
+                expr
+            })),
         }
     }
 
-    fn parse_expr(&mut self, scope: Ptr<Scope>) -> ParseResult<'a, Expr> {
-        Ok(ExprParser::new(&mut self.lexer, &*scope.borrow()).collect()?)
+    fn parse_if(&mut self, scope: Ptr<Scope>) -> ParseResult<'a, IfStatement> {
+        self.lexer.expect(TokenVariant::If)?;
+        self.lexer.expect(TokenVariant::LParenthesis)?;
+
+        let if_expr = Ptr::new(self.parse_expr(scope.clone(), &PARAM_END_ON)?);
+
+        self.lexer.expect(TokenVariant::RParenthesis)?;
+
+        let if_body = Ptr::new(self.parse_stmt(scope.clone())?);
+
+        let else_body = if self.lexer.try_consume(TokenVariant::Else) {
+            Some(Ptr::new(self.parse_stmt(scope.clone())?))
+        } else {
+            None
+        };
+
+        Ok(IfStatement {
+            check: if_expr,
+            if_body,
+            else_body,
+        })
+    }
+
+    fn parse_while(&mut self, scope: Ptr<Scope>) -> ParseResult<'a, WhileStatement> {
+        self.lexer.expect(TokenVariant::While)?;
+        self.lexer.expect(TokenVariant::LParenthesis)?;
+
+        let while_expr = Ptr::new(self.parse_expr(scope.clone(), &PARAM_END_ON)?);
+
+        self.lexer.expect(TokenVariant::RParenthesis)?;
+
+        let while_body = Ptr::new(self.parse_stmt(scope.clone())?);
+
+        Ok(WhileStatement {
+            check: while_expr,
+            body: while_body,
+        })
+    }
+
+    fn parse_expr<'b>(
+        &mut self,
+        scope: Ptr<Scope>,
+        end_on: &'b HashSet<TokenVariant<'a>>,
+    ) -> ParseResult<'a, Expr> {
+        Ok(ExprParser::new(&mut self.lexer, &*scope.borrow(), end_on).collect()?)
     }
 }
 
@@ -301,10 +357,15 @@ struct ExprParser<'a, 'b> {
     err_fuse: bool,
     err: Option<ParseError<'a>>,
     op_stack: Vec<ExprPart>,
+    end_on: &'b HashSet<TokenVariant<'a>>,
 }
 
 impl<'a, 'b> ExprParser<'a, 'b> {
-    pub fn new(lexer: &'b mut Lexer<'a>, scope: &'b Scope) -> ExprParser<'a, 'b> {
+    pub fn new(
+        lexer: &'b mut Lexer<'a>,
+        scope: &'b Scope,
+        end_on: &'b HashSet<TokenVariant<'a>>,
+    ) -> ExprParser<'a, 'b> {
         ExprParser {
             lexer,
             scope,
@@ -313,6 +374,7 @@ impl<'a, 'b> ExprParser<'a, 'b> {
             err_fuse: false,
             err: None,
             op_stack: Vec::new(),
+            end_on,
         }
     }
 
@@ -402,15 +464,8 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                     }
                 } else {
                     match self.lexer.peek() {
-                        None
-                        | Some(Token {
-                            var: TokenVariant::EndOfFile,
-                            ..
-                        })
-                        | Some(Token {
-                            var: TokenVariant::Semicolon,
-                            ..
-                        }) => self.end_lexer(),
+                        None => self.end_lexer(),
+                        Some(Token { var, .. }) if self.end_on.contains(var) => self.end_lexer(),
                         Some(token) => {
                             if token.is_op() {
                                 self.parse_op()
@@ -521,7 +576,6 @@ impl<'a, 'b> ExprParser<'a, 'b> {
         self.try_fold(
             Vec::<Expr>::new(),
             |mut expr_stack: Vec<Expr>, next_val: ExprPart| {
-                // TODO: parse expression stream described in reverse-polish notation
                 match next_val {
                     ExprPart::Int(i) => expr_stack.push(Expr::Int(i)),
                     ExprPart::Str(s) => expr_stack.push(Expr::Str(s)),

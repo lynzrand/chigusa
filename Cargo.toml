@@ -14,8 +14,9 @@ path = "src/lib.rs"
 
 [dependencies]
 atty = "0.2"
-crossterm = "0.9"
+crossterm = "0.10"
 itertools = "0.8.0"
 lazy_static = "1.3.0"
 indexmap = "1.0"
+maplit = "1.0"
 # treelike = "0.2.0"
