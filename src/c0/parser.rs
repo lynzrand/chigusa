@@ -531,6 +531,72 @@ impl<'a> ExprParser<'a> {
             }
         }
     }
+
+    fn collect(mut self) -> ParseResult<'a, Expr> {
+        self.try_fold(
+            Vec::<Expr>::new(),
+            |mut expr_stack: Vec<Expr>, next_val: ExprPart| {
+                // TODO: parse expression stream described in reverse-polish notation
+                match next_val {
+                    ExprPart::Int(i) => expr_stack.push(Expr::Int(i)),
+                    ExprPart::Str(s) => expr_stack.push(Expr::Str(s)),
+                    ExprPart::Var(v) => expr_stack.push(Expr::Var(v)),
+                    ExprPart::Op(op) => {
+                        if op.is_unary() {
+                            // unary op
+                            let operand = expr_stack.pop().ok_or(ParseError::MissingOperand)?;
+                            expr_stack.push(Expr::UnaOp(UnaryOp {
+                                var: op,
+                                val: Ptr::new(operand),
+                            }));
+                        } else {
+                            // binary op
+                            let r_operand = expr_stack.pop().ok_or(ParseError::MissingOperand)?;
+                            let l_operand = expr_stack.pop().ok_or(ParseError::MissingOperand)?;
+                            expr_stack.push(Expr::BinOp(BinaryOp {
+                                var: op,
+                                lhs: Ptr::new(l_operand),
+                                rhs: Ptr::new(r_operand),
+                            }));
+                        }
+                    }
+                    ExprPart::FnCall(func) => {
+                        let len = match &*func.0.clone().borrow() {
+                            TokenEntry::Function { params, .. } => params.len(),
+                            _ => panic!(),
+                        };
+                        let mut params: Vec<Ptr<Expr>> =
+                            (0..len).try_fold(Vec::new(), |mut vec: Vec<Ptr<Expr>>, _num| {
+                                vec.push(Ptr::new(
+                                    expr_stack.pop().ok_or(ParseError::MissingOperand)?,
+                                ));
+                                Ok(vec)
+                            })?;
+                        params.reverse();
+                        expr_stack.push(Expr::FnCall(FuncCall {
+                            fn_name: func,
+                            params,
+                        }));
+                    }
+                }
+                Ok(expr_stack)
+            },
+        )
+        .and_then(|mut vector| {
+            if self.err_fuse {
+                Err(self.err.unwrap())
+            } else {
+                let len = vector.len();
+                if len > 2 {
+                    Err(ParseError::InternalErr)
+                } else if len == 1 {
+                    Ok(vector.pop().unwrap())
+                } else {
+                    Err(ParseError::InternalErr)
+                }
+            }
+        })
+    }
 }
 
 impl<'a> Iterator for ExprParser<'a> {
@@ -707,6 +773,7 @@ pub enum ParseError<'a> {
     EarlyEof,
     UnbalancedParenthesisExpectL,
     UnbalancedParenthesisExpectR,
+    MissingOperand,
     InternalErr,
 }
 

@@ -185,7 +185,6 @@ pub enum Expr {
     BinOp(BinaryOp),
     UnaOp(UnaryOp),
     Var(Identifier),
-    Assign(Assignment),
     FnCall(FuncCall),
     Empty,
 }
