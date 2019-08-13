@@ -216,6 +216,7 @@ pub struct UnaryOp {
     pub val: Ptr<Expr>,
 }
 
+#[derive(Clone, Copy)]
 pub enum OpVar {
     // Binary
     /// `+`, Addition
@@ -278,6 +279,8 @@ pub enum OpVar {
     _Com,
     /// Assignment
     _Asn,
+    /// Dummy value
+    _Dum,
 }
 
 impl OpVar {

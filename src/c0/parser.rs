@@ -368,7 +368,7 @@ impl<'a> ExprParser<'a> {
             - false => pop until meeting that of same or lower priority
             - true => push onto stack
 
-        For function calls, transform `f(x, y)` into (f (x) (y)) and push as usual
+        For function calls, transform `f(x, y)` into `( Fn(f) ... )` and push as usual
 
         # converting to pull pipeline
 
@@ -428,35 +428,107 @@ impl<'a> ExprParser<'a> {
                         }) => self.end_lexer(),
                         Some(token) => {
                             if token.is_op() {
-                                let op: OpVar = token.var.into_op(self.suggest_unary).unwrap();
-                                if self.is_stack_top_higher_than(&op) {
-                                    Stop(self.op_stack.pop())
-                                } else {
-                                    self.op_stack.push(ExprPart::Op(op));
-                                    Continue
-                                }
+                                self.parse_op()
                             } else {
                                 // consume and check function
-                                let t: TokenVariant = self.lexer.next().unwrap().var;
-                                match t {
-                                    TokenVariant::IntegerLiteral(i) => {
-                                        Stop(Some(ExprPart::Int(IntegerLiteral(i))))
-                                    }
-                                    TokenVariant::StringLiteral(s) => {
-                                        Stop(Some(ExprPart::Str(StringLiteral(s))))
-                                    }
-                                    TokenVariant::Identifier(ident) => {
-                                        let is_fn =
-                                            self.lexer.try_consume(TokenVariant::LParenthesis);
-                                        unimplemented!()
-                                    }
-                                    token @ _ => self.meltdown(ParseError::UnexpectedToken(token)),
-                                }
+                                self.parse_val()
                             }
                         }
                     }
                 }
             })
+        }
+    }
+
+    fn parse_op<'b>(&mut self) -> LoopCtrl<Option<ExprPart>> {
+        let token = self.lexer.peek().unwrap();
+        match token.var.into_op(self.suggest_unary) {
+            Some(op) => {
+                // there is a corresponding operator here
+                if self.is_stack_top_higher_than(&op) {
+                    Stop(self.op_stack.pop())
+                } else {
+                    // special handling for parenthesis and comma
+                    if variant_eq(&op, &OpVar::_Rpr) {
+                        // clear corresponding parenthesis, or error if nothing to share
+                        if variant_eq(
+                            &self
+                                .op_stack
+                                .last()
+                                .and_then(|expr_part| expr_part.into_op())
+                                .unwrap_or(OpVar::_Dum),
+                            &OpVar::_Lpr,
+                        ) {
+                            self.op_stack.pop();
+                            self.suggest_unary = false;
+                            Continue
+                        } else {
+                            self.meltdown(ParseError::UnbalancedParenthesisExpectL)
+                        }
+                    } else if variant_eq(&op, &OpVar::_Com) {
+                        // pass
+                        self.suggest_unary = true;
+                        Continue
+                    } else {
+                        self.op_stack.push(ExprPart::Op(op));
+                        self.suggest_unary = true;
+                        Continue
+                    }
+                }
+            }
+            None => {
+                // no corresponding operator, error!
+                let t: TokenVariant = self.lexer.next().unwrap().var;
+                self.meltdown(ParseError::UnexpectedToken(t))
+            }
+        }
+    }
+
+    fn parse_val(&mut self) -> LoopCtrl<Option<ExprPart>> {
+        let t: TokenVariant = self.lexer.next().unwrap().var;
+        match t {
+            TokenVariant::IntegerLiteral(i) => {
+                self.suggest_unary = false;
+                Stop(Some(ExprPart::Int(IntegerLiteral(i))))
+            }
+            TokenVariant::StringLiteral(s) => {
+                self.suggest_unary = false;
+                Stop(Some(ExprPart::Str(StringLiteral(s))))
+            }
+            TokenVariant::Identifier(ident) => self.parse_ident(ident),
+            var @ _ => self.meltdown(ParseError::UnexpectedToken(var)),
+        }
+    }
+
+    fn parse_ident(&mut self, ident: &'a str) -> LoopCtrl<Option<ExprPart>> {
+        match self.scope.find_definition(ident) {
+            None => self.meltdown(ParseError::CannotFindIdent(ident)),
+            Some(def_ptr) => {
+                let is_fn = self.lexer.try_consume(TokenVariant::LParenthesis);
+                let def_ptr_clone = def_ptr.clone();
+                let def = def_ptr_clone.borrow();
+                if is_fn {
+                    match *def {
+                        TokenEntry::Function { .. } => {
+                            self.op_stack.push(ExprPart::Op(OpVar::_Lpr));
+                            self.op_stack
+                                .push(ExprPart::FnCall(Identifier(def_ptr.clone())));
+                            self.suggest_unary = true;
+                            Continue
+                        }
+                        _ => self.meltdown(ParseError::CannotFindFn(ident)),
+                    }
+                } else {
+                    // is variable
+                    match *def {
+                        TokenEntry::Variable { .. } => {
+                            self.suggest_unary = false;
+                            Stop(Some(ExprPart::Var(Identifier(def_ptr.clone()))))
+                        }
+                        _ => self.meltdown(ParseError::CannotFindVar(ident)),
+                    }
+                }
+            }
         }
     }
 }
@@ -499,48 +571,41 @@ impl IntoOperator for TokenVariant<'_> {
     fn into_op(&self, suggest_unary: bool) -> Option<OpVar> {
         use OpVar::*;
         use TokenVariant::*;
-        match self {
-            Minus => {
-                if suggest_unary {
-                    Some(Neg)
-                } else {
-                    Some(Sub)
-                }
+        if suggest_unary {
+            match self {
+                Minus => Some(Neg),
+                Multiply => Some(Der),
+                BinaryAnd => Some(Ref),
+                Increase => Some(Inb),
+                Decrease => Some(Deb),
+                _ => None,
             }
-            Plus => Some(Add),
-            Multiply => {
-                if suggest_unary {
-                    Some(Der)
-                } else {
-                    Some(Mul)
-                }
+        } else {
+            match self {
+                Minus => Some(Sub),
+                Plus => Some(Add),
+                Multiply => Some(Mul),
+                Divide => Some(Div),
+                Not => Some(Inv),
+                BinaryAnd => Some(Ban),
+                BinaryOr => Some(Bor),
+                TokenVariant::And => Some(OpVar::And),
+                TokenVariant::Or => Some(OpVar::Or),
+                TokenVariant::Xor => Some(OpVar::Xor),
+                Increase => Some(Ina),
+                Decrease => Some(Dea),
+                Equals => Some(Eq),
+                NotEquals => Some(Neq),
+                LessThan => Some(Lt),
+                GreaterThan => Some(Gt),
+                LessOrEqualThan => Some(Lte),
+                GreaterOrEqualThan => Some(Gte),
+                Assign => Some(_Asn),
+                Comma => Some(_Com),
+                LParenthesis => Some(_Lpr),
+                RParenthesis => Some(_Rpr),
+                _ => None,
             }
-            Divide => Some(Div),
-            Not => Some(Inv),
-            BinaryAnd => {
-                if suggest_unary {
-                    Some(Ref)
-                } else {
-                    Some(Ban)
-                }
-            }
-            BinaryOr => Some(Bor),
-            TokenVariant::And => Some(OpVar::And),
-            TokenVariant::Or => Some(OpVar::Or),
-            TokenVariant::Xor => Some(OpVar::Xor),
-            Increase => Some(Ina),
-            Decrease => Some(Dea),
-            Equals => Some(Eq),
-            NotEquals => Some(Neq),
-            LessThan => Some(Lt),
-            GreaterThan => Some(Gt),
-            LessOrEqualThan => Some(Lte),
-            GreaterOrEqualThan => Some(Gte),
-            Assign => Some(_Asn),
-            Comma => Some(_Com),
-            LParenthesis => Some(_Lpr),
-            RParenthesis => Some(_Rpr),
-            _ => None,
         }
     }
 }
@@ -558,6 +623,7 @@ impl Operator for OpVar {
         // According to https://zh.cppreference.com/w/cpp/language/operator_precedence
         use OpVar::*;
         match self {
+            _Dum => -50,
             _Lpr | _Rpr => -10,
             _Com => -4,
             _Asn => 0,
@@ -592,6 +658,15 @@ enum ExprPart {
     Op(OpVar),
 }
 
+impl ExprPart {
+    pub fn into_op(&self) -> Option<OpVar> {
+        match self {
+            ExprPart::Op(op) => Some(*op),
+            _ => None,
+        }
+    }
+}
+
 impl OptionalOperator for ExprPart {
     fn is_op(&self) -> bool {
         match self {
@@ -623,12 +698,15 @@ pub enum ParseError<'a> {
     ExpectToken(TokenVariant<'a>),
     UnexpectedToken(TokenVariant<'a>),
     NoConstFns,
+    CannotFindIdent(&'a str),
     CannotFindType(&'a str),
     CannotFindVar(&'a str),
     CannotFindFn(&'a str),
     CannotCallType(&'a str),
     UnsupportedToken(TokenVariant<'a>),
     EarlyEof,
+    UnbalancedParenthesisExpectL,
+    UnbalancedParenthesisExpectR,
     InternalErr,
 }
 
