@@ -10,6 +10,7 @@ use std::iter::Iterator;
 use std::ops::{Deref, DerefMut};
 use std::rc::{Rc, Weak};
 
+#[derive(Eq, PartialEq)]
 pub struct Ptr<T>(Rc<RefCell<T>>);
 
 impl<T> Ptr<T> {
@@ -50,6 +51,7 @@ pub struct Program {
     pub scope: Ptr<Scope>,
 }
 
+#[derive(Eq, PartialEq)]
 pub struct FnDeclaration {
     pub ident: Identifier,
     pub return_typ: Identifier,
@@ -57,12 +59,14 @@ pub struct FnDeclaration {
     pub body: Block,
 }
 
+#[derive(Eq, PartialEq)]
 pub struct Block {
     pub scope: Ptr<Scope>,
     // pub decl: Vec<Ptr<VarDecalaration>>,
     pub stmt: Vec<Statement>,
 }
 
+#[derive(Eq, PartialEq)]
 pub enum TokenEntry {
     Variable {
         is_const: bool,
@@ -145,40 +149,56 @@ impl Scope {
     }
 }
 
+impl PartialEq for Scope {
+    fn eq(&self, other: &Self) -> bool {
+        self.token_table.eq(&other.token_table)
+    }
+}
+
+impl Eq for Scope {}
+
+#[derive(Eq, PartialEq)]
 pub enum Statement {
     If(IfStatement),
     While(WhileStatement),
+    Return(Expr),
     Expr(Expr),
     Block(Block),
     Empty,
 }
 
+#[derive(Eq, PartialEq)]
 pub struct ReturnStatement {
     pub return_val: Option<Ptr<TokenEntry>>,
 }
 
+#[derive(Eq, PartialEq)]
 pub struct IfStatement {
     pub check: Ptr<Expr>,
     pub if_body: Ptr<Statement>,
     pub else_body: Option<Ptr<Statement>>,
 }
 
+#[derive(Eq, PartialEq)]
 pub struct WhileStatement {
     pub check: Ptr<Expr>,
     pub body: Ptr<Statement>,
 }
 
+#[derive(Eq, PartialEq)]
 pub struct VarDecalaration {
     pub is_const: bool,
     pub symbol: Ptr<TokenEntry>,
     pub val: Option<Ptr<Expr>>,
 }
 
+#[derive(Eq, PartialEq)]
 pub struct Assignment {
     pub ident: Identifier,
     pub expr: Ptr<Expr>,
 }
 
+#[derive(Eq, PartialEq)]
 pub enum Expr {
     Int(IntegerLiteral),
     Str(StringLiteral),
@@ -189,20 +209,25 @@ pub enum Expr {
     Empty,
 }
 
+#[derive(Eq, PartialEq)]
 pub struct Identifier(pub Ptr<TokenEntry>);
 
+#[derive(Eq, PartialEq)]
 pub struct FuncCall {
     pub fn_name: Identifier,
     pub params: Vec<Ptr<Expr>>,
 }
 
 /// An integer literal
+#[derive(Eq, PartialEq)]
 pub struct IntegerLiteral(pub i64);
 
 /// A String Literal
+#[derive(Eq, PartialEq)]
 pub struct StringLiteral(pub String);
 
 /// A binary operator
+#[derive(Eq, PartialEq)]
 pub struct BinaryOp {
     pub var: OpVar,
     pub lhs: Ptr<Expr>,
@@ -210,12 +235,13 @@ pub struct BinaryOp {
 }
 
 /// An unary operator
+#[derive(Eq, PartialEq)]
 pub struct UnaryOp {
     pub var: OpVar,
     pub val: Ptr<Expr>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Eq, PartialEq)]
 pub enum OpVar {
     // Binary
     /// `+`, Addition

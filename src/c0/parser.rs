@@ -158,6 +158,7 @@ impl<'a> Parser<'a> {
         Ok(Program {
             scope: scope.clone(),
         })
+        ///// TODO: implement
         // unimplemented!()
     }
 
@@ -200,6 +201,7 @@ impl<'a> Parser<'a> {
                 //     .token_table
                 //     .insert(identifier_owned, entry);
             }
+            // TODO: implement
             unimplemented!()
         }
     }
@@ -233,6 +235,7 @@ impl<'a> Parser<'a> {
         let new_scope = Ptr::new(Scope::new(Some(scope)));
         let params = self.parse_fn_params(new_scope.clone())?;
         let fn_body = self.parse_block_no_scope(new_scope.clone())?;
+        // TODO: implement
         unimplemented!()
     }
 
@@ -277,6 +280,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_single_var_decl(&mut self, scope: Ptr<Scope>) -> ParseResult<'a, TokenEntry> {
+        // TODO: implement
         unimplemented!()
     }
 
@@ -308,6 +312,11 @@ impl<'a> Parser<'a> {
             TokenVariant::While => Ok(Statement::While(self.parse_while(scope)?)),
             TokenVariant::LCurlyBrace => Ok(Statement::Block(self.parse_block(scope)?)),
             TokenVariant::Semicolon => Ok(Statement::Empty),
+            TokenVariant::Return => Ok(Statement::Return({
+                let expr = self.parse_expr(scope, &STMT_END_ON)?;
+                self.lexer.expect(TokenVariant::Semicolon)?;
+                expr
+            })),
             _ => Ok(Statement::Expr({
                 let expr = self.parse_expr(scope, &STMT_END_ON)?;
                 self.lexer.expect(TokenVariant::Semicolon)?;
