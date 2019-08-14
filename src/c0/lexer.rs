@@ -231,25 +231,34 @@ impl<'a> Lexer<'a> {
 
         loop {
             let (this_index, this_char) = iter.next().expect("Unexpected EOF in string literal");
-            if this_char == '\\' {
-                // Deal with escaping stuff
-                let pushed_char = match this_char {
-                    'n' => '\n',
-                    't' => '\t',
-                    'r' => '\r',
-                    '"' => '"',
-                    // 'u'=>,
-                    _ => panic!(
-                        "Invalid escape sequence '\\{}' at {}",
-                        this_char, this_index
-                    ),
-                };
-                tgt_string.push(pushed_char);
-            } else if this_char == '"' {
-                end_index = this_index + 1;
-                break;
-            } else {
-                tgt_string.push(this_char);
+            match this_char {
+                '\\' => {
+                    // Deal with escaping stuff
+                    let (_, next_char) = iter.next().expect("Unexpected EOF in string literal");
+                    let pushed_char = match next_char {
+                        'n' => '\n',
+                        't' => '\t',
+                        'r' => '\r',
+                        '\\' => '\\',
+                        '"' => '"',
+                        // 'u'=>,
+                        _ => panic!(
+                            "Invalid escape sequence '\\{}' at {}",
+                            this_char, this_index
+                        ),
+                    };
+                    tgt_string.push(pushed_char);
+                }
+                '"' => {
+                    end_index = this_index + 1;
+                    break;
+                }
+                '\n' | '\r' => {
+                    panic!("Unexpected EOL in string literal");
+                }
+                _ => {
+                    tgt_string.push(this_char);
+                }
             }
         }
 
@@ -314,44 +323,44 @@ impl<'a> Lexer<'a> {
             '+' => match second_char {
                 None => TokenVariant::Plus,
                 Some('+') => TokenVariant::Increase,
-                _ => panic!(),
+                _ => unreachable!(),
             },
             '-' => match second_char {
                 None => TokenVariant::Minus,
                 Some('-') => TokenVariant::Decrease,
-                _ => panic!(),
+                _ => unreachable!(),
             },
             '*' => TokenVariant::Multiply,
             '/' => TokenVariant::Divide,
             '=' => match second_char {
                 None => TokenVariant::Assign,
                 Some('=') => TokenVariant::Equals,
-                _ => panic!(),
+                _ => unreachable!(),
             },
             '<' => match second_char {
                 None => TokenVariant::LessThan,
                 Some('=') => TokenVariant::LessOrEqualThan,
-                _ => panic!(),
+                _ => unreachable!(),
             },
             '>' => match second_char {
                 None => TokenVariant::GreaterThan,
                 Some('=') => TokenVariant::GreaterOrEqualThan,
-                _ => panic!(),
+                _ => unreachable!(),
             },
             '!' => match second_char {
                 None => TokenVariant::Not,
                 Some('=') => TokenVariant::NotEquals,
-                _ => panic!(),
+                _ => unreachable!(),
             },
             '|' => match second_char {
                 None => TokenVariant::BinaryOr,
                 Some('|') => TokenVariant::Or,
-                _ => panic!(),
+                _ => unreachable!(),
             },
             '&' => match second_char {
                 None => TokenVariant::BinaryAnd,
                 Some('&') => TokenVariant::And,
-                _ => panic!(),
+                _ => unreachable!(),
             },
             '^' => TokenVariant::Xor,
             '(' => TokenVariant::LParenthesis,
@@ -391,5 +400,119 @@ impl<'a> IntoIterator for Lexer<'a> {
     type IntoIter = LexerIterator<'a>;
     fn into_iter(self) -> Self::IntoIter {
         LexerIterator::new(self)
+    }
+}
+
+// ======================
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_lex_number() {
+        let real: Vec<TokenVariant> = Lexer::new("123+456")
+            .into_iter()
+            .map(|token| token.var)
+            .collect();
+        let expected = vec![
+            TokenVariant::IntegerLiteral(123),
+            TokenVariant::Plus,
+            TokenVariant::IntegerLiteral(456),
+        ];
+        assert_eq!(real, expected);
+    }
+
+    #[test]
+    fn test_lex_string() {
+        let real: Vec<TokenVariant> = Lexer::new(r#""123+\r\n\t456""#)
+            .into_iter()
+            .map(|token| token.var)
+            .collect();
+        let expected = vec![TokenVariant::StringLiteral("123+\r\n\t456".to_owned())];
+        assert_eq!(real, expected);
+    }
+
+    #[test]
+    fn test_lex_ident() {
+        let real: Vec<TokenVariant> = Lexer::new("int x = 3;")
+            .into_iter()
+            .map(|token| token.var)
+            .collect();
+        let expected = vec![
+            TokenVariant::Identifier("int"),
+            TokenVariant::Identifier("x"),
+            TokenVariant::Assign,
+            TokenVariant::IntegerLiteral(3),
+            TokenVariant::Semicolon,
+        ];
+        assert_eq!(real, expected);
+    }
+
+    #[test]
+    fn test_lex_ops() {
+        use TokenVariant::*;
+        let real: Vec<TokenVariant> =
+            Lexer::new("+ - * / ++ -- ! != == >= > <= < & | && || ^ ( ) { } = ,")
+                .into_iter()
+                .map(|token| token.var)
+                .collect();
+        let expected = vec![
+            Plus,
+            Minus,
+            Multiply,
+            Divide,
+            Increase,
+            Decrease,
+            Not,
+            NotEquals,
+            Equals,
+            GreaterOrEqualThan,
+            GreaterThan,
+            LessOrEqualThan,
+            LessThan,
+            BinaryAnd,
+            BinaryOr,
+            And,
+            Or,
+            Xor,
+            LParenthesis,
+            RParenthesis,
+            LCurlyBrace,
+            RCurlyBrace,
+            Assign,
+            Comma,
+        ];
+        assert_eq!(real, expected);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_lexing_panic_op() {
+        let real: Vec<TokenVariant> = Lexer::new("int x = what?is:this;")
+            .into_iter()
+            .map(|token| token.var)
+            .collect();
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_lexing_panic_string_escape() {
+        let real: Vec<TokenVariant> = Lexer::new(r#""\y""#)
+            .into_iter()
+            .map(|token| token.var)
+            .collect();
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_lexing_panic_string_eol() {
+        let real: Vec<TokenVariant> = Lexer::new(
+            r#""
+        ""#,
+        )
+        .into_iter()
+        .map(|token| token.var)
+        .collect();
     }
 }
