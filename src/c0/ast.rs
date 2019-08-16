@@ -9,43 +9,10 @@ use std::collections::HashMap;
 use std::iter::Iterator;
 use std::ops::{Deref, DerefMut};
 use std::rc::{Rc, Weak};
+use super::infra::*;
 
-#[derive(Eq, PartialEq)]
-pub struct Ptr<T>(Rc<RefCell<T>>);
 
-impl<T> Ptr<T> {
-    pub fn new(val: T) -> Ptr<T> {
-        Ptr(Rc::new(RefCell::new(val)))
-    }
-
-    pub fn borrow(&self) -> Ref<T> {
-        self.0.borrow()
-    }
-
-    pub fn borrow_mut(&self) -> RefMut<T> {
-        self.0.borrow_mut()
-    }
-
-    pub fn downgrade(self) -> Weak<RefCell<T>> {
-        std::rc::Rc::downgrade(&self.0)
-    }
-}
-
-impl<T> Clone for Ptr<T> {
-    fn clone(&self) -> Self {
-        Ptr(self.0.clone())
-    }
-}
-
-pub trait IntoPtr<T> {
-    fn into_ptr(self) -> Ptr<T>;
-}
-
-impl<T> IntoPtr<T> for Rc<RefCell<T>> {
-    fn into_ptr(self) -> Ptr<T> {
-        Ptr(self)
-    }
-}
+// ==============
 
 pub struct Program {
     pub scope: Ptr<Scope>,
@@ -53,6 +20,7 @@ pub struct Program {
 
 #[derive(Eq, PartialEq)]
 pub struct FnDeclaration {
+    pub span: Span,
     pub ident: Identifier,
     pub return_typ: Identifier,
     pub params: Vec<Ptr<VarDecalaration>>,
@@ -62,7 +30,7 @@ pub struct FnDeclaration {
 #[derive(Eq, PartialEq)]
 pub struct Block {
     pub scope: Ptr<Scope>,
-    // pub decl: Vec<Ptr<VarDecalaration>>,
+    pub span: Span,
     pub stmt: Vec<Statement>,
 }
 

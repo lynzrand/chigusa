@@ -1,49 +1,12 @@
-use crate::c0::ast::*;
-use crate::c0::lexer::*;
+use crate::set;
+use super::{ast::*, lexer::*, infra::*};
 use itertools::Itertools;
 use lazy_static::lazy_static;
 use std::collections::*;
 use std::iter::{Iterator, Peekable};
 use std::{cell::RefCell, fmt, fmt::Display, fmt::Formatter, rc::Rc};
 
-fn variant_eq<T>(a: &T, b: &T) -> bool {
-    std::mem::discriminant(a) == std::mem::discriminant(b)
-}
-
-enum LoopCtrl<T> {
-    Stop(T),
-    Continue,
-}
-
-use self::LoopCtrl::*;
-
-impl<T> LoopCtrl<T> {
-    pub fn unwrap(self) -> T {
-        match self {
-            LoopCtrl::Stop(x) => x,
-            _ => panic!("Cannot unwrap a LoopCtrl with Continue statement"),
-        }
-    }
-
-    pub fn is_continue(&self) -> bool {
-        match self {
-            LoopCtrl::Continue => true,
-            _ => false,
-        }
-    }
-}
-
-fn loop_while<F, T>(mut f: F) -> T
-where
-    F: FnMut() -> LoopCtrl<T>,
-{
-    let mut x: LoopCtrl<T> = Continue;
-    while x.is_continue() {
-        x = f();
-    }
-    // the following unwrap CANNOT panic because x is garanteed to be Some.
-    x.unwrap()
-}
+use LoopCtrl::*;
 
 pub trait IntoParser<'a> {
     fn into_parser(self: Box<Self>) -> Parser<'a>;
@@ -56,20 +19,6 @@ impl<'a> IntoParser<'a> for dyn Iterator<Item = Token<'a>> {
 }
 
 type ParseResult<'a, T> = Result<T, ParseError<'a>>;
-
-macro_rules! set {
-    ( $( $x:expr ),* ) => {  // Match zero or more comma delimited items
-        {
-            let mut temp_set = HashSet::new();  // Create a mutable HashSet
-            $(
-                temp_set.insert($x); // Insert each item matched into the HashSet
-            )*
-            temp_set // Return the populated HashSet
-        }
-    };
-}
-
-// ====================
 
 pub trait TokenIterator<'a>: Iterator<Item = Token<'a>> {
     fn expect(&mut self, token: TokenVariant<'a>) -> ParseResult<'a, Token<'a>> {

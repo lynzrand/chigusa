@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::iter::{Iterator, Peekable};
 use std::str::{Chars, FromStr};
 use std::{cell::RefCell, fmt, fmt::Display, fmt::Formatter, hash::Hash, rc::Rc, string::String};
+use super::infra::*;
 
 #[derive(Debug, Eq, PartialEq, Hash)]
 /// This enum defines the variants of token in C0 language. Variants are pretty
@@ -83,128 +84,6 @@ impl<'a> Display for TokenVariant<'a> {
             Comma => write!(f, ","),
             EndOfFile => write!(f, "#"),
             // _ => write!(f, "???"),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct Pos {
-    ln: usize,
-    pos: usize,
-    index: usize,
-}
-
-impl Pos {
-    pub fn new(ln: usize, pos: usize, index: usize) -> Pos {
-        Pos { ln, pos, index }
-    }
-
-    pub fn zero() -> Pos {
-        Pos {
-            ln: 0,
-            pos: 0,
-            index: 0,
-        }
-    }
-
-    #[must_use]
-    #[inline]
-    pub fn bump(mut self) -> Pos {
-        self.index += 1;
-        self
-    }
-
-    #[must_use]
-    #[inline]
-    pub fn inc(mut self) -> Pos {
-        self.pos += 1;
-        self.index += 1;
-        self
-    }
-
-    #[must_use]
-    #[inline]
-    pub fn lf(mut self) -> Pos {
-        self.pos = 0;
-        self.ln += 1;
-        self.index += 1;
-        self
-    }
-
-    #[inline]
-    pub fn inc_self(&mut self)  {
-        self.pos += 1;
-        self.index += 1;
-    }
-
-    #[inline]
-    pub fn lf_self(&mut self)  {
-        self.pos = 0;
-        self.ln += 1;
-        self.index += 1;
-    }
-
-    #[inline]
-    pub fn bump_self(&mut self)  {
-        self.index += 1;
-    }
-
-}
-
-impl Display for Pos {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "line {}, col {} ({} from start)",
-            self.ln, self.pos, self.index
-        )
-    }
-}
-
-pub struct StringPosIter<'a> {
-    chars: std::iter::Chain<Chars<'a>, std::iter::Once<char>>,
-    pos: Pos,
-    is_last_cr: bool,
-}
-
-impl<'a> StringPosIter<'a> {
-    pub fn new(string: &'a str) -> StringPosIter<'a> {
-        let chars = string.chars().chain(std::iter::once('\0'));
-        StringPosIter {
-            chars,
-            pos: Pos::zero(),
-            is_last_cr: false,
-        }
-    }
-}
-
-impl<'a> Iterator for StringPosIter<'a> {
-    type Item = (Pos, char);
-    fn next(&mut self) -> Option<Self::Item> {
-        let next_char = self.chars.next();
-        match next_char {
-            None => None,
-            Some(ch) => {
-                match ch {
-                    '\n' => {
-                        if !self.is_last_cr {
-                            self.pos.lf_self();
-                        } else {
-                            self.pos.bump_self();
-                        }
-                        self.is_last_cr = false;
-                    }
-                    '\r' => {
-                        self.pos.lf_self();
-                        self.is_last_cr = true;
-                    }
-                 _ => {
-                        self.is_last_cr = false;
-                        self.pos.inc_self();
-                    }
-                };
-                Some((self.pos, ch))
-            }
         }
     }
 }
