@@ -108,12 +108,14 @@ impl Pos {
     }
 
     #[must_use]
+    #[inline]
     pub fn bump(mut self) -> Pos {
         self.index += 1;
         self
     }
 
     #[must_use]
+    #[inline]
     pub fn inc(mut self) -> Pos {
         self.pos += 1;
         self.index += 1;
@@ -121,12 +123,32 @@ impl Pos {
     }
 
     #[must_use]
+    #[inline]
     pub fn lf(mut self) -> Pos {
         self.pos = 0;
         self.ln += 1;
         self.index += 1;
         self
     }
+
+    #[inline]
+    pub fn inc_self(&mut self)  {
+        self.pos += 1;
+        self.index += 1;
+    }
+
+    #[inline]
+    pub fn lf_self(&mut self)  {
+        self.pos = 0;
+        self.ln += 1;
+        self.index += 1;
+    }
+
+    #[inline]
+    pub fn bump_self(&mut self)  {
+        self.index += 1;
+    }
+
 }
 
 impl Display for Pos {
@@ -166,19 +188,19 @@ impl<'a> Iterator for StringPosIter<'a> {
                 match ch {
                     '\n' => {
                         if !self.is_last_cr {
-                            self.pos.lf();
+                            self.pos.lf_self();
                         } else {
-                            self.pos.bump();
+                            self.pos.bump_self();
                         }
                         self.is_last_cr = false;
                     }
                     '\r' => {
-                        self.pos.lf();
+                        self.pos.lf_self();
                         self.is_last_cr = true;
                     }
-                    ch @ _ => {
+                 _ => {
                         self.is_last_cr = false;
-                        self.pos.inc();
+                        self.pos.inc_self();
                     }
                 };
                 Some((self.pos, ch))
@@ -304,14 +326,14 @@ impl<'a> Lexer<'a> {
         }
         let end_pos = iter.peek().unwrap().0;
 
-        let start_index = start_pos.index;
-        let end_index = end_pos.index;
+        let start = start_pos.index;
+        let end = end_pos.index;
 
         Token {
             var: TokenVariant::IntegerLiteral(
-                i64::from_str(&self.src[start_index..end_index]).unwrap(),
+                i64::from_str(&self.src[start..end]).unwrap(),
             ),
-            src: &self.src[start_index..end_index],
+            src: &self.src[start..end],
             pos: start_pos,
             end_pos,
         }
@@ -319,16 +341,16 @@ impl<'a> Lexer<'a> {
 
     /// Lex a string literal.
     fn lex_string_literal(&mut self, iter: &mut Peekable<StringPosIter>) -> Token<'a> {
-        let (start_index, start_quotation_mark) = iter.next().expect("This value should be valid");
+        let (start, start_quotation_mark) = iter.next().expect("This value should be valid");
 
         if start_quotation_mark != '"' {
             panic!(
                 "A string literal must start with a quotation mark! found at {}",
-                start_index
+                start
             );
         }
 
-        let end_index: Pos;
+        let end: Pos;
         let mut tgt_string = String::new();
 
         loop {
@@ -352,7 +374,7 @@ impl<'a> Lexer<'a> {
                     tgt_string.push(pushed_char);
                 }
                 '"' => {
-                    end_index = this_index.inc();
+                    end = this_index.inc();
                     break;
                 }
                 '\n' | '\r' => {
@@ -366,43 +388,43 @@ impl<'a> Lexer<'a> {
 
         Token {
             var: TokenVariant::StringLiteral(tgt_string),
-            src: &self.src[start_index.index..end_index.index],
-            pos: start_index,
-            end_pos: end_index,
+            src: &self.src[start.index..end.index],
+            pos: start,
+            end_pos: end,
         }
     }
 
     /// Lex an identifier.
     fn lex_identifier(&mut self, iter: &mut Peekable<StringPosIter>) -> Token<'a> {
-        let start_index = iter.peek().expect("This value should be valid").0;
+        let start = iter.peek().expect("This value should be valid").0;
         while iter
             .peek()
             .map_or(false, |ch_ind| (*ch_ind).1.is_alphanumeric())
         {
             iter.next();
         }
-        let mut end_index = iter.peek().unwrap().0;
-        let variation = match &self.src[start_index.index..end_index.index] {
+        let end = iter.peek().unwrap().0;
+        let variation = match &self.src[start.index..end.index] {
             "if" => TokenVariant::If,
             "else" => TokenVariant::Else,
             "while" => TokenVariant::While,
             "return" => TokenVariant::Return,
             "const" => TokenVariant::Const,
-            _ => TokenVariant::Identifier(&self.src[start_index.index..end_index.index]),
+            _ => TokenVariant::Identifier(&self.src[start.index..end.index]),
         };
 
         Token {
             var: variation,
-            src: &self.src[start_index.index..end_index.index],
-            pos: start_index,
-            end_pos: end_index,
+            src: &self.src[start.index..end.index],
+            pos: start,
+            end_pos: end,
         }
     }
 
     /// Lex an operator.
     fn lex_operator(&mut self, iter: &mut Peekable<StringPosIter>) -> Token<'a> {
-        let (start_index, first_char) = iter.next().expect("This value should be valid");
-        let mut end_index = start_index .inc();
+        let (start, first_char) = iter.next().expect("This value should be valid");
+        let mut end = start .inc();
         let second_char: Option<char> =
             __OP_COMBINATION
                 .get(&first_char)
@@ -417,7 +439,7 @@ impl<'a> Lexer<'a> {
                 });
         if second_char.is_some() {
             iter.next();
-            end_index =end_index.inc();
+            end =end.inc();
         }
 
         let variation = match first_char {
@@ -472,16 +494,16 @@ impl<'a> Lexer<'a> {
             ';' => TokenVariant::Semicolon,
             _ => panic!(
                 "Unexpected character \'{}\' at {}",
-                &self.src[start_index.index..end_index.index],
-                start_index
+                &self.src[start.index..end.index],
+                start
             ),
         };
 
         Token {
             var: variation,
-            src: &self.src[start_index.index..end_index.index],
-            pos: start_index,
-            end_pos: end_index,
+            src: &self.src[start.index..end.index],
+            pos: start,
+            end_pos: end,
         }
     }
 
