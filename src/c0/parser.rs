@@ -2,7 +2,6 @@ use crate::c0::ast::*;
 use crate::c0::lexer::*;
 use itertools::Itertools;
 use lazy_static::lazy_static;
-use maplit::*;
 use std::collections::*;
 use std::iter::{Iterator, Peekable};
 use std::{cell::RefCell, fmt, fmt::Display, fmt::Formatter, rc::Rc};
@@ -150,6 +149,7 @@ impl<'a> Parser<'a> {
 
     fn parse_program(&mut self) -> ParseResult<'a, Program> {
         let scope = Ptr::new(Scope::new(None));
+        Self::inject_std(scope.clone());
         // let mut fns = vec![];
         // let mut vars = vec![];
         while self.lexer.peek().is_some() {
@@ -160,6 +160,17 @@ impl<'a> Parser<'a> {
         })
         ///// TODO: implement
         // unimplemented!()
+    }
+
+    fn inject_std(scope: Ptr<Scope>) {
+        let mut scope = scope.borrow_mut();
+        scope.try_insert(
+            "int",
+            Ptr::new(TokenEntry::Type {
+                is_primitive: true,
+                occupy_bytes: 4,
+            }),
+        );
     }
 
     /// Parse a declaration. Could either be a function or variable declaration.
@@ -312,11 +323,7 @@ impl<'a> Parser<'a> {
             TokenVariant::While => Ok(Statement::While(self.parse_while(scope)?)),
             TokenVariant::LCurlyBrace => Ok(Statement::Block(self.parse_block(scope)?)),
             TokenVariant::Semicolon => Ok(Statement::Empty),
-            TokenVariant::Return => Ok(Statement::Return({
-                let expr = self.parse_expr(scope, &STMT_END_ON)?;
-                self.lexer.expect(TokenVariant::Semicolon)?;
-                expr
-            })),
+            TokenVariant::Return => Ok(Statement::Return(self.parse_return(scope)?)),
             _ => Ok(Statement::Expr({
                 let expr = self.parse_expr(scope, &STMT_END_ON)?;
                 self.lexer.expect(TokenVariant::Semicolon)?;
@@ -362,6 +369,45 @@ impl<'a> Parser<'a> {
             check: while_expr,
             body: while_body,
         })
+    }
+
+    fn parse_return(&mut self, scope: Ptr<Scope>) -> ParseResult<'a, Expr> {
+        let expr = self.parse_expr(scope, &STMT_END_ON)?;
+        self.lexer.expect(TokenVariant::Semicolon)?;
+        Ok(expr)
+    }
+
+    fn parse_decl_or_expr(&mut self, scope: Ptr<Scope>) -> ParseResult<'a, Statement> {
+        // TODO: Parse declarations as statements, and differ them from expressions.
+        //       (probably by checking if the identifier is a type or a variable,
+        //       and reports error if else)
+
+        //* this function allows parsing of the following
+        //* - a VarDeclaration (like `int x, y;` and `const z = 14;`)
+        //* - a FnDeclaration  (like `int f(int x) { ... }`)
+        //* - an Expr          (like `x = 3 + y;`, `y = f(z);` and `scanf(&a);`)
+
+        /*
+            The key is to peek the first token and determine if it is a type name,
+            as in the pseudo-code below:
+
+            ```
+            match peek()
+            - Identifier =>
+                |> is it a type? (check scope)
+                - true => parse_decl()
+                - false => parse_expr()
+            - _ => parse_expr()
+            ```
+
+            Another problem is to match function declaration or variable declaration
+            after consuming the second token
+
+            ----
+
+            Okay we may need a sole "type parser" to parse through the type definitions
+        */
+        unimplemented!()
     }
 
     fn parse_expr<'b>(
@@ -626,7 +672,7 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                     ExprPart::FnCall(func) => {
                         let len = match &*func.0.clone().borrow() {
                             TokenEntry::Function { params, .. } => params.len(),
-                            _ => panic!(),
+                            _ => unreachable!(),
                         };
                         let mut params: Vec<Ptr<Expr>> =
                             (0..len).try_fold(Vec::new(), |mut vec: Vec<Ptr<Expr>>, _num| {
@@ -866,4 +912,12 @@ impl<'a> Display for ParseError<'a> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "E{:4}: {}", self.get_err_code(), self.get_err_desc())
     }
+}
+
+// ======================
+
+#[cfg(test)]
+mod test {
+    #[test]
+    fn test_parser() {}
 }
