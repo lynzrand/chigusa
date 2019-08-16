@@ -1,7 +1,7 @@
 use lazy_static::lazy_static;
 use std::collections::HashMap;
 use std::iter::{Iterator, Peekable};
-use std::str::{CharIndices, FromStr};
+use std::str::{Chars, FromStr};
 use std::{cell::RefCell, fmt, fmt::Display, fmt::Formatter, hash::Hash, rc::Rc, string::String};
 
 #[derive(Debug, Eq, PartialEq, Hash)]
@@ -87,6 +87,106 @@ impl<'a> Display for TokenVariant<'a> {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct Pos {
+    ln: usize,
+    pos: usize,
+    index: usize,
+}
+
+impl Pos {
+    pub fn new(ln: usize, pos: usize, index: usize) -> Pos {
+        Pos { ln, pos, index }
+    }
+
+    pub fn zero() -> Pos {
+        Pos {
+            ln: 0,
+            pos: 0,
+            index: 0,
+        }
+    }
+
+    #[must_use]
+    pub fn bump(mut self) -> Pos {
+        self.index += 1;
+        self
+    }
+
+    #[must_use]
+    pub fn inc(mut self) -> Pos {
+        self.pos += 1;
+        self.index += 1;
+        self
+    }
+
+    #[must_use]
+    pub fn lf(mut self) -> Pos {
+        self.pos = 0;
+        self.ln += 1;
+        self.index += 1;
+        self
+    }
+}
+
+impl Display for Pos {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "line {}, col {} ({} from start)",
+            self.ln, self.pos, self.index
+        )
+    }
+}
+
+pub struct StringPosIter<'a> {
+    chars: std::iter::Chain<Chars<'a>, std::iter::Once<char>>,
+    pos: Pos,
+    is_last_cr: bool,
+}
+
+impl<'a> StringPosIter<'a> {
+    pub fn new(string: &'a str) -> StringPosIter<'a> {
+        let chars = string.chars().chain(std::iter::once('\0'));
+        StringPosIter {
+            chars,
+            pos: Pos::zero(),
+            is_last_cr: false,
+        }
+    }
+}
+
+impl<'a> Iterator for StringPosIter<'a> {
+    type Item = (Pos, char);
+    fn next(&mut self) -> Option<Self::Item> {
+        let next_char = self.chars.next();
+        match next_char {
+            None => None,
+            Some(ch) => {
+                match ch {
+                    '\n' => {
+                        if !self.is_last_cr {
+                            self.pos.lf();
+                        } else {
+                            self.pos.bump();
+                        }
+                        self.is_last_cr = false;
+                    }
+                    '\r' => {
+                        self.pos.lf();
+                        self.is_last_cr = true;
+                    }
+                    ch @ _ => {
+                        self.is_last_cr = false;
+                        self.pos.inc();
+                    }
+                };
+                Some((self.pos, ch))
+            }
+        }
+    }
+}
+
 /// A single token
 #[derive(Debug)]
 pub struct Token<'a> {
@@ -97,10 +197,10 @@ pub struct Token<'a> {
     pub src: &'a str,
 
     /// its position along source code
-    pub pos: usize,
+    pub pos: Pos,
 
     /// its end position along source code
-    pub end_pos: usize,
+    pub end_pos: Pos,
 }
 
 impl<'a> Token<'a> {
@@ -143,7 +243,7 @@ pub struct Lexer<'a> {
 
 pub struct LexerIterator<'a> {
     lexer: Lexer<'a>,
-    iter: Option<Peekable<CharIndices<'a>>>,
+    iter: Option<Peekable<StringPosIter<'a>>>,
 }
 
 impl<'a> LexerIterator<'a> {
@@ -152,7 +252,7 @@ impl<'a> LexerIterator<'a> {
             lexer: src,
             iter: None,
         };
-        new_iter.iter = Some(new_iter.lexer.src.char_indices().peekable());
+        new_iter.iter = Some(StringPosIter::new(new_iter.lexer.src).peekable());
         new_iter
     }
 }
@@ -176,7 +276,7 @@ impl<'a> Lexer<'a> {
     ///
     /// This method requires creating a character index iterator for the `src`
     /// field. Thus it must be used inside an `LexerIterator`.
-    pub fn get_next_token(&mut self, iter: &mut Peekable<CharIndices>) -> Option<Token<'a>> {
+    pub fn get_next_token(&mut self, iter: &mut Peekable<StringPosIter>) -> Option<Token<'a>> {
         Self::skip_spaces(iter);
         // the first character of next token
         let c = match iter.peek() {
@@ -197,26 +297,28 @@ impl<'a> Lexer<'a> {
     }
 
     /// Lex a number
-    fn lex_number(&mut self, iter: &mut Peekable<CharIndices>) -> Token<'a> {
-        let start_index = iter.peek().expect("This value should be valid").0;
-        let mut end_index = start_index;
+    fn lex_number(&mut self, iter: &mut Peekable<StringPosIter>) -> Token<'a> {
+        let start_pos = iter.peek().expect("This value should be valid").0;
         while iter.peek().map_or(false, |ch_ind| (*ch_ind).1.is_digit(10)) {
             iter.next();
-            end_index += 1;
         }
+        let end_pos = iter.peek().unwrap().0;
+
+        let start_index = start_pos.index;
+        let end_index = end_pos.index;
 
         Token {
             var: TokenVariant::IntegerLiteral(
                 i64::from_str(&self.src[start_index..end_index]).unwrap(),
             ),
             src: &self.src[start_index..end_index],
-            pos: start_index,
-            end_pos: end_index,
+            pos: start_pos,
+            end_pos,
         }
     }
 
     /// Lex a string literal.
-    fn lex_string_literal(&mut self, iter: &mut Peekable<CharIndices>) -> Token<'a> {
+    fn lex_string_literal(&mut self, iter: &mut Peekable<StringPosIter>) -> Token<'a> {
         let (start_index, start_quotation_mark) = iter.next().expect("This value should be valid");
 
         if start_quotation_mark != '"' {
@@ -226,7 +328,7 @@ impl<'a> Lexer<'a> {
             );
         }
 
-        let end_index: usize;
+        let end_index: Pos;
         let mut tgt_string = String::new();
 
         loop {
@@ -250,7 +352,7 @@ impl<'a> Lexer<'a> {
                     tgt_string.push(pushed_char);
                 }
                 '"' => {
-                    end_index = this_index + 1;
+                    end_index = this_index.inc();
                     break;
                 }
                 '\n' | '\r' => {
@@ -264,44 +366,43 @@ impl<'a> Lexer<'a> {
 
         Token {
             var: TokenVariant::StringLiteral(tgt_string),
-            src: &self.src[start_index..end_index],
+            src: &self.src[start_index.index..end_index.index],
             pos: start_index,
             end_pos: end_index,
         }
     }
 
     /// Lex an identifier.
-    fn lex_identifier(&mut self, iter: &mut Peekable<CharIndices>) -> Token<'a> {
+    fn lex_identifier(&mut self, iter: &mut Peekable<StringPosIter>) -> Token<'a> {
         let start_index = iter.peek().expect("This value should be valid").0;
-        let mut end_index = start_index;
         while iter
             .peek()
             .map_or(false, |ch_ind| (*ch_ind).1.is_alphanumeric())
         {
             iter.next();
-            end_index += 1;
         }
-        let variation = match &self.src[start_index..end_index] {
+        let mut end_index = iter.peek().unwrap().0;
+        let variation = match &self.src[start_index.index..end_index.index] {
             "if" => TokenVariant::If,
             "else" => TokenVariant::Else,
             "while" => TokenVariant::While,
             "return" => TokenVariant::Return,
             "const" => TokenVariant::Const,
-            _ => TokenVariant::Identifier(&self.src[start_index..end_index]),
+            _ => TokenVariant::Identifier(&self.src[start_index.index..end_index.index]),
         };
 
         Token {
             var: variation,
-            src: &self.src[start_index..end_index],
+            src: &self.src[start_index.index..end_index.index],
             pos: start_index,
             end_pos: end_index,
         }
     }
 
     /// Lex an operator.
-    fn lex_operator(&mut self, iter: &mut Peekable<CharIndices>) -> Token<'a> {
+    fn lex_operator(&mut self, iter: &mut Peekable<StringPosIter>) -> Token<'a> {
         let (start_index, first_char) = iter.next().expect("This value should be valid");
-        let mut end_index = start_index + 1;
+        let mut end_index = start_index .inc();
         let second_char: Option<char> =
             __OP_COMBINATION
                 .get(&first_char)
@@ -316,7 +417,7 @@ impl<'a> Lexer<'a> {
                 });
         if second_char.is_some() {
             iter.next();
-            end_index += 1;
+            end_index =end_index.inc();
         }
 
         let variation = match first_char {
@@ -371,21 +472,21 @@ impl<'a> Lexer<'a> {
             ';' => TokenVariant::Semicolon,
             _ => panic!(
                 "Unexpected character \'{}\' at {}",
-                &self.src[start_index..end_index],
+                &self.src[start_index.index..end_index.index],
                 start_index
             ),
         };
 
         Token {
             var: variation,
-            src: &self.src[start_index..end_index],
+            src: &self.src[start_index.index..end_index.index],
             pos: start_index,
             end_pos: end_index,
         }
     }
 
     /// Skip spaces and stop before the next non-space character.
-    fn skip_spaces(iter: &mut Peekable<CharIndices>) {
+    fn skip_spaces(iter: &mut Peekable<StringPosIter>) {
         while match iter.peek() {
             None => false,
             Some((_, ch)) => ch.is_whitespace(),
