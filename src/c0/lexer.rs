@@ -1,9 +1,9 @@
+use super::infra::*;
 use lazy_static::lazy_static;
 use std::collections::HashMap;
 use std::iter::{Iterator, Peekable};
 use std::str::{Chars, FromStr};
 use std::{cell::RefCell, fmt, fmt::Display, fmt::Formatter, hash::Hash, rc::Rc, string::String};
-use super::infra::*;
 
 #[derive(Debug, Eq, PartialEq, Hash)]
 /// This enum defines the variants of token in C0 language. Variants are pretty
@@ -97,11 +97,8 @@ pub struct Token<'a> {
     /// its source string
     pub src: &'a str,
 
-    /// its position along source code
-    pub pos: Pos,
-
-    /// its end position along source code
-    pub end_pos: Pos,
+    /// The space the token occupies
+    pub span: Span,
 }
 
 impl<'a> Token<'a> {
@@ -181,6 +178,7 @@ impl<'a> Lexer<'a> {
         Self::skip_spaces(iter);
         // the first character of next token
         let c = match iter.peek() {
+            Some((_, '\0')) => return None,
             Some((_, c)) => c,
             // spaces may occur at the end of file
             None => return None,
@@ -209,12 +207,9 @@ impl<'a> Lexer<'a> {
         let end = end_pos.index;
 
         Token {
-            var: TokenVariant::IntegerLiteral(
-                i64::from_str(&self.src[start..end]).unwrap(),
-            ),
+            var: TokenVariant::IntegerLiteral(i64::from_str(&self.src[start..end]).unwrap()),
             src: &self.src[start..end],
-            pos: start_pos,
-            end_pos,
+            span: Span::from(start_pos, end_pos),
         }
     }
 
@@ -253,7 +248,7 @@ impl<'a> Lexer<'a> {
                     tgt_string.push(pushed_char);
                 }
                 '"' => {
-                    end = this_index.inc();
+                    end = this_index.map_inc(-1, 0, -1);
                     break;
                 }
                 '\n' | '\r' => {
@@ -268,8 +263,7 @@ impl<'a> Lexer<'a> {
         Token {
             var: TokenVariant::StringLiteral(tgt_string),
             src: &self.src[start.index..end.index],
-            pos: start,
-            end_pos: end,
+            span: Span::from(start, end),
         }
     }
 
@@ -295,15 +289,14 @@ impl<'a> Lexer<'a> {
         Token {
             var: variation,
             src: &self.src[start.index..end.index],
-            pos: start,
-            end_pos: end,
+            span: Span::from(start, end),
         }
     }
 
     /// Lex an operator.
     fn lex_operator(&mut self, iter: &mut Peekable<StringPosIter>) -> Token<'a> {
         let (start, first_char) = iter.next().expect("This value should be valid");
-        let mut end = start .inc();
+        let mut end = start.inc();
         let second_char: Option<char> =
             __OP_COMBINATION
                 .get(&first_char)
@@ -318,7 +311,7 @@ impl<'a> Lexer<'a> {
                 });
         if second_char.is_some() {
             iter.next();
-            end =end.inc();
+            end = end.inc();
         }
 
         let variation = match first_char {
@@ -381,8 +374,7 @@ impl<'a> Lexer<'a> {
         Token {
             var: variation,
             src: &self.src[start.index..end.index],
-            pos: start,
-            end_pos: end,
+            span: Span::from(start, end),
         }
     }
 

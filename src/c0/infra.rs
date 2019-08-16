@@ -1,6 +1,7 @@
 use std::str::{Chars, FromStr};
 use std::{
     cell::{Ref, RefCell, RefMut},
+    cmp::PartialOrd,
     fmt,
     fmt::Display,
     fmt::Formatter,
@@ -53,6 +54,26 @@ impl Pos {
         self
     }
 
+    #[must_use]
+    pub fn map_inc(mut self, pos_offset: isize, ln_offset: isize, index_offset: isize) -> Pos {
+        self.pos = if pos_offset >= 0 {
+            self.pos + pos_offset as usize
+        } else {
+            self.pos - (-pos_offset) as usize
+        };
+        self.ln = if ln_offset >= 0 {
+            self.ln + ln_offset as usize
+        } else {
+            self.ln - (-ln_offset) as usize
+        };
+        self.index = if index_offset >= 0 {
+            self.index + index_offset as usize
+        } else {
+            self.index - (-index_offset) as usize
+        };
+        self
+    }
+
     #[inline]
     pub fn inc_self(&mut self) {
         self.pos += 1;
@@ -82,6 +103,108 @@ impl Display for Pos {
     }
 }
 
+impl PartialOrd for Pos {
+    fn partial_cmp(&self, other: &Pos) -> Option<std::cmp::Ordering> {
+        Some(self.index.cmp(&other.index))
+    }
+}
+
+impl Ord for Pos {
+    fn cmp(&self, other: &Pos) -> std::cmp::Ordering {
+        self.index.cmp(&other.index)
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub struct Span {
+    pub start: Pos,
+    pub end: Pos,
+}
+
+impl Span {
+    pub fn from(start: Pos, end: Pos) -> Span {
+        assert!(start <= end);
+        Span { start, end }
+    }
+}
+
+impl std::ops::Add for Span {
+    type Output = Span;
+
+    /// An add between spans is combining them together, and filling the center
+    /// if any hollow part appears. Adding spans only preserves the ordination
+    /// between indexes, so only adding spans from the same string makes sense.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use chigusa::c0::infra::{Pos, Span};
+    /// let lhs = Span {
+    ///     start: Pos {
+    ///         ln: 1,
+    ///         pos: 1,
+    ///         index: 0,
+    ///     },
+    ///     end: Pos {
+    ///         ln: 1,
+    ///         pos: 3,
+    ///         index: 2,
+    ///     }
+    /// };
+    ///
+    /// let rhs = Span {
+    ///     start: Pos {
+    ///         ln: 1,
+    ///         pos: 5,
+    ///         index: 4,
+    ///     },
+    ///     end: Pos {
+    ///         ln: 1,
+    ///         pos: 9,
+    ///         index: 8,
+    ///     }
+    /// };
+    ///
+    /// assert_eq!(lhs + rhs, Span {
+    ///     start: Pos {
+    ///         ln: 1,
+    ///         pos: 1,
+    ///         index: 0,
+    ///     },
+    ///     end: Pos {
+    ///         ln: 1,
+    ///         pos: 9,
+    ///         index: 8,
+    ///     }
+    /// });
+    /// ```
+    fn add(self, rhs: Span) -> Self::Output {
+        let smaller_start = std::cmp::min(self.start, rhs.start);
+        let larger_end = std::cmp::max(self.end, rhs.end);
+        Span {
+            start: smaller_start,
+            end: larger_end,
+        }
+    }
+}
+/*
+    // Subtracting spans make no sense for now
+
+    impl std::ops::Sub for Span{
+        type Output = Span;
+        fn sub(self, rhs: Span)->Self::Output{
+            if self.start==rhs.start{
+                Span{
+                    start: rhs.end,
+                    end: self.end
+                }
+            } else {
+
+            }
+        }
+    }
+*/
+
 pub struct StringPosIter<'a> {
     chars: std::iter::Chain<Chars<'a>, std::iter::Once<char>>,
     pos: Pos,
@@ -106,6 +229,7 @@ impl<'a> Iterator for StringPosIter<'a> {
         match next_char {
             None => None,
             Some(ch) => {
+                let ret = Some((self.pos, ch));
                 match ch {
                     '\n' => {
                         if !self.is_last_cr {
@@ -124,7 +248,7 @@ impl<'a> Iterator for StringPosIter<'a> {
                         self.pos.inc_self();
                     }
                 };
-                Some((self.pos, ch))
+                ret
             }
         }
     }
@@ -167,22 +291,9 @@ impl<T> IntoPtr<T> for Rc<RefCell<T>> {
     }
 }
 
-#[derive(Copy, Clone, Eq, PartialEq)]
-pub struct Span {
-    start: Pos,
-    end: Pos,
-}
-
-impl Span {
-    pub fn from(start: Pos, end: Pos) -> Span {
-        Span { start, end }
-    }
-}
-
 pub trait AstNode {
     fn get_span(&self) -> Span;
 }
-
 
 pub fn variant_eq<T>(a: &T, b: &T) -> bool {
     std::mem::discriminant(a) == std::mem::discriminant(b)
@@ -194,7 +305,6 @@ pub enum LoopCtrl<T> {
 }
 
 use LoopCtrl::*;
-
 
 impl<T> LoopCtrl<T> {
     pub fn unwrap(self) -> T {
@@ -236,5 +346,3 @@ macro_rules! set {
         }
     };
 }
-
-
