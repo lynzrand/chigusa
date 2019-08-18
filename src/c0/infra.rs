@@ -405,8 +405,24 @@ macro_rules! set {
 
 pub type ParseResult<'a, T> = Result<T, ParseError<'a>>;
 
+pub fn parse_err<'a>(var: ParseErrVariant<'a>, pos: Pos)->ParseError<'a>{
+ParseError{var, pos}
+}
+
 #[derive(Debug)]
-pub enum ParseError<'a> {
+pub struct ParseError<'a>{
+    var: ParseErrVariant<'a>,
+    pos: Pos
+}
+
+impl<'a> Display for ParseError<'a> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} at {}", self.var, self.pos)
+    }
+}
+
+#[derive(Debug)]
+pub enum ParseErrVariant<'a> {
     ExpectToken(TokenVariant<'a>),
     UnexpectedToken(TokenVariant<'a>),
     NoConstFns,
@@ -426,9 +442,9 @@ pub enum ParseError<'a> {
     InternalErr,
 }
 
-impl<'a> ParseError<'a> {
+impl<'a> ParseErrVariant<'a> {
     pub fn get_err_code(&self) -> usize {
-        use self::ParseError::*;
+        use self::ParseErrVariant::*;
         match self {
             ExpectToken(_) => 1,
             NoConstFns => 2,
@@ -438,7 +454,7 @@ impl<'a> ParseError<'a> {
     }
 
     pub fn get_err_desc(&self) -> String {
-        use self::ParseError::*;
+        use self::ParseErrVariant::*;
         match self {
             ExpectToken(token) => format!("Expected {}", token),
             NoConstFns => "Functions cannot be marked as constant".to_string(),
@@ -448,7 +464,7 @@ impl<'a> ParseError<'a> {
     }
 }
 
-impl<'a> Display for ParseError<'a> {
+impl<'a> Display for ParseErrVariant<'a> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "E{:4}: {}", self.get_err_code(), self.get_err_desc())
     }

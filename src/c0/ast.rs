@@ -16,14 +16,15 @@ use std::rc::{Rc, Weak};
 #[derive(Debug,Eq, PartialEq)]
 pub struct Program {
     pub scope: Ptr<Scope>,
+    pub span: Span,
 }
 
 #[derive(Debug,Eq, PartialEq)]
 pub struct FnDeclaration {
-    pub span: Span,
     // pub return_type: Identifier,
     // pub params: Vec<Ptr<VarDecalaration>>,
     pub body: Block,
+    pub span: Span,
 }
 
 #[derive(Debug,Eq, PartialEq)]
@@ -92,7 +93,7 @@ impl TokenEntry {
         }
     }
 
-    pub fn find_fn<'a, F: FnOnce() -> ParseError<'a>>(
+    pub fn find_fn<'a, F: FnOnce() ->ParseError<'a>>(
         &self,
         get_err: F,
     ) -> ParseResult<'a, &FnScopeDecl> {
@@ -231,6 +232,7 @@ pub enum Statement {
 #[derive(Debug,Eq, PartialEq)]
 pub struct ReturnStatement {
     pub return_val: Option<Ptr<TokenEntry>>,
+    pub span: Span,
 }
 
 #[derive(Debug,Eq, PartialEq)]
@@ -238,12 +240,14 @@ pub struct IfStatement {
     pub check: Ptr<Expr>,
     pub if_body: Ptr<Statement>,
     pub else_body: Option<Ptr<Statement>>,
+    pub span: Span
 }
 
 #[derive(Debug,Eq, PartialEq)]
 pub struct WhileStatement {
     pub check: Ptr<Expr>,
     pub body: Ptr<Statement>,
+    pub span: Span
 }
 
 #[derive(Debug,Eq, PartialEq)]
@@ -251,6 +255,7 @@ pub struct VarDecalaration {
     pub is_const: bool,
     pub symbol: Ptr<TokenEntry>,
     pub val: Option<Ptr<Expr>>,
+    pub span: Span
 }
 
 #[derive(Debug,Eq, PartialEq)]
@@ -265,21 +270,24 @@ pub enum Expr {
 }
 
 #[derive(Debug,Eq, PartialEq)]
-pub struct Identifier(pub Ptr<TokenEntry>);
+pub struct Identifier(pub Ptr<TokenEntry>,
+    pub  Span
+);
 
 #[derive(Debug,Eq, PartialEq)]
 pub struct FuncCall {
     pub fn_name: Identifier,
     pub params: Vec<Ptr<Expr>>,
+    pub span: Span
 }
 
 /// An integer literal
 #[derive(Debug,Eq, PartialEq)]
-pub struct IntegerLiteral(pub i64);
+pub struct IntegerLiteral(pub i64, pub Span);
 
 /// A String Literal
 #[derive(Debug,Eq, PartialEq)]
-pub struct StringLiteral(pub String);
+pub struct StringLiteral(pub String, pub Span);
 
 /// A binary operator
 #[derive(Debug,Eq, PartialEq)]
@@ -287,6 +295,7 @@ pub struct BinaryOp {
     pub var: OpVar,
     pub lhs: Ptr<Expr>,
     pub rhs: Ptr<Expr>,
+    pub span: Span
 }
 
 /// An unary operator
@@ -294,6 +303,7 @@ pub struct BinaryOp {
 pub struct UnaryOp {
     pub var: OpVar,
     pub val: Ptr<Expr>,
+    pub span: Span
 }
 
 #[derive(Debug,Clone, Copy, Eq, PartialEq)]

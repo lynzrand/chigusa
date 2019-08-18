@@ -22,14 +22,14 @@ pub trait TokenIterator<'a>: Iterator<Item = Token<'a>> + itertools::PeekingNext
     fn expect(&mut self, token: TokenVariant<'a>) -> ParseResult<'a, Token<'a>> {
         self.next()
             .filter(|t| variant_eq(&t.var, &token))
-            .ok_or(ParseError::ExpectToken(token))
+            .ok_or(ParseErrVariant::ExpectToken(token))
     }
 
     fn expect_map_or<T>(
         &mut self,
         token: TokenVariant<'a>,
         map: impl FnOnce(Token<'a>) -> T,
-        f: impl FnOnce(Token<'a>) -> Result<T, ParseError<'a>>,
+        f: impl FnOnce(Token<'a>) -> Result<T, ParseErrVariant<'a>>,
     ) -> ParseResult<'a, T> {
         let next = self.next();
         match next {
@@ -40,7 +40,7 @@ pub trait TokenIterator<'a>: Iterator<Item = Token<'a>> + itertools::PeekingNext
                     f(v)
                 }
             }
-            None => Err(ParseError::ExpectToken(token)),
+            None => Err(ParseErrVariant::ExpectToken(token)),
         }
     }
 
@@ -144,26 +144,26 @@ impl<'a> Parser<'a> {
         let var_type = scope
             .borrow()
             .find_definition(type_name)
-            .ok_or(ParseError::CannotFindType(type_name))
+            .ok_or(ParseErrVariant::CannotFindType(type_name))
             .and_then(|ptr_token| {
                 if ptr_token.borrow().is_type() {
                     Ok(ptr_token)
                 } else {
-                    Err(ParseError::ExpectToBeType(type_name))
+                    Err(ParseErrVariant::ExpectToBeType(type_name))
                 }
             })?;
 
         let identifier = self.lexer.expect(TokenVariant::Identifier(""))?;
         let identifier_owned: String = match identifier.var {
             TokenVariant::Identifier(s) => s.to_owned(),
-            _ => return Err(ParseError::InternalErr),
+            _ => return Err(ParseErrVariant::InternalErr),
         };
         let is_fn = self.lexer.try_consume(TokenVariant::LParenthesis);
 
         if is_fn {
             // Functions cannot be const
             if is_const {
-                return Err(ParseError::NoConstFns);
+                return Err(ParseErrVariant::NoConstFns);
             }
 
             // This thing is a function! the insersion and other stuff are done
@@ -177,20 +177,20 @@ impl<'a> Parser<'a> {
                 Ptr::new(self.parse_single_var_decl(scope.clone(), var_type.clone(), is_const)?);
 
             if !scope.borrow_mut().try_insert(&identifier_owned, first_entry) {
-                return Err(ParseError::TokenExists(&identifier.get_ident().unwrap()));
+                return Err(ParseErrVariant::TokenExists(&identifier.get_ident().unwrap()));
             }
 
             while self.lexer.try_consume(TokenVariant::Comma) {
                 let identifier = self.lexer.expect(TokenVariant::Identifier(""))?;
                 let identifier_owned: String = match identifier.var {
                     TokenVariant::Identifier(s) => s.to_owned(),
-                    _ => return Err(ParseError::InternalErr),
+                    _ => return Err(ParseErrVariant::InternalErr),
                 };
                 let entry =
                     Ptr::new(self.parse_single_var_decl(scope.clone(), var_type.clone(), is_const)?);
 
                 if !scope.borrow_mut().try_insert(&identifier_owned, entry) {
-                    return Err(ParseError::TokenExists(identifier.get_ident().unwrap()));
+                    return Err(ParseErrVariant::TokenExists(identifier.get_ident().unwrap()));
                 }
             }
             self.lexer.expect(TokenVariant::Semicolon)?;
@@ -243,7 +243,7 @@ impl<'a> Parser<'a> {
 
         fn_scope_decl
             .borrow_mut()
-            .find_fn_mut(|| ParseError::InternalErr)?
+            .find_fn_mut(|| ParseErrVariant::InternalErr)?
             .decl = Some(fn_decl);
 
         Ok(())
@@ -260,18 +260,18 @@ impl<'a> Parser<'a> {
                 .lexer
                 .expect(TokenVariant::Identifier(""))?
                 .get_ident()
-                .map_err(|_| ParseError::InternalErr)?;
+                .map_err(|_| ParseErrVariant::InternalErr)?;
 
             let var_type = scope
                 .borrow()
                 .find_definition(var_type_ident)
-                .ok_or(ParseError::CannotFindType(var_type_ident))?;
+                .ok_or(ParseErrVariant::CannotFindType(var_type_ident))?;
 
             let var_ident = self
                 .lexer
                 .expect(TokenVariant::Identifier(""))?
                 .get_ident()
-                .map_err(|_| ParseError::InternalErr)?;
+                .map_err(|_| ParseErrVariant::InternalErr)?;
 
             let token_entry = Ptr::new(TokenEntry::Variable(VarScopeDecl {
                 is_const,
@@ -344,7 +344,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_stmt(&mut self, scope: Ptr<Scope>) -> ParseResult<'a, Statement> {
-        match self.lexer.peek().ok_or(ParseError::EarlyEof)?.var {
+        match self.lexer.peek().ok_or(ParseErrVariant::EarlyEof)?.var {
             TokenVariant::If => Ok(Statement::If(self.parse_if(scope)?)),
             TokenVariant::While => Ok(Statement::While(self.parse_while(scope)?)),
             TokenVariant::LCurlyBrace => Ok(Statement::Block(self.parse_block(scope)?)),
@@ -466,7 +466,7 @@ struct ExprParser<'a, 'b> {
     lexer_ended: bool,
     suggest_unary: bool,
     err_fuse: bool,
-    err: Option<ParseError<'a>>,
+    err: Option<ParseErrVariant<'a>>,
     op_stack: Vec<ExprPart>,
     end_on: &'b HashSet<TokenVariant<'a>>,
 }
@@ -489,7 +489,7 @@ impl<'a, 'b> ExprParser<'a, 'b> {
         }
     }
 
-    fn meltdown<T>(&mut self, err: ParseError<'a>) -> LoopCtrl<Option<T>> {
+    fn meltdown<T>(&mut self, err: ParseErrVariant<'a>) -> LoopCtrl<Option<T>> {
         self.err = Some(err);
         self.err_fuse = true;
         Stop(None)
@@ -614,7 +614,7 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                             self.suggest_unary = false;
                             Continue
                         } else {
-                            self.meltdown(ParseError::UnbalancedParenthesisExpectL)
+                            self.meltdown(ParseErrVariant::UnbalancedParenthesisExpectL)
                         }
                     } else if variant_eq(&op, &OpVar::_Com) {
                         // pass
@@ -630,7 +630,7 @@ impl<'a, 'b> ExprParser<'a, 'b> {
             None => {
                 // no corresponding operator, error!
                 let t: TokenVariant = self.lexer.next().unwrap().var;
-                self.meltdown(ParseError::UnexpectedToken(t))
+                self.meltdown(ParseErrVariant::UnexpectedToken(t))
             }
         }
     }
@@ -647,13 +647,13 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                 Stop(Some(ExprPart::Str(StringLiteral(s))))
             }
             TokenVariant::Identifier(ident) => self.parse_ident(ident),
-            var @ _ => self.meltdown(ParseError::UnexpectedToken(var)),
+            var @ _ => self.meltdown(ParseErrVariant::UnexpectedToken(var)),
         }
     }
 
     fn parse_ident(&mut self, ident: &'a str) -> LoopCtrl<Option<ExprPart>> {
         match self.scope.find_definition(ident) {
-            None => self.meltdown(ParseError::CannotFindIdent(ident)),
+            None => self.meltdown(ParseErrVariant::CannotFindIdent(ident)),
             Some(def_ptr) => {
                 let is_fn = self.lexer.try_consume(TokenVariant::LParenthesis);
                 let def_ptr_clone = def_ptr.clone();
@@ -667,7 +667,7 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                             self.suggest_unary = true;
                             Continue
                         }
-                        _ => self.meltdown(ParseError::CannotFindFn(ident)),
+                        _ => self.meltdown(ParseErrVariant::CannotFindFn(ident)),
                     }
                 } else {
                     // is variable
@@ -676,7 +676,7 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                             self.suggest_unary = false;
                             Stop(Some(ExprPart::Var(Identifier(def_ptr.clone()))))
                         }
-                        _ => self.meltdown(ParseError::CannotFindVar(ident)),
+                        _ => self.meltdown(ParseErrVariant::CannotFindVar(ident)),
                     }
                 }
             }
@@ -694,15 +694,15 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                     ExprPart::Op(op) => {
                         if op.is_unary() {
                             // unary op
-                            let operand = expr_stack.pop().ok_or(ParseError::MissingOperand)?;
+                            let operand = expr_stack.pop().ok_or(ParseErrVariant::MissingOperand)?;
                             expr_stack.push(Expr::UnaOp(UnaryOp {
                                 var: op,
                                 val: Ptr::new(operand),
                             }));
                         } else {
                             // binary op
-                            let r_operand = expr_stack.pop().ok_or(ParseError::MissingOperand)?;
-                            let l_operand = expr_stack.pop().ok_or(ParseError::MissingOperand)?;
+                            let r_operand = expr_stack.pop().ok_or(ParseErrVariant::MissingOperand)?;
+                            let l_operand = expr_stack.pop().ok_or(ParseErrVariant::MissingOperand)?;
                             expr_stack.push(Expr::BinOp(BinaryOp {
                                 var: op,
                                 lhs: Ptr::new(l_operand),
@@ -718,7 +718,7 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                         let mut params: Vec<Ptr<Expr>> =
                             (0..len).try_fold(Vec::new(), |mut vec: Vec<Ptr<Expr>>, _num| {
                                 vec.push(Ptr::new(
-                                    expr_stack.pop().ok_or(ParseError::MissingOperand)?,
+                                    expr_stack.pop().ok_or(ParseErrVariant::MissingOperand)?,
                                 ));
                                 Ok(vec)
                             })?;
@@ -738,11 +738,11 @@ impl<'a, 'b> ExprParser<'a, 'b> {
             } else {
                 let len = vector.len();
                 if len > 2 {
-                    Err(ParseError::InternalErr)
+                    Err(parse_err(ParseErrVariant::InternalErr, ))
                 } else if len == 1 {
                     Ok(vector.pop().unwrap())
                 } else {
-                    Err(ParseError::InternalErr)
+                    Err(ParseErrVariant::InternalErr)
                 }
             }
         })
