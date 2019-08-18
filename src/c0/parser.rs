@@ -326,7 +326,7 @@ impl<'a> Parser<'a> {
                 return Ok(span);
             }
 
-            let stmt = self.parse_stmt(scope.clone())?;
+            let stmt = self.parse_decl_or_stmt(scope.clone())?;
             block_statements.push(stmt);
             Ok(Continue)
         })?;
@@ -398,7 +398,7 @@ impl<'a> Parser<'a> {
         Ok(expr)
     }
 
-    fn parse_decl_or_expr(&mut self, scope: Ptr<Scope>) -> ParseResult<'a, Statement> {
+    fn parse_decl_or_stmt(&mut self, scope: Ptr<Scope>) -> ParseResult<'a, Statement> {
         // TODO: Parse declarations as statements, and differ them from expressions.
         //       (probably by checking if the identifier is a type or a variable,
         //       and reports error if else)
@@ -433,6 +433,7 @@ impl<'a> Parser<'a> {
                 .borrow()
                 .find_definition(ident)
                 .map_or(false, |entry| entry.borrow().is_type()),
+                TokenVariant::Const=>true,
             _ => false,
         });
 
