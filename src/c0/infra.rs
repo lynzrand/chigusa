@@ -256,7 +256,7 @@ impl<'a> Iterator for StringPosIter<'a> {
     }
 }
 
-#[derive(Eq, PartialEq)]
+#[derive(Eq, PartialEq, Debug)]
 pub struct Ptr<T>(Rc<RefCell<T>>);
 
 impl<T> Ptr<T> {
@@ -405,6 +405,7 @@ macro_rules! set {
 
 pub type ParseResult<'a, T> = Result<T, ParseError<'a>>;
 
+#[derive(Debug)]
 pub enum ParseError<'a> {
     ExpectToken(TokenVariant<'a>),
     UnexpectedToken(TokenVariant<'a>),
@@ -417,6 +418,7 @@ pub enum ParseError<'a> {
     ExpectToBeVar(&'a str),
     ExpectToBeFn(&'a str),
     UnsupportedToken(TokenVariant<'a>),
+    TokenExists(&'a str),
     EarlyEof,
     UnbalancedParenthesisExpectL,
     UnbalancedParenthesisExpectR,

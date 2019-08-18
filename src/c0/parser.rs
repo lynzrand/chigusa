@@ -9,16 +9,16 @@ use std::{cell::RefCell, fmt, fmt::Display, fmt::Formatter, rc::Rc};
 use LoopCtrl::*;
 
 pub trait IntoParser<'a> {
-    fn into_parser(self: Box<Self>) -> Parser<'a>;
+    fn into_parser(self) -> Parser<'a>;
 }
 
-impl<'a> IntoParser<'a> for dyn Iterator<Item = Token<'a>> {
-    fn into_parser(self: Box<Self>) -> Parser<'a> {
+impl<'a> IntoParser<'a> for LexerIterator<'a> {
+    fn into_parser(self) -> Parser<'a> {
         Parser::new(self)
     }
 }
 
-pub trait TokenIterator<'a>: Iterator<Item = Token<'a>> {
+pub trait TokenIterator<'a>: Iterator<Item = Token<'a>> + itertools::PeekingNext {
     fn expect(&mut self, token: TokenVariant<'a>) -> ParseResult<'a, Token<'a>> {
         self.next()
             .filter(|t| variant_eq(&t.var, &token))
@@ -44,10 +44,7 @@ pub trait TokenIterator<'a>: Iterator<Item = Token<'a>> {
         }
     }
 
-    fn try_consume(&mut self, token: TokenVariant<'a>) -> bool
-    where
-        Self: itertools::PeekingNext,
-    {
+    fn try_consume(&mut self, token: TokenVariant<'a>) -> bool {
         match self.peeking_next(|v| variant_eq(&v.var, &token)) {
             Some(_) => {
                 self.next();
@@ -57,10 +54,7 @@ pub trait TokenIterator<'a>: Iterator<Item = Token<'a>> {
         }
     }
 
-    fn try_consume_log_span(&mut self, token: TokenVariant<'a>) -> Option<Span>
-    where
-        Self: itertools::PeekingNext,
-    {
+    fn try_consume_log_span(&mut self, token: TokenVariant<'a>) -> Option<Span> {
         match self.peeking_next(|v| variant_eq(&v.var, &token)) {
             Some(v) => {
                 self.next();
@@ -71,12 +65,12 @@ pub trait TokenIterator<'a>: Iterator<Item = Token<'a>> {
     }
 }
 
-type Lexer<'a> = Peekable<Box<dyn Iterator<Item = Token<'a>>>>;
+type LexerWrapped<'a> = Peekable<LexerIterator<'a>>;
 
-impl<'a> TokenIterator<'a> for Lexer<'a> {}
+impl<'a> TokenIterator<'a> for LexerWrapped<'a> {}
 
 pub struct Parser<'a> {
-    lexer: Lexer<'a>,
+    lexer: LexerWrapped<'a>,
 }
 
 lazy_static! {
@@ -95,7 +89,7 @@ lazy_static! {
 }
 
 impl<'a> Parser<'a> {
-    pub fn new(lexer: Box<dyn Iterator<Item = Token<'a>>>) -> Parser<'a> {
+    pub fn new(lexer: LexerIterator<'a>) -> Parser<'a> {
         let lexer = lexer.peekable();
         Parser {
             lexer,
@@ -180,16 +174,27 @@ impl<'a> Parser<'a> {
         // return;
         } else {
             let first_entry =
-                Ptr::new(self.parse_single_var_decl(scope.clone(), var_type, is_const)?);
-            while !self.lexer.try_consume(TokenVariant::Semicolon) {
-                // TODO: write parser for single entries
-                // scope
-                //     .borrow_mut()
-                //     .token_table
-                //     .insert(identifier_owned, entry);
+                Ptr::new(self.parse_single_var_decl(scope.clone(), var_type.clone(), is_const)?);
+
+            if !scope.borrow_mut().try_insert(&identifier_owned, first_entry) {
+                return Err(ParseError::TokenExists(&identifier.get_ident().unwrap()));
             }
-            // TODO: implement
-            unimplemented!()
+
+            while self.lexer.try_consume(TokenVariant::Comma) {
+                let identifier = self.lexer.expect(TokenVariant::Identifier(""))?;
+                let identifier_owned: String = match identifier.var {
+                    TokenVariant::Identifier(s) => s.to_owned(),
+                    _ => return Err(ParseError::InternalErr),
+                };
+                let entry =
+                    Ptr::new(self.parse_single_var_decl(scope.clone(), var_type.clone(), is_const)?);
+
+                if !scope.borrow_mut().try_insert(&identifier_owned, entry) {
+                    return Err(ParseError::TokenExists(identifier.get_ident().unwrap()));
+                }
+            }
+            self.lexer.expect(TokenVariant::Semicolon)?;
+            Ok(())
         }
     }
 
@@ -433,7 +438,8 @@ impl<'a> Parser<'a> {
                 .borrow()
                 .find_definition(ident)
                 .map_or(false, |entry| entry.borrow().is_type()),
-                TokenVariant::Const=>true,
+            TokenVariant::Const => true,
+            // TokenVariant:
             _ => false,
         });
 
@@ -455,7 +461,7 @@ impl<'a> Parser<'a> {
 }
 
 struct ExprParser<'a, 'b> {
-    lexer: &'b mut Lexer<'a>,
+    lexer: &'b mut LexerWrapped<'a>,
     scope: &'b Scope,
     lexer_ended: bool,
     suggest_unary: bool,
@@ -467,7 +473,7 @@ struct ExprParser<'a, 'b> {
 
 impl<'a, 'b> ExprParser<'a, 'b> {
     pub fn new(
-        lexer: &'b mut Lexer<'a>,
+        lexer: &'b mut LexerWrapped<'a>,
         scope: &'b Scope,
         end_on: &'b HashSet<TokenVariant<'a>>,
     ) -> ExprParser<'a, 'b> {
@@ -908,6 +914,29 @@ impl Operator for ExprPart {
 
 #[cfg(test)]
 mod test {
+    use super::*;
+    use crate::c0::infra::*;
+
     #[test]
-    fn test_parser() {}
+    fn test_parser() {
+        use TokenVariant::*;
+        let src = r#"
+            int x, y;
+            int main(){
+                x = 1;
+                y = 2 + 3;
+                int z = x + y;
+                print(z);
+                return 0;
+            }
+        "#;
+
+        let ast = crate::c0::lexer::Lexer::new(src)
+            .into_iter()
+            .into_parser()
+            .parse()
+            .unwrap();
+
+        println!("{:#?}", ast);
+    }
 }
