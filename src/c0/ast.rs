@@ -3,14 +3,13 @@
     https://github.com/rust-lang/rust/blob/master/src/libsyntax/ast.rs
 */
 
+use super::infra::*;
 use indexmap::IndexMap;
 use std::cell::{Ref, RefCell, RefMut};
 use std::collections::HashMap;
 use std::iter::Iterator;
 use std::ops::{Deref, DerefMut};
 use std::rc::{Rc, Weak};
-use super::infra::*;
-
 
 // ==============
 
@@ -21,9 +20,8 @@ pub struct Program {
 #[derive(Eq, PartialEq)]
 pub struct FnDeclaration {
     pub span: Span,
-    pub ident: Identifier,
-    pub return_typ: Identifier,
-    pub params: Vec<Ptr<VarDecalaration>>,
+    // pub return_type: Identifier,
+    // pub params: Vec<Ptr<VarDecalaration>>,
     pub body: Block,
 }
 
@@ -36,19 +34,112 @@ pub struct Block {
 
 #[derive(Eq, PartialEq)]
 pub enum TokenEntry {
-    Variable {
-        is_const: bool,
-        var_type: Ptr<TokenEntry>,
-    },
-    Type {
-        is_primitive: bool,
-        occupy_bytes: usize,
-    },
-    Function {
-        returns_type: Ptr<TokenEntry>,
-        params: Vec<Ptr<TokenEntry>>,
-        decl: FnDeclaration,
-    },
+    Variable(VarScopeDecl),
+    Type(TypeScopeDecl),
+    Function(FnScopeDecl),
+}
+
+#[derive(Eq, PartialEq)]
+pub struct VarScopeDecl {
+    pub is_const: bool,
+    pub val: Option<Ptr<Expr>>,
+    pub var_type: Ptr<TokenEntry>,
+}
+
+#[derive(Eq, PartialEq)]
+pub struct TypeScopeDecl {
+    pub is_primitive: bool,
+    pub occupy_bytes: usize,
+}
+
+#[derive(Eq, PartialEq)]
+pub struct FnScopeDecl {
+    pub returns_type: Ptr<TokenEntry>,
+    pub params: Vec<Ptr<TokenEntry>>,
+    pub decl: Option<FnDeclaration>,
+}
+
+impl TokenEntry {
+    pub fn is_var(&self) -> bool {
+        match self {
+            TokenEntry::Variable(_) => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_fn(&self) -> bool {
+        match self {
+            TokenEntry::Function(_) => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_type(&self) -> bool {
+        match self {
+            TokenEntry::Type(_) => true,
+            _ => false,
+        }
+    }
+
+    pub fn find_var<'a, F: FnOnce() -> ParseError<'a>>(
+        &self,
+        get_err: F,
+    ) -> ParseResult<'a, &VarScopeDecl> {
+        match self {
+            TokenEntry::Variable(v) => Ok(&v),
+            _ => Err(get_err()),
+        }
+    }
+
+    pub fn find_fn<'a, F: FnOnce() -> ParseError<'a>>(
+        &self,
+        get_err: F,
+    ) -> ParseResult<'a, &FnScopeDecl> {
+        match self {
+            TokenEntry::Function(v) => Ok(&v),
+            _ => Err(get_err()),
+        }
+    }
+
+    pub fn find_type<'a, F: FnOnce() -> ParseError<'a>>(
+        &self,
+        get_err: F,
+    ) -> ParseResult<'a, &TypeScopeDecl> {
+        match self {
+            TokenEntry::Type(v) => Ok(&v),
+            _ => Err(get_err()),
+        }
+    }
+
+    pub fn find_var_mut<'a, F: FnOnce() -> ParseError<'a>>(
+        &mut self,
+        get_err: F,
+    ) -> ParseResult<'a, &mut VarScopeDecl> {
+        match self {
+            TokenEntry::Variable(v) => Ok(v),
+            _ => Err(get_err()),
+        }
+    }
+
+    pub fn find_fn_mut<'a, F: FnOnce() -> ParseError<'a>>(
+        &mut self,
+        get_err: F,
+    ) -> ParseResult<'a, &mut FnScopeDecl> {
+        match self {
+            TokenEntry::Function(v) => Ok(v),
+            _ => Err(get_err()),
+        }
+    }
+
+    pub fn find_type_mut<'a, F: FnOnce() -> ParseError<'a>>(
+        &mut self,
+        get_err: F,
+    ) -> ParseResult<'a, &mut TypeScopeDecl> {
+        match self {
+            TokenEntry::Type(v) => Ok(v),
+            _ => Err(get_err()),
+        }
+    }
 }
 
 pub struct Scope {
@@ -161,12 +252,6 @@ pub struct VarDecalaration {
 }
 
 #[derive(Eq, PartialEq)]
-pub struct Assignment {
-    pub ident: Identifier,
-    pub expr: Ptr<Expr>,
-}
-
-#[derive(Eq, PartialEq)]
 pub enum Expr {
     Int(IntegerLiteral),
     Str(StringLiteral),
@@ -272,6 +357,8 @@ pub enum OpVar {
     _Com,
     /// Assignment
     _Asn,
+    /// Constant assignment
+    _Csn,
     /// Dummy value
     _Dum,
 }

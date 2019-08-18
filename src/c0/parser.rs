@@ -1,5 +1,5 @@
+use super::{ast::*, infra::*, lexer::*};
 use crate::set;
-use super::{ast::*, lexer::*, infra::*};
 use itertools::Itertools;
 use lazy_static::lazy_static;
 use std::collections::*;
@@ -17,8 +17,6 @@ impl<'a> IntoParser<'a> for dyn Iterator<Item = Token<'a>> {
         Parser::new(self)
     }
 }
-
-type ParseResult<'a, T> = Result<T, ParseError<'a>>;
 
 pub trait TokenIterator<'a>: Iterator<Item = Token<'a>> {
     fn expect(&mut self, token: TokenVariant<'a>) -> ParseResult<'a, Token<'a>> {
@@ -56,6 +54,19 @@ pub trait TokenIterator<'a>: Iterator<Item = Token<'a>> {
                 true
             }
             None => false,
+        }
+    }
+
+    fn try_consume_log_span(&mut self, token: TokenVariant<'a>) -> Option<Span>
+    where
+        Self: itertools::PeekingNext,
+    {
+        match self.peeking_next(|v| variant_eq(&v.var, &token)) {
+            Some(v) => {
+                self.next();
+                Some(v.span)
+            }
+            None => None,
         }
     }
 }
@@ -107,27 +118,47 @@ impl<'a> Parser<'a> {
         Ok(Program {
             scope: scope.clone(),
         })
-        ///// TODO: implement
-        // unimplemented!()
     }
 
     fn inject_std(scope: Ptr<Scope>) {
         let mut scope = scope.borrow_mut();
         scope.try_insert(
             "int",
-            Ptr::new(TokenEntry::Type {
+            Ptr::new(TokenEntry::Type(TypeScopeDecl {
                 is_primitive: true,
                 occupy_bytes: 4,
-            }),
+            })),
         );
     }
 
     /// Parse a declaration. Could either be a function or variable declaration.
     /// After the parsing completed, the coresponding declaration entry will be
     /// inserted into the symbol table defined in `scope`.
+    ///
+    /// # Returns
+    ///
+    /// This function returns `Ok(())` when no error occurs and `Err(e)` when
+    /// encountering an error.
     fn parse_decl(&mut self, scope: Ptr<Scope>) -> ParseResult<'a, ()> {
         let is_const = self.lexer.try_consume(TokenVariant::Const);
-        let type_name = self.lexer.expect(TokenVariant::Identifier(""))?;
+        let type_name = self
+            .lexer
+            .expect(TokenVariant::Identifier(""))?
+            .get_ident()
+            .unwrap();
+
+        let var_type = scope
+            .borrow()
+            .find_definition(type_name)
+            .ok_or(ParseError::CannotFindType(type_name))
+            .and_then(|ptr_token| {
+                if ptr_token.borrow().is_type() {
+                    Ok(ptr_token)
+                } else {
+                    Err(ParseError::ExpectToBeType(type_name))
+                }
+            })?;
+
         let identifier = self.lexer.expect(TokenVariant::Identifier(""))?;
         let identifier_owned: String = match identifier.var {
             TokenVariant::Identifier(s) => s.to_owned(),
@@ -141,20 +172,16 @@ impl<'a> Parser<'a> {
                 return Err(ParseError::NoConstFns);
             }
 
-            // This thing is a function! Parse the rest stuff.
-            let entry = Ptr::new(self.parse_fn_decl_rest(scope.clone(), type_name, identifier)?);;
-
-            // Insert
-            scope
-                .borrow_mut()
-                .token_table
-                .insert(identifier_owned, entry);
+            // This thing is a function! the insersion and other stuff are done
+            // in function call route
+            self.parse_fn_decl_rest(scope.clone(), var_type, identifier_owned, identifier.span)?;
 
             Ok(())
         // return;
         } else {
+            let first_entry =
+                Ptr::new(self.parse_single_var_decl(scope.clone(), var_type, is_const)?);
             while !self.lexer.try_consume(TokenVariant::Semicolon) {
-                let entry = Ptr::new(self.parse_single_var_decl(scope.clone())?);
                 // TODO: write parser for single entries
                 // scope
                 //     .borrow_mut()
@@ -186,20 +213,38 @@ impl<'a> Parser<'a> {
     fn parse_fn_decl_rest(
         &mut self,
         scope: Ptr<Scope>,
-        return_type: Token<'a>,
-        identifier: Token<'a>,
-    ) -> ParseResult<'a, TokenEntry> {
-        let ident = identifier
-            .get_ident()
-            .map_err(|_| ParseError::InternalErr)?;
-        let new_scope = Ptr::new(Scope::new(Some(scope)));
+        returns_type: Ptr<TokenEntry>,
+        identifier: String,
+        start_span: Span,
+    ) -> ParseResult<'a, ()> {
+        let new_scope = Ptr::new(Scope::new(Some(scope.clone())));
         let params = self.parse_fn_params(new_scope.clone())?;
+        // TODO: add function itself to scope for recursive calling
+        let fn_scope_decl = Ptr::new(TokenEntry::Function(FnScopeDecl {
+            returns_type,
+            params,
+            decl: None,
+        }));
+
+        scope
+            .borrow_mut()
+            .try_insert_or_replace_same(&identifier, fn_scope_decl.clone());
+
         let fn_body = self.parse_block_no_scope(new_scope.clone())?;
-        // TODO: implement
-        unimplemented!()
+        let fn_decl = FnDeclaration {
+            span: fn_body.span + start_span,
+            body: fn_body,
+        };
+
+        fn_scope_decl
+            .borrow_mut()
+            .find_fn_mut(|| ParseError::InternalErr)?
+            .decl = Some(fn_decl);
+
+        Ok(())
     }
 
-    fn parse_fn_params(&mut self, scope: Ptr<Scope>) -> ParseResult<'a, Vec<Ptr<VarDecalaration>>> {
+    fn parse_fn_params(&mut self, scope: Ptr<Scope>) -> ParseResult<'a, Vec<Ptr<TokenEntry>>> {
         let mut params = Vec::new();
 
         while self.lexer.try_consume(TokenVariant::Comma) {
@@ -223,15 +268,16 @@ impl<'a> Parser<'a> {
                 .get_ident()
                 .map_err(|_| ParseError::InternalErr)?;
 
-            let token_entry = Ptr::new(TokenEntry::Variable { is_const, var_type });
-            let var_decl = Ptr::new(VarDecalaration {
+            let token_entry = Ptr::new(TokenEntry::Variable(VarScopeDecl {
                 is_const,
-                symbol: token_entry.clone(),
+                var_type,
                 val: None,
-            });
+            }));
 
-            scope.borrow_mut().try_insert(var_ident, token_entry);
-            params.push(var_decl.clone());
+            scope
+                .borrow_mut()
+                .try_insert(var_ident, token_entry.clone());
+            params.push(token_entry.clone());
         }
 
         self.lexer.expect(TokenVariant::RParenthesis)?;
@@ -239,9 +285,25 @@ impl<'a> Parser<'a> {
         Ok(params)
     }
 
-    fn parse_single_var_decl(&mut self, scope: Ptr<Scope>) -> ParseResult<'a, TokenEntry> {
-        // TODO: implement
-        unimplemented!()
+    fn parse_single_var_decl(
+        &mut self,
+        scope: Ptr<Scope>,
+        var_type: Ptr<TokenEntry>,
+        is_const: bool,
+    ) -> ParseResult<'a, TokenEntry> {
+        let def_span = self.lexer.try_consume_log_span(TokenVariant::Equals);
+
+        let def = if def_span.is_some() {
+            Some(Ptr::new(self.parse_expr(scope.clone(), &PARAM_END_ON)?))
+        } else {
+            None
+        };
+
+        Ok(TokenEntry::Variable(VarScopeDecl {
+            is_const,
+            var_type,
+            val: def,
+        }))
     }
 
     fn parse_block(&mut self, scope: Ptr<Scope>) -> ParseResult<'a, Block> {
@@ -250,19 +312,29 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_block_no_scope(&mut self, scope: Ptr<Scope>) -> ParseResult<'a, Block> {
-        self.lexer.expect(TokenVariant::LCurlyBrace)?;
+        let start = self.lexer.expect(TokenVariant::LCurlyBrace)?.span;
 
         let mut block_statements = Vec::new();
 
-        while !self.lexer.try_consume(TokenVariant::RCurlyBrace) {
+        // TODO: bad implementation, wait for more beautiful ones
+        let end = loop_while_check(|| {
+            let span: LoopCtrl<Span> = self
+                .lexer
+                .try_consume_log_span(TokenVariant::RCurlyBrace)
+                .into();
+            if !span.is_continue() {
+                return Ok(span);
+            }
+
             let stmt = self.parse_stmt(scope.clone())?;
             block_statements.push(stmt);
-        }
+            Ok(Continue)
+        })?;
 
         Ok(Block {
             scope: scope.clone(),
-            // decl: block_statements,
             stmt: block_statements,
+            span: start + end,
         })
     }
 
@@ -356,7 +428,20 @@ impl<'a> Parser<'a> {
 
             Okay we may need a sole "type parser" to parse through the type definitions
         */
-        unimplemented!()
+        let is_decl = self.lexer.peek().map_or(false, |token| match token.var {
+            TokenVariant::Identifier(ident) => scope
+                .borrow()
+                .find_definition(ident)
+                .map_or(false, |entry| entry.borrow().is_type()),
+            _ => false,
+        });
+
+        if is_decl {
+            self.parse_decl(scope)?;
+            Ok(Statement::Empty)
+        } else {
+            self.parse_stmt(scope)
+        }
     }
 
     fn parse_expr<'b>(
@@ -620,7 +705,7 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                     }
                     ExprPart::FnCall(func) => {
                         let len = match &*func.0.clone().borrow() {
-                            TokenEntry::Function { params, .. } => params.len(),
+                            TokenEntry::Function(FnScopeDecl { params, .. }) => params.len(),
                             _ => unreachable!(),
                         };
                         let mut params: Vec<Ptr<Expr>> =
@@ -750,7 +835,7 @@ impl Operator for OpVar {
             _Dum => -50,
             _Lpr | _Rpr => -10,
             _Com => -4,
-            _Asn => 0,
+            _Asn | _Csn => 0,
             Eq | Neq => 2,
             Gt | Lt | Gte | Lte => 3,
             Or => 4,
@@ -815,51 +900,6 @@ impl Operator for ExprPart {
             ExprPart::FnCall(..) => true,
             _ => panic!("Cannot use trait Operator on expression parts that are not operator!"),
         }
-    }
-}
-
-pub enum ParseError<'a> {
-    ExpectToken(TokenVariant<'a>),
-    UnexpectedToken(TokenVariant<'a>),
-    NoConstFns,
-    CannotFindIdent(&'a str),
-    CannotFindType(&'a str),
-    CannotFindVar(&'a str),
-    CannotFindFn(&'a str),
-    CannotCallType(&'a str),
-    UnsupportedToken(TokenVariant<'a>),
-    EarlyEof,
-    UnbalancedParenthesisExpectL,
-    UnbalancedParenthesisExpectR,
-    MissingOperand,
-    InternalErr,
-}
-
-impl<'a> ParseError<'a> {
-    pub fn get_err_code(&self) -> usize {
-        use self::ParseError::*;
-        match self {
-            ExpectToken(_) => 1,
-            NoConstFns => 2,
-            InternalErr => 1023,
-            _ => 1024,
-        }
-    }
-
-    pub fn get_err_desc(&self) -> String {
-        use self::ParseError::*;
-        match self {
-            ExpectToken(token) => format!("Expected {}", token),
-            NoConstFns => "Functions cannot be marked as constant".to_string(),
-            InternalErr => "Something went wrong inside the compiler".to_string(),
-            _ => "Unknown Error".to_string(),
-        }
-    }
-}
-
-impl<'a> Display for ParseError<'a> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "E{:4}: {}", self.get_err_code(), self.get_err_desc())
     }
 }
 

@@ -1,3 +1,4 @@
+use super::lexer::TokenVariant;
 use std::str::{Chars, FromStr};
 use std::{
     cell::{Ref, RefCell, RefMut},
@@ -6,6 +7,7 @@ use std::{
     fmt::Display,
     fmt::Formatter,
     hash::Hash,
+    ops::Try,
     rc::{Rc, Weak},
     string::String,
 };
@@ -295,6 +297,7 @@ pub trait AstNode {
     fn get_span(&self) -> Span;
 }
 
+#[inline]
 pub fn variant_eq<T>(a: &T, b: &T) -> bool {
     std::mem::discriminant(a) == std::mem::discriminant(b)
 }
@@ -322,6 +325,48 @@ impl<T> LoopCtrl<T> {
     }
 }
 
+impl<T> From<Option<T>> for LoopCtrl<T> {
+    fn from(other: Option<T>) -> LoopCtrl<T> {
+        match other {
+            Some(v) => Stop(v),
+            None => Continue,
+        }
+    }
+}
+
+impl<T> From<Result<(), T>> for LoopCtrl<T> {
+    fn from(other: Result<(), T>) -> LoopCtrl<T> {
+        match other {
+            Ok(_) => Continue,
+            Err(e) => Stop(e),
+        }
+    }
+}
+
+impl<T> Into<Result<(), T>> for LoopCtrl<T> {
+    fn into(self) -> Result<(), T> {
+        match self {
+            Continue => Ok(()),
+            Stop(x) => Err(x),
+        }
+    }
+}
+
+impl<T> Try for LoopCtrl<T> {
+    type Ok = ();
+    type Error = T;
+    fn into_result(self) -> Result<Self::Ok, Self::Error> {
+        self.into()
+    }
+    fn from_error(v: Self::Error) -> Self {
+        Stop(v)
+    }
+    fn from_ok(v: Self::Ok) -> Self {
+        Continue
+    }
+}
+
+#[inline]
 pub fn loop_while<F, T>(mut f: F) -> T
 where
     F: FnMut() -> LoopCtrl<T>,
@@ -332,6 +377,17 @@ where
     }
     // the following unwrap CANNOT panic because x is garanteed to be Some.
     x.unwrap()
+}
+
+pub fn loop_while_check<F, T, E>(mut body: F) -> Result<T, E>
+where
+    F: FnMut() -> Result<LoopCtrl<T>, E>,
+{
+    let mut x: LoopCtrl<T> = body()?;
+    while x.is_continue() {
+        x = body()?;
+    }
+    Ok(x.unwrap())
 }
 
 #[macro_export]
@@ -345,4 +401,53 @@ macro_rules! set {
             temp_set // Return the populated HashSet
         }
     };
+}
+
+pub type ParseResult<'a, T> = Result<T, ParseError<'a>>;
+
+pub enum ParseError<'a> {
+    ExpectToken(TokenVariant<'a>),
+    UnexpectedToken(TokenVariant<'a>),
+    NoConstFns,
+    CannotFindIdent(&'a str),
+    CannotFindType(&'a str),
+    CannotFindVar(&'a str),
+    CannotFindFn(&'a str),
+    ExpectToBeType(&'a str),
+    ExpectToBeVar(&'a str),
+    ExpectToBeFn(&'a str),
+    UnsupportedToken(TokenVariant<'a>),
+    EarlyEof,
+    UnbalancedParenthesisExpectL,
+    UnbalancedParenthesisExpectR,
+    MissingOperand,
+    InternalErr,
+}
+
+impl<'a> ParseError<'a> {
+    pub fn get_err_code(&self) -> usize {
+        use self::ParseError::*;
+        match self {
+            ExpectToken(_) => 1,
+            NoConstFns => 2,
+            InternalErr => 1023,
+            _ => 1024,
+        }
+    }
+
+    pub fn get_err_desc(&self) -> String {
+        use self::ParseError::*;
+        match self {
+            ExpectToken(token) => format!("Expected {}", token),
+            NoConstFns => "Functions cannot be marked as constant".to_string(),
+            InternalErr => "Something went wrong inside the compiler".to_string(),
+            _ => "Unknown Error".to_string(),
+        }
+    }
+}
+
+impl<'a> Display for ParseError<'a> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "E{:4}: {}", self.get_err_code(), self.get_err_desc())
+    }
 }
