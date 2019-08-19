@@ -128,6 +128,20 @@ impl Span {
         assert!(start <= end);
         Span { start, end }
     }
+
+    pub fn point(pos: Pos) -> Span {
+        Span::from(pos, pos)
+    }
+
+    pub fn zero() -> Span {
+        Span::from(Pos::zero(), Pos::zero())
+    }
+}
+
+impl Display for Span {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "from {} to {}", self.start, self.end)
+    }
 }
 
 impl std::ops::Add for Span {
@@ -405,19 +419,19 @@ macro_rules! set {
 
 pub type ParseResult<'a, T> = Result<T, ParseError<'a>>;
 
-pub fn parse_err<'a>(var: ParseErrVariant<'a>, pos: Pos)->ParseError<'a>{
-ParseError{var, pos}
+pub fn parse_err<'a>(var: ParseErrVariant<'a>, span: Span) -> ParseError<'a> {
+    ParseError { var, span }
 }
 
 #[derive(Debug)]
-pub struct ParseError<'a>{
+pub struct ParseError<'a> {
     var: ParseErrVariant<'a>,
-    pos: Pos
+    span: Span,
 }
 
 impl<'a> Display for ParseError<'a> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{} at {}", self.var, self.pos)
+        write!(f, "{} at {}", self.var, self.span)
     }
 }
 

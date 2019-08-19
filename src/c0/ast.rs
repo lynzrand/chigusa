@@ -13,13 +13,19 @@ use std::rc::{Rc, Weak};
 
 // ==============
 
-#[derive(Debug,Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq)]
 pub struct Program {
     pub scope: Ptr<Scope>,
     pub span: Span,
 }
 
-#[derive(Debug,Eq, PartialEq)]
+impl AstNode for Program {
+    fn get_span(&self) -> Span {
+        self.span
+    }
+}
+
+#[derive(Debug, Eq, PartialEq)]
 pub struct FnDeclaration {
     // pub return_type: Identifier,
     // pub params: Vec<Ptr<VarDecalaration>>,
@@ -27,34 +33,46 @@ pub struct FnDeclaration {
     pub span: Span,
 }
 
-#[derive(Debug,Eq, PartialEq)]
-pub struct Block {
-    pub scope: Ptr<Scope>,
-    pub span: Span,
-    pub stmt: Vec<Statement>,
+impl AstNode for FnDeclaration {
+    fn get_span(&self) -> Span {
+        self.span
+    }
 }
 
-#[derive(Debug,Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq)]
+pub struct Block {
+    pub scope: Ptr<Scope>,
+    pub stmt: Vec<Statement>,
+    pub span: Span,
+}
+
+impl AstNode for Block {
+    fn get_span(&self) -> Span {
+        self.span
+    }
+}
+
+#[derive(Debug, Eq, PartialEq)]
 pub enum TokenEntry {
     Variable(VarScopeDecl),
     Type(TypeScopeDecl),
     Function(FnScopeDecl),
 }
 
-#[derive(Debug,Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq)]
 pub struct VarScopeDecl {
     pub is_const: bool,
     pub val: Option<Ptr<Expr>>,
     pub var_type: Ptr<TokenEntry>,
 }
 
-#[derive(Debug,Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq)]
 pub struct TypeScopeDecl {
     pub is_primitive: bool,
     pub occupy_bytes: usize,
 }
 
-#[derive(Debug,Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq)]
 pub struct FnScopeDecl {
     pub returns_type: Ptr<TokenEntry>,
     pub params: Vec<Ptr<TokenEntry>>,
@@ -93,7 +111,7 @@ impl TokenEntry {
         }
     }
 
-    pub fn find_fn<'a, F: FnOnce() ->ParseError<'a>>(
+    pub fn find_fn<'a, F: FnOnce() -> ParseError<'a>>(
         &self,
         get_err: F,
     ) -> ParseResult<'a, &FnScopeDecl> {
@@ -219,46 +237,84 @@ impl PartialEq for Scope {
 
 impl Eq for Scope {}
 
-#[derive(Debug,Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq)]
 pub enum Statement {
     If(IfStatement),
     While(WhileStatement),
     Return(Expr),
     Expr(Expr),
     Block(Block),
-    Empty,
+    Empty(Span),
 }
 
-#[derive(Debug,Eq, PartialEq)]
+impl AstNode for Statement {
+    fn get_span(&self) -> Span {
+        use Statement::*;
+        match self {
+            If(i) => i.get_span(),
+            While(w) => w.get_span(),
+            Return(r) => r.get_span(),
+            Expr(e) => e.get_span(),
+            Block(b) => b.get_span(),
+            Empty(span) => *span,
+        }
+    }
+}
+
+#[derive(Debug, Eq, PartialEq)]
 pub struct ReturnStatement {
     pub return_val: Option<Ptr<TokenEntry>>,
     pub span: Span,
 }
 
-#[derive(Debug,Eq, PartialEq)]
+impl AstNode for ReturnStatement {
+    fn get_span(&self) -> Span {
+        self.span
+    }
+}
+
+#[derive(Debug, Eq, PartialEq)]
 pub struct IfStatement {
     pub check: Ptr<Expr>,
     pub if_body: Ptr<Statement>,
     pub else_body: Option<Ptr<Statement>>,
-    pub span: Span
+    pub span: Span,
 }
 
-#[derive(Debug,Eq, PartialEq)]
+impl AstNode for IfStatement {
+    fn get_span(&self) -> Span {
+        self.span
+    }
+}
+
+#[derive(Debug, Eq, PartialEq)]
 pub struct WhileStatement {
     pub check: Ptr<Expr>,
     pub body: Ptr<Statement>,
-    pub span: Span
+    pub span: Span,
 }
 
-#[derive(Debug,Eq, PartialEq)]
+impl AstNode for WhileStatement {
+    fn get_span(&self) -> Span {
+        self.span
+    }
+}
+
+#[derive(Debug, Eq, PartialEq)]
 pub struct VarDecalaration {
     pub is_const: bool,
     pub symbol: Ptr<TokenEntry>,
     pub val: Option<Ptr<Expr>>,
-    pub span: Span
+    pub span: Span,
 }
 
-#[derive(Debug,Eq, PartialEq)]
+impl AstNode for VarDecalaration {
+    fn get_span(&self) -> Span {
+        self.span
+    }
+}
+
+#[derive(Debug, Eq, PartialEq)]
 pub enum Expr {
     Int(IntegerLiteral),
     Str(StringLiteral),
@@ -266,47 +322,93 @@ pub enum Expr {
     UnaOp(UnaryOp),
     Var(Identifier),
     FnCall(FuncCall),
-    Empty,
+    Empty(Span),
 }
 
-#[derive(Debug,Eq, PartialEq)]
-pub struct Identifier(pub Ptr<TokenEntry>,
-    pub  Span
-);
+impl AstNode for Expr {
+    fn get_span(&self) -> Span {
+        use Expr::*;
+        match self {
+            Int(i) => i.get_span(),
+            Str(s) => s.get_span(),
+            BinOp(b) => b.get_span(),
+            UnaOp(u) => u.get_span(),
+            Var(i) => i.get_span(),
+            FnCall(f) => f.get_span(),
+            Empty(span) => *span,
+        }
+    }
+}
 
-#[derive(Debug,Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq)]
+pub struct Identifier(pub Ptr<TokenEntry>, pub Span);
+
+impl AstNode for Identifier {
+    fn get_span(&self) -> Span {
+        self.1
+    }
+}
+#[derive(Debug, Eq, PartialEq)]
 pub struct FuncCall {
     pub fn_name: Identifier,
     pub params: Vec<Ptr<Expr>>,
-    pub span: Span
+    pub span: Span,
 }
 
+impl AstNode for FuncCall {
+    fn get_span(&self) -> Span {
+        self.span
+    }
+}
 /// An integer literal
-#[derive(Debug,Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq)]
 pub struct IntegerLiteral(pub i64, pub Span);
 
+impl AstNode for IntegerLiteral {
+    fn get_span(&self) -> Span {
+        self.1
+    }
+}
+
 /// A String Literal
-#[derive(Debug,Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq)]
 pub struct StringLiteral(pub String, pub Span);
 
+impl AstNode for StringLiteral {
+    fn get_span(&self) -> Span {
+        self.1
+    }
+}
 /// A binary operator
-#[derive(Debug,Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq)]
 pub struct BinaryOp {
     pub var: OpVar,
     pub lhs: Ptr<Expr>,
     pub rhs: Ptr<Expr>,
-    pub span: Span
+    pub span: Span,
+}
+
+impl AstNode for BinaryOp {
+    fn get_span(&self) -> Span {
+        self.span
+    }
 }
 
 /// An unary operator
-#[derive(Debug,Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq)]
 pub struct UnaryOp {
     pub var: OpVar,
     pub val: Ptr<Expr>,
-    pub span: Span
+    pub span: Span,
 }
 
-#[derive(Debug,Clone, Copy, Eq, PartialEq)]
+impl AstNode for UnaryOp {
+    fn get_span(&self) -> Span {
+        self.span
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum OpVar {
     // Binary
     /// `+`, Addition
