@@ -5,7 +5,7 @@ use std::iter::{Iterator, Peekable};
 use std::str::{Chars, FromStr};
 use std::{cell::RefCell, fmt, fmt::Display, fmt::Formatter, hash::Hash, rc::Rc, string::String};
 
-#[derive(Debug, Eq, PartialEq, Hash)]
+#[derive(Debug, Eq, PartialEq, Hash, Clone)]
 /// This enum defines the variants of token in C0 language. Variants are pretty
 /// self-explanatory.
 pub enum TokenVariant<'a> {
@@ -89,7 +89,7 @@ impl<'a> Display for TokenVariant<'a> {
 }
 
 /// A single token
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Token<'a> {
     /// Its variant
     pub var: TokenVariant<'a>,

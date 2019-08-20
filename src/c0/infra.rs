@@ -308,7 +308,7 @@ impl<T> IntoPtr<T> for Rc<RefCell<T>> {
 }
 
 pub trait AstNode {
-    fn get_span(&self) -> Span;
+    fn span(&self) -> Span;
 }
 
 #[inline]
@@ -423,6 +423,16 @@ pub fn parse_err<'a>(var: ParseErrVariant<'a>, span: Span) -> ParseError<'a> {
     ParseError { var, span }
 }
 
+pub fn parse_err_z<'a>(var: ParseErrVariant<'a>) -> ParseError<'a> {
+    ParseError {
+        var,
+        span: Span::zero(),
+    }
+}
+
+/// An error present in parsing process.
+///
+/// > When span is not avaliable, use Span::zero().
 #[derive(Debug)]
 pub struct ParseError<'a> {
     var: ParseErrVariant<'a>,

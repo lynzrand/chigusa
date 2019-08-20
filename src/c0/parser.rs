@@ -20,16 +20,24 @@ impl<'a> IntoParser<'a> for LexerIterator<'a> {
 
 pub trait TokenIterator<'a>: Iterator<Item = Token<'a>> + itertools::PeekingNext {
     fn expect(&mut self, token: TokenVariant<'a>) -> ParseResult<'a, Token<'a>> {
-        self.next()
-            .filter(|t| variant_eq(&t.var, &token))
-            .ok_or(ParseErrVariant::ExpectToken(token))
+        // * separated variables because lifetime concerns.
+        match self.next() {
+            Some(t) => {
+                if variant_eq(&t.var, &token) {
+                    Ok(t)
+                } else {
+                    Err(parse_err(ParseErrVariant::ExpectToken(token), t.span))
+                }
+            }
+            None => Err(parse_err(ParseErrVariant::ExpectToken(token), Span::zero())),
+        }
     }
 
     fn expect_map_or<T>(
         &mut self,
         token: TokenVariant<'a>,
         map: impl FnOnce(Token<'a>) -> T,
-        f: impl FnOnce(Token<'a>) -> Result<T, ParseErrVariant<'a>>,
+        f: impl FnOnce(Token<'a>) -> Result<T, ParseError<'a>>,
     ) -> ParseResult<'a, T> {
         let next = self.next();
         match next {
@@ -40,7 +48,7 @@ pub trait TokenIterator<'a>: Iterator<Item = Token<'a>> + itertools::PeekingNext
                     f(v)
                 }
             }
-            None => Err(ParseErrVariant::ExpectToken(token)),
+            None => Err(parse_err(ParseErrVariant::ExpectToken(token), Span::zero())),
         }
     }
 
@@ -104,13 +112,14 @@ impl<'a> Parser<'a> {
     fn parse_program(&mut self) -> ParseResult<'a, Program> {
         let scope = Ptr::new(Scope::new(None));
         Self::inject_std(scope.clone());
-        // let mut fns = vec![];
-        // let mut vars = vec![];
+        let mut span = Span::zero();
         while self.lexer.peek().is_some() {
-            self.parse_decl(scope.clone())?
+            let stmt = self.parse_stmt(scope.clone())?;
+            span = span + stmt.span();
         }
         Ok(Program {
             scope: scope.clone(),
+            span,
         })
     }
 
@@ -133,68 +142,96 @@ impl<'a> Parser<'a> {
     ///
     /// This function returns `Ok(())` when no error occurs and `Err(e)` when
     /// encountering an error.
-    fn parse_decl(&mut self, scope: Ptr<Scope>) -> ParseResult<'a, ()> {
+    fn parse_decl(&mut self, scope: Ptr<Scope>) -> ParseResult<'a, Span> {
         let is_const = self.lexer.try_consume(TokenVariant::Const);
-        let type_name = self
-            .lexer
-            .expect(TokenVariant::Identifier(""))?
-            .get_ident()
-            .unwrap();
+        let type_decl = self.lexer.expect(TokenVariant::Identifier(""))?;
+        let type_name = type_decl.get_ident().unwrap();
 
         let var_type = scope
             .borrow()
             .find_definition(type_name)
-            .ok_or(ParseErrVariant::CannotFindType(type_name))
+            .ok_or_else(|| parse_err(ParseErrVariant::CannotFindType(type_name), type_decl.span))
             .and_then(|ptr_token| {
                 if ptr_token.borrow().is_type() {
                     Ok(ptr_token)
                 } else {
-                    Err(ParseErrVariant::ExpectToBeType(type_name))
+                    Err(parse_err(
+                        ParseErrVariant::ExpectToBeType(type_name),
+                        type_decl.span,
+                    ))
                 }
             })?;
 
         let identifier = self.lexer.expect(TokenVariant::Identifier(""))?;
         let identifier_owned: String = match identifier.var {
             TokenVariant::Identifier(s) => s.to_owned(),
-            _ => return Err(ParseErrVariant::InternalErr),
+            _ => return Err(parse_err_z(ParseErrVariant::InternalErr)),
         };
-        let is_fn = self.lexer.try_consume(TokenVariant::LParenthesis);
+        let is_fn = self.lexer.peek().map_or_else(
+            || Err(parse_err_z(ParseErrVariant::EarlyEof)),
+            |token| Ok(variant_eq(&token.var, &TokenVariant::LParenthesis)),
+        )?;
 
         if is_fn {
             // Functions cannot be const
             if is_const {
-                return Err(ParseErrVariant::NoConstFns);
+                return Err(parse_err(ParseErrVariant::NoConstFns, identifier.span));
             }
 
             // This thing is a function! the insersion and other stuff are done
             // in function call route
-            self.parse_fn_decl_rest(scope.clone(), var_type, identifier_owned, identifier.span)?;
+            let span = self.parse_fn_decl_rest(
+                scope.clone(),
+                var_type,
+                identifier_owned,
+                identifier.span,
+            )? + type_decl.span;
 
-            Ok(())
+            Ok(span)
         // return;
         } else {
+            let mut span = type_decl.span;
+
             let first_entry =
                 Ptr::new(self.parse_single_var_decl(scope.clone(), var_type.clone(), is_const)?);
 
-            if !scope.borrow_mut().try_insert(&identifier_owned, first_entry) {
-                return Err(ParseErrVariant::TokenExists(&identifier.get_ident().unwrap()));
+            if !scope
+                .borrow_mut()
+                .try_insert(&identifier_owned, first_entry)
+            {
+                return Err(parse_err(
+                    ParseErrVariant::TokenExists(&identifier.get_ident().unwrap()),
+                    identifier.span,
+                ));
             }
 
             while self.lexer.try_consume(TokenVariant::Comma) {
                 let identifier = self.lexer.expect(TokenVariant::Identifier(""))?;
+
                 let identifier_owned: String = match identifier.var {
                     TokenVariant::Identifier(s) => s.to_owned(),
-                    _ => return Err(ParseErrVariant::InternalErr),
+                    _ => return Err(parse_err_z(ParseErrVariant::InternalErr)),
                 };
-                let entry =
-                    Ptr::new(self.parse_single_var_decl(scope.clone(), var_type.clone(), is_const)?);
+
+                let entry = Ptr::new(self.parse_single_var_decl(
+                    scope.clone(),
+                    var_type.clone(),
+                    is_const,
+                )?);
 
                 if !scope.borrow_mut().try_insert(&identifier_owned, entry) {
-                    return Err(ParseErrVariant::TokenExists(identifier.get_ident().unwrap()));
+                    return Err(parse_err(
+                        ParseErrVariant::TokenExists(identifier.get_ident().unwrap()),
+                        identifier.span,
+                    ));
                 }
+
+                span = span + identifier.span;
             }
+
             self.lexer.expect(TokenVariant::Semicolon)?;
-            Ok(())
+
+            Ok(span)
         }
     }
 
@@ -221,10 +258,12 @@ impl<'a> Parser<'a> {
         returns_type: Ptr<TokenEntry>,
         identifier: String,
         start_span: Span,
-    ) -> ParseResult<'a, ()> {
+    ) -> ParseResult<'a, Span> {
         let new_scope = Ptr::new(Scope::new(Some(scope.clone())));
-        let params = self.parse_fn_params(new_scope.clone())?;
-        // TODO: add function itself to scope for recursive calling
+        let (params_span, params) = self.parse_fn_params(new_scope.clone())?;
+
+        // // TODO: add function itself to scope for recursive calling
+
         let fn_scope_decl = Ptr::new(TokenEntry::Function(FnScopeDecl {
             returns_type,
             params,
@@ -236,6 +275,8 @@ impl<'a> Parser<'a> {
             .try_insert_or_replace_same(&identifier, fn_scope_decl.clone());
 
         let fn_body = self.parse_block_no_scope(new_scope.clone())?;
+        let body_span = fn_body.span();
+
         let fn_decl = FnDeclaration {
             span: fn_body.span + start_span,
             body: fn_body,
@@ -243,35 +284,47 @@ impl<'a> Parser<'a> {
 
         fn_scope_decl
             .borrow_mut()
-            .find_fn_mut(|| ParseErrVariant::InternalErr)?
+            .find_fn_mut(|| parse_err_z(ParseErrVariant::InternalErr))?
             .decl = Some(fn_decl);
 
-        Ok(())
+        Ok(body_span + start_span)
     }
 
-    fn parse_fn_params(&mut self, scope: Ptr<Scope>) -> ParseResult<'a, Vec<Ptr<TokenEntry>>> {
+    fn parse_fn_params(
+        &mut self,
+        scope: Ptr<Scope>,
+    ) -> ParseResult<'a, (Span, Vec<Ptr<TokenEntry>>)> {
         let mut params = Vec::new();
+        let mut span = self
+            .lexer
+            .try_consume_log_span(TokenVariant::LParenthesis)
+            .unwrap();
 
         while self.lexer.try_consume(TokenVariant::Comma) {
             // parse type definition
             let is_const = self.lexer.try_consume(TokenVariant::Const);
 
-            let var_type_ident = self
-                .lexer
-                .expect(TokenVariant::Identifier(""))?
+            let var_type_ident = self.lexer.expect(TokenVariant::Identifier(""))?;
+
+            let var_type_decl = var_type_ident
                 .get_ident()
-                .map_err(|_| ParseErrVariant::InternalErr)?;
+                .map_err(|_| parse_err(ParseErrVariant::InternalErr, var_type_ident.span))?;
 
             let var_type = scope
                 .borrow()
-                .find_definition(var_type_ident)
-                .ok_or(ParseErrVariant::CannotFindType(var_type_ident))?;
+                .find_definition(var_type_decl)
+                .ok_or_else(|| {
+                    parse_err(
+                        ParseErrVariant::CannotFindType(var_type_decl),
+                        var_type_ident.span,
+                    )
+                })?;
 
-            let var_ident = self
-                .lexer
-                .expect(TokenVariant::Identifier(""))?
+            let var_ident_token = self.lexer.expect(TokenVariant::Identifier(""))?;
+            let var_ident = var_ident_token
                 .get_ident()
-                .map_err(|_| ParseErrVariant::InternalErr)?;
+                .map_err(|_| parse_err(ParseErrVariant::InternalErr, var_type_ident.span))?;
+            span = span + var_ident_token.span;
 
             let token_entry = Ptr::new(TokenEntry::Variable(VarScopeDecl {
                 is_const,
@@ -287,7 +340,7 @@ impl<'a> Parser<'a> {
 
         self.lexer.expect(TokenVariant::RParenthesis)?;
 
-        Ok(params)
+        Ok((span, params))
     }
 
     fn parse_single_var_decl(
@@ -344,11 +397,19 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_stmt(&mut self, scope: Ptr<Scope>) -> ParseResult<'a, Statement> {
-        match self.lexer.peek().ok_or(ParseErrVariant::EarlyEof)?.var {
+        let token = self
+            .lexer
+            .peek()
+            .ok_or(parse_err_z(ParseErrVariant::EarlyEof))
+            .and_then(|t| match t.var {
+                TokenVariant::EndOfFile => Err(parse_err(ParseErrVariant::EarlyEof, t.span)),
+                _ => Ok(t),
+            })?;
+        match token.var {
             TokenVariant::If => Ok(Statement::If(self.parse_if(scope)?)),
             TokenVariant::While => Ok(Statement::While(self.parse_while(scope)?)),
             TokenVariant::LCurlyBrace => Ok(Statement::Block(self.parse_block(scope)?)),
-            TokenVariant::Semicolon => Ok(Statement::Empty),
+            TokenVariant::Semicolon => Ok(Statement::Empty(token.span)),
             TokenVariant::Return => Ok(Statement::Return(self.parse_return(scope)?)),
             _ => Ok(Statement::Expr({
                 let expr = self.parse_expr(scope, &STMT_END_ON)?;
@@ -359,7 +420,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_if(&mut self, scope: Ptr<Scope>) -> ParseResult<'a, IfStatement> {
-        self.lexer.expect(TokenVariant::If)?;
+        let start = self.lexer.expect(TokenVariant::If)?.span;
         self.lexer.expect(TokenVariant::LParenthesis)?;
 
         let if_expr = Ptr::new(self.parse_expr(scope.clone(), &PARAM_END_ON)?);
@@ -367,9 +428,12 @@ impl<'a> Parser<'a> {
         self.lexer.expect(TokenVariant::RParenthesis)?;
 
         let if_body = Ptr::new(self.parse_stmt(scope.clone())?);
+        let mut span = if_body.borrow().span() + start;
 
         let else_body = if self.lexer.try_consume(TokenVariant::Else) {
-            Some(Ptr::new(self.parse_stmt(scope.clone())?))
+            let else_body = Ptr::new(self.parse_stmt(scope.clone())?);
+            span = else_body.borrow().span() + span;
+            Some(else_body)
         } else {
             None
         };
@@ -378,11 +442,12 @@ impl<'a> Parser<'a> {
             check: if_expr,
             if_body,
             else_body,
+            span,
         })
     }
 
     fn parse_while(&mut self, scope: Ptr<Scope>) -> ParseResult<'a, WhileStatement> {
-        self.lexer.expect(TokenVariant::While)?;
+        let start = self.lexer.expect(TokenVariant::While)?.span;
         self.lexer.expect(TokenVariant::LParenthesis)?;
 
         let while_expr = Ptr::new(self.parse_expr(scope.clone(), &PARAM_END_ON)?);
@@ -390,17 +455,32 @@ impl<'a> Parser<'a> {
         self.lexer.expect(TokenVariant::RParenthesis)?;
 
         let while_body = Ptr::new(self.parse_stmt(scope.clone())?);
+        let span = while_body.borrow().span() + start;
 
         Ok(WhileStatement {
             check: while_expr,
             body: while_body,
+            span,
         })
     }
 
-    fn parse_return(&mut self, scope: Ptr<Scope>) -> ParseResult<'a, Expr> {
-        let expr = self.parse_expr(scope, &STMT_END_ON)?;
-        self.lexer.expect(TokenVariant::Semicolon)?;
-        Ok(expr)
+    fn parse_return(&mut self, scope: Ptr<Scope>) -> ParseResult<'a, ReturnStatement> {
+        let start = self.lexer.expect(TokenVariant::Return)?.span;
+        let has_expr = self.lexer.try_consume_log_span(TokenVariant::Semicolon);
+
+        if has_expr.is_some() {
+            let expr = self.parse_expr(scope, &STMT_END_ON)?;
+            let span = self.lexer.expect(TokenVariant::Semicolon)?.span + start;
+            Ok(ReturnStatement {
+                return_val: Some(expr),
+                span,
+            })
+        } else {
+            Ok(ReturnStatement {
+                return_val: None,
+                span: start + has_expr.unwrap(),
+            })
+        }
     }
 
     fn parse_decl_or_stmt(&mut self, scope: Ptr<Scope>) -> ParseResult<'a, Statement> {
@@ -444,8 +524,8 @@ impl<'a> Parser<'a> {
         });
 
         if is_decl {
-            self.parse_decl(scope)?;
-            Ok(Statement::Empty)
+            let span = self.parse_decl(scope)?;
+            Ok(Statement::Empty(span))
         } else {
             self.parse_stmt(scope)
         }
@@ -466,7 +546,7 @@ struct ExprParser<'a, 'b> {
     lexer_ended: bool,
     suggest_unary: bool,
     err_fuse: bool,
-    err: Option<ParseErrVariant<'a>>,
+    err: Option<ParseError<'a>>,
     op_stack: Vec<ExprPart>,
     end_on: &'b HashSet<TokenVariant<'a>>,
 }
@@ -489,7 +569,7 @@ impl<'a, 'b> ExprParser<'a, 'b> {
         }
     }
 
-    fn meltdown<T>(&mut self, err: ParseErrVariant<'a>) -> LoopCtrl<Option<T>> {
+    fn meltdown<T>(&mut self, err: ParseError<'a>) -> LoopCtrl<Option<T>> {
         self.err = Some(err);
         self.err_fuse = true;
         Stop(None)
@@ -593,6 +673,7 @@ impl<'a, 'b> ExprParser<'a, 'b> {
 
     fn parse_op(&mut self) -> LoopCtrl<Option<ExprPart>> {
         let token = self.lexer.peek().unwrap();
+        let token_span = token.span;
         match token.var.into_op(self.suggest_unary) {
             Some(op) => {
                 // there is a corresponding operator here
@@ -614,14 +695,17 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                             self.suggest_unary = false;
                             Continue
                         } else {
-                            self.meltdown(ParseErrVariant::UnbalancedParenthesisExpectL)
+                            self.meltdown(parse_err(
+                                ParseErrVariant::UnbalancedParenthesisExpectL,
+                                token_span,
+                            ))
                         }
                     } else if variant_eq(&op, &OpVar::_Com) {
                         // pass
                         self.suggest_unary = true;
                         Continue
                     } else {
-                        self.op_stack.push(ExprPart::Op(op));
+                        self.op_stack.push(ExprPart::Op(op, token_span));
                         self.suggest_unary = true;
                         Continue
                     }
@@ -630,53 +714,56 @@ impl<'a, 'b> ExprParser<'a, 'b> {
             None => {
                 // no corresponding operator, error!
                 let t: TokenVariant = self.lexer.next().unwrap().var;
-                self.meltdown(ParseErrVariant::UnexpectedToken(t))
+                self.meltdown(parse_err(ParseErrVariant::UnexpectedToken(t), token_span))
             }
         }
     }
 
     fn parse_val(&mut self) -> LoopCtrl<Option<ExprPart>> {
-        let t: TokenVariant = self.lexer.next().unwrap().var;
+        let token = self.lexer.next().unwrap();
+        let t = token.var;
         match t {
             TokenVariant::IntegerLiteral(i) => {
                 self.suggest_unary = false;
-                Stop(Some(ExprPart::Int(IntegerLiteral(i))))
+                Stop(Some(ExprPart::Int(IntegerLiteral(i, token.span))))
             }
             TokenVariant::StringLiteral(s) => {
                 self.suggest_unary = false;
-                Stop(Some(ExprPart::Str(StringLiteral(s))))
+                Stop(Some(ExprPart::Str(StringLiteral(s, token.span))))
             }
-            TokenVariant::Identifier(ident) => self.parse_ident(ident),
-            var @ _ => self.meltdown(ParseErrVariant::UnexpectedToken(var)),
+            TokenVariant::Identifier(i) => self.parse_ident(i, token.span),
+            var @ _ => self.meltdown(parse_err(ParseErrVariant::UnexpectedToken(var), token.span)),
         }
     }
 
-    fn parse_ident(&mut self, ident: &'a str) -> LoopCtrl<Option<ExprPart>> {
+    fn parse_ident(&mut self, ident: &'a str, span: Span) -> LoopCtrl<Option<ExprPart>> {
         match self.scope.find_definition(ident) {
-            None => self.meltdown(ParseErrVariant::CannotFindIdent(ident)),
+            None => self.meltdown(parse_err(ParseErrVariant::CannotFindIdent(ident), span)),
             Some(def_ptr) => {
-                let is_fn = self.lexer.try_consume(TokenVariant::LParenthesis);
+                let is_fn_lparen_span = self.lexer.try_consume_log_span(TokenVariant::LParenthesis);
+                let is_fn = is_fn_lparen_span.is_some();
                 let def_ptr_clone = def_ptr.clone();
                 let def = def_ptr_clone.borrow();
                 if is_fn {
                     match *def {
                         TokenEntry::Function { .. } => {
-                            self.op_stack.push(ExprPart::Op(OpVar::_Lpr));
                             self.op_stack
-                                .push(ExprPart::FnCall(Identifier(def_ptr.clone())));
+                                .push(ExprPart::Op(OpVar::_Lpr, is_fn_lparen_span.unwrap()));
+                            self.op_stack
+                                .push(ExprPart::FnCall(Identifier(def_ptr.clone(), span)));
                             self.suggest_unary = true;
                             Continue
                         }
-                        _ => self.meltdown(ParseErrVariant::CannotFindFn(ident)),
+                        _ => self.meltdown(parse_err(ParseErrVariant::CannotFindFn(ident), span)),
                     }
                 } else {
                     // is variable
                     match *def {
                         TokenEntry::Variable { .. } => {
                             self.suggest_unary = false;
-                            Stop(Some(ExprPart::Var(Identifier(def_ptr.clone()))))
+                            Stop(Some(ExprPart::Var(Identifier(def_ptr.clone(), span))))
                         }
-                        _ => self.meltdown(ParseErrVariant::CannotFindVar(ident)),
+                        _ => self.meltdown(parse_err(ParseErrVariant::CannotFindVar(ident), span)),
                     }
                 }
             }
@@ -691,22 +778,36 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                     ExprPart::Int(i) => expr_stack.push(Expr::Int(i)),
                     ExprPart::Str(s) => expr_stack.push(Expr::Str(s)),
                     ExprPart::Var(v) => expr_stack.push(Expr::Var(v)),
-                    ExprPart::Op(op) => {
+                    ExprPart::Op(op, span) => {
                         if op.is_unary() {
                             // unary op
-                            let operand = expr_stack.pop().ok_or(ParseErrVariant::MissingOperand)?;
+                            let operand = expr_stack
+                                .pop()
+                                .ok_or(parse_err(ParseErrVariant::MissingOperand, span))?;
+                            let op_span = operand.span();
+
                             expr_stack.push(Expr::UnaOp(UnaryOp {
                                 var: op,
                                 val: Ptr::new(operand),
+                                span: op_span + span,
                             }));
                         } else {
                             // binary op
-                            let r_operand = expr_stack.pop().ok_or(ParseErrVariant::MissingOperand)?;
-                            let l_operand = expr_stack.pop().ok_or(ParseErrVariant::MissingOperand)?;
+                            let r_operand = expr_stack
+                                .pop()
+                                .ok_or(parse_err(ParseErrVariant::MissingOperand, span))?;
+                            let r_span = r_operand.span();
+
+                            let l_operand = expr_stack
+                                .pop()
+                                .ok_or(parse_err(ParseErrVariant::MissingOperand, span))?;
+                            let l_span = l_operand.span();
+
                             expr_stack.push(Expr::BinOp(BinaryOp {
                                 var: op,
                                 lhs: Ptr::new(l_operand),
                                 rhs: Ptr::new(r_operand),
+                                span: span + l_span + r_span,
                             }));
                         }
                     }
@@ -715,10 +816,20 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                             TokenEntry::Function(FnScopeDecl { params, .. }) => params.len(),
                             _ => unreachable!(),
                         };
+                        let mut span = func.span();
                         let mut params: Vec<Ptr<Expr>> =
                             (0..len).try_fold(Vec::new(), |mut vec: Vec<Ptr<Expr>>, _num| {
                                 vec.push(Ptr::new(
-                                    expr_stack.pop().ok_or(ParseErrVariant::MissingOperand)?,
+                                    expr_stack
+                                        .pop()
+                                        .map(|v| {
+                                            span = span + v.span();
+                                            v
+                                        })
+                                        .ok_or(parse_err(
+                                            ParseErrVariant::MissingOperand,
+                                            func.1,
+                                        ))?,
                                 ));
                                 Ok(vec)
                             })?;
@@ -726,6 +837,7 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                         expr_stack.push(Expr::FnCall(FuncCall {
                             fn_name: func,
                             params,
+                            span,
                         }));
                     }
                 }
@@ -738,11 +850,11 @@ impl<'a, 'b> ExprParser<'a, 'b> {
             } else {
                 let len = vector.len();
                 if len > 2 {
-                    Err(parse_err(ParseErrVariant::InternalErr, ))
+                    Err(parse_err_z(ParseErrVariant::InternalErr))
                 } else if len == 1 {
                     Ok(vector.pop().unwrap())
                 } else {
-                    Err(ParseErrVariant::InternalErr)
+                    Err(parse_err_z(ParseErrVariant::InternalErr))
                 }
             }
         })
@@ -871,13 +983,13 @@ enum ExprPart {
     Str(StringLiteral),
     FnCall(Identifier),
     Var(Identifier),
-    Op(OpVar),
+    Op(OpVar, Span),
 }
 
 impl ExprPart {
     pub fn into_op(&self) -> Option<OpVar> {
         match self {
-            ExprPart::Op(op) => Some(*op),
+            ExprPart::Op(op, ..) => Some(*op),
             _ => None,
         }
     }
@@ -895,7 +1007,7 @@ impl OptionalOperator for ExprPart {
 impl Operator for ExprPart {
     fn priority(&self) -> isize {
         match self {
-            ExprPart::Op(op) => op.priority(),
+            ExprPart::Op(op, ..) => op.priority(),
             ExprPart::FnCall(..) => -5,
             _ => panic!("Cannot use trait Operator on expression parts that are not operator!"),
         }
@@ -903,7 +1015,7 @@ impl Operator for ExprPart {
 
     fn is_right_associative(&self) -> bool {
         match self {
-            ExprPart::Op(op) => op.is_right_associative(),
+            ExprPart::Op(op, ..) => op.is_right_associative(),
             ExprPart::FnCall(..) => true,
             _ => panic!("Cannot use trait Operator on expression parts that are not operator!"),
         }

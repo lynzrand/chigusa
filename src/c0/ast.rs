@@ -20,7 +20,7 @@ pub struct Program {
 }
 
 impl AstNode for Program {
-    fn get_span(&self) -> Span {
+    fn span(&self) -> Span {
         self.span
     }
 }
@@ -34,7 +34,7 @@ pub struct FnDeclaration {
 }
 
 impl AstNode for FnDeclaration {
-    fn get_span(&self) -> Span {
+    fn span(&self) -> Span {
         self.span
     }
 }
@@ -47,7 +47,7 @@ pub struct Block {
 }
 
 impl AstNode for Block {
-    fn get_span(&self) -> Span {
+    fn span(&self) -> Span {
         self.span
     }
 }
@@ -241,21 +241,21 @@ impl Eq for Scope {}
 pub enum Statement {
     If(IfStatement),
     While(WhileStatement),
-    Return(Expr),
+    Return(ReturnStatement),
     Expr(Expr),
     Block(Block),
     Empty(Span),
 }
 
 impl AstNode for Statement {
-    fn get_span(&self) -> Span {
+    fn span(&self) -> Span {
         use Statement::*;
         match self {
-            If(i) => i.get_span(),
-            While(w) => w.get_span(),
-            Return(r) => r.get_span(),
-            Expr(e) => e.get_span(),
-            Block(b) => b.get_span(),
+            If(i) => i.span(),
+            While(w) => w.span(),
+            Return(r) => r.span(),
+            Expr(e) => e.span(),
+            Block(b) => b.span(),
             Empty(span) => *span,
         }
     }
@@ -263,12 +263,12 @@ impl AstNode for Statement {
 
 #[derive(Debug, Eq, PartialEq)]
 pub struct ReturnStatement {
-    pub return_val: Option<Ptr<TokenEntry>>,
+    pub return_val: Option<Expr>,
     pub span: Span,
 }
 
 impl AstNode for ReturnStatement {
-    fn get_span(&self) -> Span {
+    fn span(&self) -> Span {
         self.span
     }
 }
@@ -282,7 +282,7 @@ pub struct IfStatement {
 }
 
 impl AstNode for IfStatement {
-    fn get_span(&self) -> Span {
+    fn span(&self) -> Span {
         self.span
     }
 }
@@ -295,7 +295,7 @@ pub struct WhileStatement {
 }
 
 impl AstNode for WhileStatement {
-    fn get_span(&self) -> Span {
+    fn span(&self) -> Span {
         self.span
     }
 }
@@ -309,7 +309,7 @@ pub struct VarDecalaration {
 }
 
 impl AstNode for VarDecalaration {
-    fn get_span(&self) -> Span {
+    fn span(&self) -> Span {
         self.span
     }
 }
@@ -326,15 +326,15 @@ pub enum Expr {
 }
 
 impl AstNode for Expr {
-    fn get_span(&self) -> Span {
+    fn span(&self) -> Span {
         use Expr::*;
         match self {
-            Int(i) => i.get_span(),
-            Str(s) => s.get_span(),
-            BinOp(b) => b.get_span(),
-            UnaOp(u) => u.get_span(),
-            Var(i) => i.get_span(),
-            FnCall(f) => f.get_span(),
+            Int(i) => i.span(),
+            Str(s) => s.span(),
+            BinOp(b) => b.span(),
+            UnaOp(u) => u.span(),
+            Var(i) => i.span(),
+            FnCall(f) => f.span(),
             Empty(span) => *span,
         }
     }
@@ -344,7 +344,7 @@ impl AstNode for Expr {
 pub struct Identifier(pub Ptr<TokenEntry>, pub Span);
 
 impl AstNode for Identifier {
-    fn get_span(&self) -> Span {
+    fn span(&self) -> Span {
         self.1
     }
 }
@@ -356,7 +356,7 @@ pub struct FuncCall {
 }
 
 impl AstNode for FuncCall {
-    fn get_span(&self) -> Span {
+    fn span(&self) -> Span {
         self.span
     }
 }
@@ -365,7 +365,7 @@ impl AstNode for FuncCall {
 pub struct IntegerLiteral(pub i64, pub Span);
 
 impl AstNode for IntegerLiteral {
-    fn get_span(&self) -> Span {
+    fn span(&self) -> Span {
         self.1
     }
 }
@@ -375,7 +375,7 @@ impl AstNode for IntegerLiteral {
 pub struct StringLiteral(pub String, pub Span);
 
 impl AstNode for StringLiteral {
-    fn get_span(&self) -> Span {
+    fn span(&self) -> Span {
         self.1
     }
 }
@@ -389,7 +389,7 @@ pub struct BinaryOp {
 }
 
 impl AstNode for BinaryOp {
-    fn get_span(&self) -> Span {
+    fn span(&self) -> Span {
         self.span
     }
 }
@@ -403,7 +403,7 @@ pub struct UnaryOp {
 }
 
 impl AstNode for UnaryOp {
-    fn get_span(&self) -> Span {
+    fn span(&self) -> Span {
         self.span
     }
 }
