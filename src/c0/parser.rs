@@ -54,20 +54,14 @@ pub trait TokenIterator<'a>: Iterator<Item = Token<'a>> + itertools::PeekingNext
 
     fn try_consume(&mut self, token: TokenVariant<'a>) -> bool {
         match self.peeking_next(|v| variant_eq(&v.var, &token)) {
-            Some(_) => {
-                self.next();
-                true
-            }
+            Some(_) => true,
             None => false,
         }
     }
 
     fn try_consume_log_span(&mut self, token: TokenVariant<'a>) -> Option<Span> {
         match self.peeking_next(|v| variant_eq(&v.var, &token)) {
-            Some(v) => {
-                self.next();
-                Some(v.span)
-            }
+            Some(v) => Some(v.span),
             None => None,
         }
     }
@@ -114,7 +108,7 @@ impl<'a> Parser<'a> {
         Self::inject_std(scope.clone());
         let mut span = Span::zero();
         while self.lexer.peek().is_some() {
-            let stmt = self.parse_stmt(scope.clone())?;
+            let stmt = self.parse_decl_or_stmt(scope.clone())?;
             span = span + stmt.span();
         }
         Ok(Program {
@@ -125,11 +119,35 @@ impl<'a> Parser<'a> {
 
     fn inject_std(scope: Ptr<Scope>) {
         let mut scope = scope.borrow_mut();
+
+        let int_type = Ptr::new(TokenEntry::Type(TypeScopeDecl {
+            is_primitive: true,
+            occupy_bytes: 4,
+        }));
+
+        scope.try_insert("int", int_type.clone());
+
+        let void_type = Ptr::new(TokenEntry::Type(TypeScopeDecl {
+            is_primitive: true,
+            occupy_bytes: 0,
+        }));
+
+        scope.try_insert("void", void_type.clone());
+
+        let string_type = Ptr::new(TokenEntry::Type(TypeScopeDecl {
+            is_primitive: true,
+            occupy_bytes: 4,
+        }));
+
+        scope.try_insert("String", string_type.clone());
+
         scope.try_insert(
-            "int",
-            Ptr::new(TokenEntry::Type(TypeScopeDecl {
-                is_primitive: true,
-                occupy_bytes: 4,
+            "print",
+            Ptr::new(TokenEntry::Function(FnScopeDecl {
+                returns_type: void_type.clone(),
+                params: vec![int_type.clone()],
+                is_ffi: true,
+                decl: None,
             })),
         );
     }
@@ -142,6 +160,11 @@ impl<'a> Parser<'a> {
     ///
     /// This function returns `Ok(())` when no error occurs and `Err(e)` when
     /// encountering an error.
+    ///
+    /// # Todo
+    ///
+    /// > When parsing statement with value assignment, return multiple
+    /// > statements so assignment happens in the right place.
     fn parse_decl(&mut self, scope: Ptr<Scope>) -> ParseResult<'a, Span> {
         let is_const = self.lexer.try_consume(TokenVariant::Const);
         let type_decl = self.lexer.expect(TokenVariant::Identifier(""))?;
@@ -267,6 +290,7 @@ impl<'a> Parser<'a> {
         let fn_scope_decl = Ptr::new(TokenEntry::Function(FnScopeDecl {
             returns_type,
             params,
+            is_ffi: false,
             decl: None,
         }));
 
@@ -349,7 +373,7 @@ impl<'a> Parser<'a> {
         var_type: Ptr<TokenEntry>,
         is_const: bool,
     ) -> ParseResult<'a, TokenEntry> {
-        let def_span = self.lexer.try_consume_log_span(TokenVariant::Equals);
+        let def_span = self.lexer.try_consume_log_span(TokenVariant::Assign);
 
         let def = if def_span.is_some() {
             Some(Ptr::new(self.parse_expr(scope.clone(), &PARAM_END_ON)?))
@@ -405,6 +429,7 @@ impl<'a> Parser<'a> {
                 TokenVariant::EndOfFile => Err(parse_err(ParseErrVariant::EarlyEof, t.span)),
                 _ => Ok(t),
             })?;
+
         match token.var {
             TokenVariant::If => Ok(Statement::If(self.parse_if(scope)?)),
             TokenVariant::While => Ok(Statement::While(self.parse_while(scope)?)),
@@ -468,7 +493,7 @@ impl<'a> Parser<'a> {
         let start = self.lexer.expect(TokenVariant::Return)?.span;
         let has_expr = self.lexer.try_consume_log_span(TokenVariant::Semicolon);
 
-        if has_expr.is_some() {
+        if has_expr.is_none() {
             let expr = self.parse_expr(scope, &STMT_END_ON)?;
             let span = self.lexer.expect(TokenVariant::Semicolon)?.span + start;
             Ok(ReturnStatement {
@@ -680,6 +705,7 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                 if self.is_stack_top_higher_than(&op) {
                     Stop(self.op_stack.pop())
                 } else {
+                    self.lexer.next();
                     // special handling for parenthesis and comma
                     if variant_eq(&op, &OpVar::_Rpr) {
                         // clear corresponding parenthesis, or error if nothing to share
@@ -714,7 +740,10 @@ impl<'a, 'b> ExprParser<'a, 'b> {
             None => {
                 // no corresponding operator, error!
                 let t: TokenVariant = self.lexer.next().unwrap().var;
-                self.meltdown(parse_err(ParseErrVariant::UnexpectedToken(t), token_span))
+                self.meltdown(parse_err(
+                    ParseErrVariant::UnexpectedTokenMsg(t, "No corresponding operator for token"),
+                    token_span,
+                ))
             }
         }
     }
@@ -732,7 +761,10 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                 Stop(Some(ExprPart::Str(StringLiteral(s, token.span))))
             }
             TokenVariant::Identifier(i) => self.parse_ident(i, token.span),
-            var @ _ => self.meltdown(parse_err(ParseErrVariant::UnexpectedToken(var), token.span)),
+            var @ _ => self.meltdown(parse_err(
+                ParseErrVariant::UnexpectedTokenMsg(var, "Should be literal or identifier"),
+                token.span,
+            )),
         }
     }
 
@@ -783,7 +815,7 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                             // unary op
                             let operand = expr_stack
                                 .pop()
-                                .ok_or(parse_err(ParseErrVariant::MissingOperand, span))?;
+                                .ok_or(parse_err(ParseErrVariant::MissingOperandUnary, span))?;
                             let op_span = operand.span();
 
                             expr_stack.push(Expr::UnaOp(UnaryOp {
@@ -795,12 +827,12 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                             // binary op
                             let r_operand = expr_stack
                                 .pop()
-                                .ok_or(parse_err(ParseErrVariant::MissingOperand, span))?;
+                                .ok_or(parse_err(ParseErrVariant::MissingOperandR, span))?;
                             let r_span = r_operand.span();
 
                             let l_operand = expr_stack
                                 .pop()
-                                .ok_or(parse_err(ParseErrVariant::MissingOperand, span))?;
+                                .ok_or(parse_err(ParseErrVariant::MissingOperandL, span))?;
                             let l_span = l_operand.span();
 
                             expr_stack.push(Expr::BinOp(BinaryOp {
@@ -827,7 +859,7 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                                             v
                                         })
                                         .ok_or(parse_err(
-                                            ParseErrVariant::MissingOperand,
+                                            ParseErrVariant::NotMatchFnArguments(len, _num),
                                             func.1,
                                         ))?,
                                 ));
@@ -906,6 +938,7 @@ impl IntoOperator for TokenVariant<'_> {
                 BinaryAnd => Some(Ref),
                 Increase => Some(Inb),
                 Decrease => Some(Deb),
+                LParenthesis => Some(_Lpr),
                 _ => None,
             }
         } else {
@@ -930,7 +963,7 @@ impl IntoOperator for TokenVariant<'_> {
                 GreaterOrEqualThan => Some(Gte),
                 Assign => Some(_Asn),
                 Comma => Some(_Com),
-                LParenthesis => Some(_Lpr),
+                // LParenthesis => Some(_Lpr),
                 RParenthesis => Some(_Rpr),
                 _ => None,
             }
@@ -971,7 +1004,7 @@ impl Operator for OpVar {
     fn is_right_associative(&self) -> bool {
         use OpVar::*;
         match self {
-            Neg | Inv | Bin | Ref | Der | _Asn => true,
+            Neg | Inv | Bin | Ref | Der | _Asn | _Lpr | _Rpr => true,
             _ => false,
         }
     }
@@ -1033,21 +1066,23 @@ mod test {
     fn test_parser() {
         use TokenVariant::*;
         let src = r#"
-            int x, y;
-            int main(){
-                x = 1;
-                y = 2 + 3;
-                int z = x + y;
-                print(z);
-                return 0;
-            }
+int x, y;
+int main(){
+    x = 1;
+    y = 2 + 3;
+    int z = x + y;
+    print(z);
+    return 0;
+}
         "#;
 
         let ast = crate::c0::lexer::Lexer::new(src)
             .into_iter()
             .into_parser()
             .parse()
-            .unwrap();
+            .unwrap_or_else(|err| {
+                panic!("{}\nCode with issue: \"{}\"", err, str_span(src, err.span))
+            });
 
         println!("{:#?}", ast);
     }

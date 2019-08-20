@@ -76,6 +76,7 @@ pub struct TypeScopeDecl {
 pub struct FnScopeDecl {
     pub returns_type: Ptr<TokenEntry>,
     pub params: Vec<Ptr<TokenEntry>>,
+    pub is_ffi: bool,
     pub decl: Option<FnDeclaration>,
 }
 
@@ -482,7 +483,7 @@ impl OpVar {
     pub fn is_binary(&self) -> bool {
         use self::OpVar::*;
         match self {
-            Add | Sub | Mul | Div | Gt | Lt | Eq | Gte | Lte | Neq => true,
+            Add | Sub | Mul | Div | Gt | Lt | Eq | Gte | Lte | Neq | _Asn => true,
             _ => false,
         }
     }

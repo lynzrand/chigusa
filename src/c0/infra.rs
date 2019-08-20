@@ -435,13 +435,13 @@ pub fn parse_err_z<'a>(var: ParseErrVariant<'a>) -> ParseError<'a> {
 /// > When span is not avaliable, use Span::zero().
 #[derive(Debug)]
 pub struct ParseError<'a> {
-    var: ParseErrVariant<'a>,
-    span: Span,
+    pub var: ParseErrVariant<'a>,
+    pub span: Span,
 }
 
 impl<'a> Display for ParseError<'a> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{} at {}", self.var, self.span)
+        write!(f, "{:#?} at {}", self.var, self.span)
     }
 }
 
@@ -449,6 +449,7 @@ impl<'a> Display for ParseError<'a> {
 pub enum ParseErrVariant<'a> {
     ExpectToken(TokenVariant<'a>),
     UnexpectedToken(TokenVariant<'a>),
+    UnexpectedTokenMsg(TokenVariant<'a>, &'static str),
     NoConstFns,
     CannotFindIdent(&'a str),
     CannotFindType(&'a str),
@@ -462,7 +463,10 @@ pub enum ParseErrVariant<'a> {
     EarlyEof,
     UnbalancedParenthesisExpectL,
     UnbalancedParenthesisExpectR,
-    MissingOperand,
+    MissingOperandUnary,
+    MissingOperandL,
+    MissingOperandR,
+    NotMatchFnArguments(usize, usize),
     InternalErr,
 }
 
@@ -492,4 +496,8 @@ impl<'a> Display for ParseErrVariant<'a> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "E{:4}: {}", self.get_err_code(), self.get_err_desc())
     }
+}
+
+pub fn str_span(s: &str, span: Span) -> &str {
+    &s[span.start.index..span.end.index]
 }
