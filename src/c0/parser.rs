@@ -702,7 +702,7 @@ impl<'a, 'b> ExprParser<'a, 'b> {
         match token.var.into_op(self.suggest_unary) {
             Some(op) => {
                 // there is a corresponding operator here
-                if self.is_stack_top_higher_than(&op) {
+                if !(op == OpVar::_Lpr) && self.is_stack_top_higher_than(&op) {
                     Stop(self.op_stack.pop())
                 } else {
                     self.lexer.next();
@@ -732,7 +732,11 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                         Continue
                     } else {
                         self.op_stack.push(ExprPart::Op(op, token_span));
-                        self.suggest_unary = true;
+                        if !self.suggest_unary && op.is_unary() {
+                            self.suggest_unary = false;
+                        } else {
+                            self.suggest_unary = true;
+                        }
                         Continue
                     }
                 }
@@ -1011,6 +1015,7 @@ impl Operator for OpVar {
 }
 
 ///
+// #[derive(Debug)]
 enum ExprPart {
     Int(IntegerLiteral),
     Str(StringLiteral),
@@ -1055,6 +1060,18 @@ impl Operator for ExprPart {
     }
 }
 
+impl std::fmt::Debug for ExprPart {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ExprPart::Int(i) => write!(f, "Int({})", i.0),
+            ExprPart::Str(s) => write!(f, "Str({})", s.0),
+            ExprPart::FnCall(_) => write!(f, "FnCall"),
+            ExprPart::Var(_) => write!(f, "Var"),
+            ExprPart::Op(o, _) => write!(f, "Op({:?})", o),
+        }
+    }
+}
+
 // ======================
 
 #[cfg(test)]
@@ -1069,8 +1086,11 @@ mod test {
 int x, y;
 int main(){
     x = 1;
-    y = 2 + 3;
+    y = (1 + 2) * 3 + 4;
     int z = x + y;
+    y++;
+    x+++++y;
+    *x;
     print(z);
     return 0;
 }
