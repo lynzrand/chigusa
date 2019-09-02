@@ -342,7 +342,7 @@ impl AstNode for Expr {
 }
 
 #[derive(Debug, Eq, PartialEq)]
-pub struct Identifier(pub Ptr<TokenEntry>, pub Span);
+pub struct Identifier(pub String, pub Span);
 
 impl AstNode for Identifier {
     fn span(&self) -> Span {

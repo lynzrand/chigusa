@@ -824,7 +824,7 @@ impl<'a, 'b> ExprParser<'a, 'b> {
             Some(def_ptr) => {
                 let is_fn_lparen_span = self.lexer.try_consume_log_span(TokenVariant::LParenthesis);
                 let is_fn = is_fn_lparen_span.is_some();
-                let def_ptr_clone = def_ptr.clone();
+                let def_ptr_clone = def_ptr.clone()
                 let def = def_ptr_clone.borrow();
                 if is_fn {
                     match *def {
@@ -832,7 +832,7 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                             self.op_stack
                                 .push(ExprPart::Op(OpVar::_Lpr, is_fn_lparen_span.unwrap()));
                             self.op_stack
-                                .push(ExprPart::FnCall(Identifier(def_ptr.clone(), span)));
+                                .push(ExprPart::FnCall(Identifier(ident.to_owned(), span)));
                             self.suggest_unary = true;
                             Continue
                         }
@@ -843,7 +843,7 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                     match *def {
                         TokenEntry::Variable { .. } => {
                             self.suggest_unary = false;
-                            Stop(Some(ExprPart::Var(Identifier(def_ptr.clone(), span))))
+                            Stop(Some(ExprPart::Var(Identifier(ident.to_owned(), span))))
                         }
                         _ => self.meltdown(parse_err(ParseErrVariant::CannotFindVar(ident), span)),
                     }
