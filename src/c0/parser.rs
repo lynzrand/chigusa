@@ -1,5 +1,6 @@
 use super::{ast::*, infra::*, lexer::*};
 use crate::set;
+use either::Either;
 use itertools::Itertools;
 use lazy_static::lazy_static;
 use std::collections::*;
@@ -105,15 +106,33 @@ impl<'a> Parser<'a> {
 
     fn parse_program(&mut self) -> ParseResult<'a, Program> {
         let scope = Ptr::new(Scope::new(None));
+
+        let mut program_stmts = Vec::new();
+
         Self::inject_std(scope.clone());
+
         let mut span = Span::zero();
+
         while self.lexer.peek().is_some() {
-            let stmt = self.parse_decl_or_stmt(scope.clone())?;
-            span = span + stmt.span();
+            let result = self.parse_decl_or_stmt(scope.clone())?;
+            match result {
+                Either::Left(stmt) => {
+                    span = span + stmt.span();
+                    match stmt {
+                        Statement::Empty(_) => {}
+                        stmt @ _ => program_stmts.push(stmt),
+                    }
+                }
+                Either::Right(mut stmts) => {
+                    span = stmts.iter().fold(span, |span, stmt| span + stmt.span());
+                    program_stmts.append(&mut stmts);
+                }
+            }
         }
         Ok(Program {
             scope: scope.clone(),
             span,
+            stmts: program_stmts,
         })
     }
 
@@ -165,7 +184,7 @@ impl<'a> Parser<'a> {
     ///
     /// > When parsing statement with value assignment, return multiple
     /// > statements so assignment happens in the right place.
-    fn parse_decl(&mut self, scope: Ptr<Scope>) -> ParseResult<'a, Span> {
+    fn parse_decl(&mut self, scope: Ptr<Scope>) -> ParseResult<'a, (Span, Vec<Statement>)> {
         let is_const = self.lexer.try_consume(TokenVariant::Const);
         let type_decl = self.lexer.expect(TokenVariant::Identifier(""))?;
         let type_name = type_decl.get_ident().unwrap();
@@ -210,22 +229,37 @@ impl<'a> Parser<'a> {
                 identifier.span,
             )? + type_decl.span;
 
-            Ok(span)
+            Ok((span, Vec::new()))
         // return;
         } else {
             let mut span = type_decl.span;
 
-            let first_entry =
-                Ptr::new(self.parse_single_var_decl(scope.clone(), var_type.clone(), is_const)?);
+            let (entry, stmt) =
+                self.parse_single_var_decl(scope.clone(), var_type.clone(), is_const)?;
+
+            let mut stmts = Vec::new();
+
+            let entry_ptr = Ptr::new(entry);
 
             if !scope
                 .borrow_mut()
-                .try_insert(&identifier_owned, first_entry)
+                .try_insert(&identifier_owned, entry_ptr.clone())
             {
                 return Err(parse_err(
                     ParseErrVariant::TokenExists(&identifier.get_ident().unwrap()),
                     identifier.span,
                 ));
+            }
+
+            if stmt.is_some() {
+                let span = stmt.unwrap().span();
+                let stmt = Statement::Expr(Expr::BinOp(BinaryOp {
+                    var: OpVar::_Csn,
+                    lhs: Ptr::new(Expr::Var(Identifier(entry_ptr))),
+                    rhs: stmt.unwrap(),
+                    span,
+                }));
+                stmts.push(stmt);
             }
 
             while self.lexer.try_consume(TokenVariant::Comma) {
@@ -236,17 +270,28 @@ impl<'a> Parser<'a> {
                     _ => return Err(parse_err_z(ParseErrVariant::InternalErr)),
                 };
 
-                let entry = Ptr::new(self.parse_single_var_decl(
-                    scope.clone(),
-                    var_type.clone(),
-                    is_const,
-                )?);
+                let (entry, stmt) =
+                    self.parse_single_var_decl(scope.clone(), var_type.clone(), is_const)?;
 
-                if !scope.borrow_mut().try_insert(&identifier_owned, entry) {
+                if !scope
+                    .borrow_mut()
+                    .try_insert(&identifier_owned, Ptr::new(entry))
+                {
                     return Err(parse_err(
                         ParseErrVariant::TokenExists(identifier.get_ident().unwrap()),
                         identifier.span,
                     ));
+                }
+
+                if stmt.is_some() {
+                    let span = stmt.unwrap().span();
+                    let stmt = Statement::Expr(Expr::BinOp(BinaryOp {
+                        var: OpVar::_Csn,
+                        lhs: Ptr::new(Expr::Var(Identifier(entry_ptr))),
+                        rhs: stmt.unwrap(),
+                        span,
+                    }));
+                    stmts.push(stmt);
                 }
 
                 span = span + identifier.span;
@@ -254,7 +299,7 @@ impl<'a> Parser<'a> {
 
             self.lexer.expect(TokenVariant::Semicolon)?;
 
-            Ok(span)
+            Ok((span, stmts))
         }
     }
 
@@ -350,11 +395,7 @@ impl<'a> Parser<'a> {
                 .map_err(|_| parse_err(ParseErrVariant::InternalErr, var_type_ident.span))?;
             span = span + var_ident_token.span;
 
-            let token_entry = Ptr::new(TokenEntry::Variable(VarScopeDecl {
-                is_const,
-                var_type,
-                val: None,
-            }));
+            let token_entry = Ptr::new(TokenEntry::Variable(VarScopeDecl { is_const, var_type }));
 
             scope
                 .borrow_mut()
@@ -372,20 +413,19 @@ impl<'a> Parser<'a> {
         scope: Ptr<Scope>,
         var_type: Ptr<TokenEntry>,
         is_const: bool,
-    ) -> ParseResult<'a, TokenEntry> {
+    ) -> ParseResult<'a, (TokenEntry, Option<Expr>)> {
         let def_span = self.lexer.try_consume_log_span(TokenVariant::Assign);
 
         let def = if def_span.is_some() {
-            Some(Ptr::new(self.parse_expr(scope.clone(), &PARAM_END_ON)?))
+            Some(self.parse_expr(scope.clone(), &PARAM_END_ON)?)
         } else {
             None
         };
 
-        Ok(TokenEntry::Variable(VarScopeDecl {
-            is_const,
-            var_type,
-            val: def,
-        }))
+        Ok((
+            TokenEntry::Variable(VarScopeDecl { is_const, var_type }),
+            def,
+        ))
     }
 
     fn parse_block(&mut self, scope: Ptr<Scope>) -> ParseResult<'a, Block> {
@@ -409,7 +449,10 @@ impl<'a> Parser<'a> {
             }
 
             let stmt = self.parse_decl_or_stmt(scope.clone())?;
-            block_statements.push(stmt);
+            match stmt {
+                Either::Left(stmt) => block_statements.push(stmt),
+                Either::Right(mut stmts) => block_statements.append(&mut stmts),
+            }
             Ok(Continue)
         })?;
 
@@ -508,7 +551,10 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_decl_or_stmt(&mut self, scope: Ptr<Scope>) -> ParseResult<'a, Statement> {
+    fn parse_decl_or_stmt(
+        &mut self,
+        scope: Ptr<Scope>,
+    ) -> ParseResult<'a, Either<Statement, Vec<Statement>>> {
         // TODO: Parse declarations as statements, and differ them from expressions.
         //       (probably by checking if the identifier is a type or a variable,
         //       and reports error if else)
@@ -549,10 +595,10 @@ impl<'a> Parser<'a> {
         });
 
         if is_decl {
-            let span = self.parse_decl(scope)?;
-            Ok(Statement::Empty(span))
+            let (span, stmts) = self.parse_decl(scope)?;
+            Ok(Either::Right(stmts))
         } else {
-            self.parse_stmt(scope)
+            Ok(Either::Left(self.parse_stmt(scope)?))
         }
     }
 

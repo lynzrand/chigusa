@@ -17,6 +17,7 @@ use std::rc::{Rc, Weak};
 pub struct Program {
     pub scope: Ptr<Scope>,
     pub span: Span,
+    pub stmts: Vec<Statement>,
 }
 
 impl AstNode for Program {
@@ -62,7 +63,6 @@ pub enum TokenEntry {
 #[derive(Debug, Eq, PartialEq)]
 pub struct VarScopeDecl {
     pub is_const: bool,
-    pub val: Option<Ptr<Expr>>,
     pub var_type: Ptr<TokenEntry>,
 }
 
@@ -472,7 +472,11 @@ pub enum OpVar {
     _Com,
     /// Assignment
     _Asn,
-    /// Constant assignment
+    /// Constant assignment. 
+    /// 
+    /// Acts like a conventional assignment with both variables and constants, 
+    /// but only generated when parsing declarations. This eliminates the problem
+    /// of re-assigning constants.
     _Csn,
     /// Dummy value
     _Dum,
