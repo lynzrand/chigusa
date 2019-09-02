@@ -234,8 +234,13 @@ impl<'a> Parser<'a> {
         } else {
             let mut span = type_decl.span;
 
-            let (entry, stmt) =
-                self.parse_single_var_decl(scope.clone(), var_type.clone(), is_const)?;
+            let (entry, stmt) = self.parse_single_var_decl(
+                scope.clone(),
+                var_type.clone(),
+                &identifier_owned,
+                identifier.span,
+                is_const,
+            )?;
 
             let mut stmts = Vec::new();
 
@@ -252,13 +257,7 @@ impl<'a> Parser<'a> {
             }
 
             if stmt.is_some() {
-                let span = stmt.unwrap().span();
-                let stmt = Statement::Expr(Expr::BinOp(BinaryOp {
-                    var: OpVar::_Csn,
-                    lhs: Ptr::new(Expr::Var(Identifier(entry_ptr))),
-                    rhs: stmt.unwrap(),
-                    span,
-                }));
+                let stmt = Statement::Expr(stmt.unwrap());
                 stmts.push(stmt);
             }
 
@@ -270,8 +269,13 @@ impl<'a> Parser<'a> {
                     _ => return Err(parse_err_z(ParseErrVariant::InternalErr)),
                 };
 
-                let (entry, stmt) =
-                    self.parse_single_var_decl(scope.clone(), var_type.clone(), is_const)?;
+                let (entry, stmt) = self.parse_single_var_decl(
+                    scope.clone(),
+                    var_type.clone(),
+                    &identifier_owned,
+                    identifier.span,
+                    is_const,
+                )?;
 
                 if !scope
                     .borrow_mut()
@@ -284,13 +288,7 @@ impl<'a> Parser<'a> {
                 }
 
                 if stmt.is_some() {
-                    let span = stmt.unwrap().span();
-                    let stmt = Statement::Expr(Expr::BinOp(BinaryOp {
-                        var: OpVar::_Csn,
-                        lhs: Ptr::new(Expr::Var(Identifier(entry_ptr))),
-                        rhs: stmt.unwrap(),
-                        span,
-                    }));
+                    let stmt = Statement::Expr(stmt.unwrap());
                     stmts.push(stmt);
                 }
 
@@ -412,12 +410,24 @@ impl<'a> Parser<'a> {
         &mut self,
         scope: Ptr<Scope>,
         var_type: Ptr<TokenEntry>,
+        identifier: &str,
+        identifier_span: Span,
         is_const: bool,
     ) -> ParseResult<'a, (TokenEntry, Option<Expr>)> {
         let def_span = self.lexer.try_consume_log_span(TokenVariant::Assign);
 
         let def = if def_span.is_some() {
-            Some(self.parse_expr(scope.clone(), &PARAM_END_ON)?)
+            let rhs = self.parse_expr(scope.clone(), &PARAM_END_ON)?;
+            let rhs_span = rhs.span();
+            Some(Expr::BinOp(BinaryOp {
+                var: OpVar::_Csn,
+                rhs: Ptr::new(rhs),
+                lhs: Ptr::new(Expr::Var(Identifier(
+                    identifier.to_owned(),
+                    identifier_span,
+                ))),
+                span: identifier_span + rhs_span,
+            }))
         } else {
             None
         };
@@ -824,15 +834,15 @@ impl<'a, 'b> ExprParser<'a, 'b> {
             Some(def_ptr) => {
                 let is_fn_lparen_span = self.lexer.try_consume_log_span(TokenVariant::LParenthesis);
                 let is_fn = is_fn_lparen_span.is_some();
-                let def_ptr_clone = def_ptr.clone()
+                let def_ptr_clone = def_ptr.clone();
                 let def = def_ptr_clone.borrow();
                 if is_fn {
                     match *def {
-                        TokenEntry::Function { .. } => {
+                        TokenEntry::Function(ref decl) => {
                             self.op_stack
                                 .push(ExprPart::Op(OpVar::_Lpr, is_fn_lparen_span.unwrap()));
                             self.op_stack
-                                .push(ExprPart::FnCall(Identifier(ident.to_owned(), span)));
+                                .push(ExprPart::FnCall(Identifier(ident.to_owned(), span), decl.params.len()));
                             self.suggest_unary = true;
                             Continue
                         }
@@ -860,44 +870,8 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                     ExprPart::Int(i) => expr_stack.push(Expr::Int(i)),
                     ExprPart::Str(s) => expr_stack.push(Expr::Str(s)),
                     ExprPart::Var(v) => expr_stack.push(Expr::Var(v)),
-                    ExprPart::Op(op, span) => {
-                        if op.is_unary() {
-                            // unary op
-                            let operand = expr_stack
-                                .pop()
-                                .ok_or(parse_err(ParseErrVariant::MissingOperandUnary, span))?;
-                            let op_span = operand.span();
-
-                            expr_stack.push(Expr::UnaOp(UnaryOp {
-                                var: op,
-                                val: Ptr::new(operand),
-                                span: op_span + span,
-                            }));
-                        } else {
-                            // binary op
-                            let r_operand = expr_stack
-                                .pop()
-                                .ok_or(parse_err(ParseErrVariant::MissingOperandR, span))?;
-                            let r_span = r_operand.span();
-
-                            let l_operand = expr_stack
-                                .pop()
-                                .ok_or(parse_err(ParseErrVariant::MissingOperandL, span))?;
-                            let l_span = l_operand.span();
-
-                            expr_stack.push(Expr::BinOp(BinaryOp {
-                                var: op,
-                                lhs: Ptr::new(l_operand),
-                                rhs: Ptr::new(r_operand),
-                                span: span + l_span + r_span,
-                            }));
-                        }
-                    }
-                    ExprPart::FnCall(func) => {
-                        let len = match &*func.0.clone().borrow() {
-                            TokenEntry::Function(FnScopeDecl { params, .. }) => params.len(),
-                            _ => unreachable!(),
-                        };
+                    ExprPart::Op(op, span) => Self::collect_identifier(op, span, &mut expr_stack)?,
+                    ExprPart::FnCall(func, len) => {
                         let mut span = func.span();
                         let mut params: Vec<Ptr<Expr>> =
                             (0..len).try_fold(Vec::new(), |mut vec: Vec<Ptr<Expr>>, _num| {
@@ -940,6 +914,45 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                 }
             }
         })
+    }
+
+    fn collect_identifier(
+        op: OpVar,
+        span: Span,
+        expr_stack: &mut Vec<Expr>,
+    ) -> ParseResult<'a, ()> {
+        if op.is_unary() {
+            // unary op
+            let operand = expr_stack
+                .pop()
+                .ok_or(parse_err(ParseErrVariant::MissingOperandUnary, span))?;
+            let op_span = operand.span();
+
+            expr_stack.push(Expr::UnaOp(UnaryOp {
+                var: op,
+                val: Ptr::new(operand),
+                span: op_span + span,
+            }));
+        } else {
+            // binary op
+            let r_operand = expr_stack
+                .pop()
+                .ok_or(parse_err(ParseErrVariant::MissingOperandR, span))?;
+            let r_span = r_operand.span();
+
+            let l_operand = expr_stack
+                .pop()
+                .ok_or(parse_err(ParseErrVariant::MissingOperandL, span))?;
+            let l_span = l_operand.span();
+
+            expr_stack.push(Expr::BinOp(BinaryOp {
+                var: op,
+                lhs: Ptr::new(l_operand),
+                rhs: Ptr::new(r_operand),
+                span: span + l_span + r_span,
+            }));
+        };
+        Ok(())
     }
 }
 
@@ -1065,7 +1078,7 @@ impl Operator for OpVar {
 enum ExprPart {
     Int(IntegerLiteral),
     Str(StringLiteral),
-    FnCall(Identifier),
+    FnCall(Identifier, usize),
     Var(Identifier),
     Op(OpVar, Span),
 }
@@ -1111,9 +1124,9 @@ impl std::fmt::Debug for ExprPart {
         match self {
             ExprPart::Int(i) => write!(f, "Int({})", i.0),
             ExprPart::Str(s) => write!(f, "Str({})", s.0),
-            ExprPart::FnCall(_) => write!(f, "FnCall"),
-            ExprPart::Var(_) => write!(f, "Var"),
-            ExprPart::Op(o, _) => write!(f, "Op({:?})", o),
+            ExprPart::FnCall(..) => write!(f, "FnCall"),
+            ExprPart::Var(..) => write!(f, "Var"),
+            ExprPart::Op(o, ..) => write!(f, "Op({:?})", o),
         }
     }
 }

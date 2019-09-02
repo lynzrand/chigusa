@@ -228,6 +228,14 @@ impl Scope {
                 .and_then(|p| p.borrow().find_definition_skip(token, skip - 1))
         }
     }
+
+    pub fn get_fn_params_length(&self, token: &str) -> Option<usize> {
+        self.find_definition(token)
+            .and_then(|def| match &*def.borrow() {
+                TokenEntry::Function(FnScopeDecl { params, .. }) => Some(params.len()),
+                _ => None,
+            })
+    }
 }
 
 impl PartialEq for Scope {
@@ -472,9 +480,9 @@ pub enum OpVar {
     _Com,
     /// Assignment
     _Asn,
-    /// Constant assignment. 
-    /// 
-    /// Acts like a conventional assignment with both variables and constants, 
+    /// Constant assignment.
+    ///
+    /// Acts like a conventional assignment with both variables and constants,
     /// but only generated when parsing declarations. This eliminates the problem
     /// of re-assigning constants.
     _Csn,
