@@ -27,4 +27,4 @@ inkwell = { git = "https://github.com/TheDan64/inkwell", branch = "llvm8-0", opt
 llvm = ["inkwell"]
 kurumi = []
 
-default = ["llvm"]
+default = ["kurumi"]
