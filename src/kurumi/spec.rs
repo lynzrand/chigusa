@@ -1,3 +1,11 @@
+use std::collections::HashMap;
+
+/// Representation of a whole Kurumi Program
+pub struct Program{
+    data: Vec<u64>,
+    text: Vec<Op>,
+    
+}
 
 /// Instructions available inside Kurumi VM.
 /// 
@@ -49,14 +57,14 @@ pub enum Op {
     /// # Pushes 1 item
     /// 
     /// - The immediate value provided inside instruction
-    LImm(isize),
+    LImm(i64),
 
     /// Load local variable
     /// 
     /// # Pushes 1 item
     /// 
     /// - The local variable numbered inside instruction
-    LLoc(usize),
+    LLoc(u64),
 
     /// Load Address
     /// 
@@ -105,7 +113,7 @@ pub enum Op {
     /// 
     /// - The address to memory
     /// - The value to store
-    Sas(usize),
+    Sas(u64),
 
     /// Store to stack
     /// 
@@ -269,21 +277,21 @@ pub enum Op {
     /// 
     /// Will jump to the corresponding program location offset if the value is 
     /// true. Else it will just pop the value and nothing will happen.
-    Jt(isize),
+    Jt(i64),
 
     /// Jump unconditional
     /// 
     /// # Side effect
     /// 
     /// Will jump to the corresponding program offset unconditionally.
-    Jmp(isize),
+    Jmp(i64),
 
     /// Jump absolute unconditional
     /// 
     /// # Side effect
     /// 
     /// Will jump to the corresponding absolute program position unconditionally.
-    JmpAbs(usize),
+    JmpAbs(u64),
 
     /// Call
     /// 
@@ -298,7 +306,7 @@ pub enum Op {
     /// # Side effect
     /// 
     /// Jumps to the start of the specified address
-    Call(isize),
+    Call(i64),
 
     /// Call Absolute
     /// 
@@ -313,13 +321,13 @@ pub enum Op {
     /// # Side effect
     /// 
     /// Jumps to the start of the specified address
-    CallAbs(usize),
+    CallAbs(u64),
 
     /// Return
     /// 
     /// # Pops 2 values
     /// 
-    /// - The return value (isize; for larger return values use RetS instead;
+    /// - The return value (i64; for larger return values use RetS instead;
     ///     for void returns provide anything (conventionally `0`))
     /// - The original instruction pointer
     /// 
@@ -347,7 +355,7 @@ pub enum Op {
     /// # Pushes multiple values
     /// 
     /// - The return value, sized as supplied
-    RetM(usize),
+    RetM(u64),
 
     /// Reserve stack
     /// 
@@ -358,7 +366,7 @@ pub enum Op {
     /// # Pushes multiple values
     /// 
     /// - The reserved stack, sized as supplied
-    Rs(usize),
+    Rs(u64),
 
     /// Clean stack
     /// 
@@ -369,7 +377,7 @@ pub enum Op {
     /// # Pops multiple values
     /// 
     /// - The reserved stack, sized as supplied
-    Cs(usize),
+    Cs(u64),
 
     /// Clean stack with stack top reserved
     /// 
@@ -381,7 +389,7 @@ pub enum Op {
     /// 
     /// - The size to clean, exact
     /// - The reserved stack, sized as supplied
-    Csz(usize),
+    Csz(u64),
 
     // Arithmic
     /// Integer addition
