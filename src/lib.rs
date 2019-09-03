@@ -5,7 +5,7 @@
 pub mod c0;
 
 /// Kurumi is a simple virtual machine for this project.
-#[cfg(kurumi)]
+// #[cfg(kurumi)]
 pub mod kurumi;
 
 #[cfg(llvm)]

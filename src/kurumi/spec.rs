@@ -49,14 +49,14 @@ pub enum Op {
     /// # Pushes 1 item
     /// 
     /// - The immediate value provided inside instruction
-    LImm(i64),
+    LImm(isize),
 
     /// Load local variable
     /// 
     /// # Pushes 1 item
     /// 
     /// - The local variable numbered inside instruction
-    LLoc(u64),
+    LLoc(usize),
 
     /// Load Address
     /// 
@@ -80,6 +80,13 @@ pub enum Op {
     /// - The item in that stack address, cloned
     Ls,
 
+    /// Load base pointer value
+    /// 
+    /// # Pushes 1 item
+    /// 
+    /// - The current value of base poiner
+    Lbp,
+
     /// Store to address
     /// 
     /// # Pops 2 items
@@ -88,6 +95,18 @@ pub enum Op {
     /// - The value to store
     Sa,
 
+    /// Store to address, sized
+    /// 
+    /// # Data
+    /// 
+    /// - The bytes of data to be saved
+    /// 
+    /// # Pops 2 items
+    /// 
+    /// - The address to memory
+    /// - The value to store
+    Sas(usize),
+
     /// Store to stack
     /// 
     /// # Pops 2 items
@@ -95,6 +114,18 @@ pub enum Op {
     /// - The stack offset to the value
     /// - The value to store
     Ss,
+
+    /// Store to stack, sized
+    /// 
+    /// # Data
+    /// 
+    /// The size of bytes to be saved
+    /// 
+    /// # Pops 2 items
+    /// 
+    /// - The stack offset to the value
+    /// - The value to store
+    Sss(u8),
 
     /// Duplicate stack top
     /// 
@@ -138,7 +169,8 @@ pub enum Op {
     /// cause the program to panic.
     Free,
 
-    // Test
+    // Testing
+    
     /// Test less or equal
     /// 
     /// # Pops 2 items
@@ -257,14 +289,99 @@ pub enum Op {
     /// 
     /// # Data
     /// 
-    /// The absolute position of the function being called
+    /// The relative position of the function being called
+    /// 
+    /// # Pushes 1 value
+    /// 
+    /// - The current instruction pointer value
     /// 
     /// # Side effect
     /// 
-    /// Will
-    Call(usize),
+    /// Jumps to the start of the specified address
+    Call(isize),
+
+    /// Call Absolute
+    /// 
+    /// # Data
+    /// 
+    /// The absolute position of the function being called
+    /// 
+    /// # Pushes 1 value
+    /// 
+    /// - The current instruction pointer value
+    /// 
+    /// # Side effect
+    /// 
+    /// Jumps to the start of the specified address
+    CallAbs(usize),
+
     /// Return
+    /// 
+    /// # Pops 2 values
+    /// 
+    /// - The return value (isize; for larger return values use RetS instead;
+    ///     for void returns provide anything (conventionally `0`))
+    /// - The original instruction pointer
+    /// 
+    /// # Pushes 1 value
+    /// 
+    /// - The return value (restored at stack top)
+    /// 
+    /// # Side effect
+    /// 
+    /// Pops the stack and sets instruction pointer to whatever stored inside
+    /// it.
     Ret,
+
+    /// Return Multiple
+    /// 
+    /// # Data
+    /// 
+    /// The size of return value
+    /// 
+    /// # Pops multiple values
+    /// 
+    /// - The return value, sized as supplied
+    /// - The original instruction pointer
+    /// 
+    /// # Pushes multiple values
+    /// 
+    /// - The return value, sized as supplied
+    RetM(usize),
+
+    /// Reserve stack
+    /// 
+    /// # Data
+    /// 
+    /// The size to reserve, exact
+    /// 
+    /// # Pushes multiple values
+    /// 
+    /// - The reserved stack, sized as supplied
+    Rs(usize),
+
+    /// Clean stack
+    /// 
+    /// # Data
+    /// 
+    /// The size to clean, exact
+    /// 
+    /// # Pops multiple values
+    /// 
+    /// - The reserved stack, sized as supplied
+    Cs(usize),
+
+    /// Clean stack with stack top reserved
+    /// 
+    /// # Data
+    /// 
+    /// The size to reserve at stack top, exact
+    /// 
+    /// # Pops multiple values
+    /// 
+    /// - The size to clean, exact
+    /// - The reserved stack, sized as supplied
+    Csz(usize),
 
     // Arithmic
     /// Integer addition
@@ -277,8 +394,22 @@ pub enum Op {
     IDiv,
     /// Integer negate
     INeg,
-    /// Binary invert
-    BInv,
+    /// Float addition
+    FAdd,
+    /// Float subtraction
+    FSub,
+    /// Float multiplication
+    FMul,
+    /// Float division
+    FDiv,
+    /// Float negate
+    FNeg,
+    /// Invert
+    Inv,
+    /// Shift right
+    Shr,
+    /// SHift left
+    Shl,
     /// Boolean not
     Not,
     /// Binary and
@@ -287,4 +418,20 @@ pub enum Op {
     Or,
     /// Binary xor
     Xor,
+
+    /// Convert Unsigned
+    /// 
+    /// # Data
+    /// 
+    /// - The number of bits of the original number
+    /// - The number of bits of the converted number
+    ConU(u8, u8),
+
+    /// Convert Signed
+    /// 
+    /// # Data
+    /// 
+    /// - The number of bits of the original number
+    /// - The number of bits of the converted number
+    ConS(u8, u8)
 }
