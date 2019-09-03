@@ -192,13 +192,18 @@ impl<'a> Parser<'a> {
         let var_type = scope
             .borrow()
             .find_definition(type_name)
-            .ok_or_else(|| parse_err(ParseErrVariant::CannotFindType(type_name), type_decl.span))
+            .ok_or_else(|| {
+                parse_err(
+                    ParseErrVariant::CannotFindType(type_name.to_owned()),
+                    type_decl.span,
+                )
+            })
             .and_then(|ptr_token| {
                 if ptr_token.borrow().is_type() {
                     Ok(ptr_token)
                 } else {
                     Err(parse_err(
-                        ParseErrVariant::ExpectToBeType(type_name),
+                        ParseErrVariant::ExpectToBeType(type_name.to_owned()),
                         type_decl.span,
                     ))
                 }
@@ -251,7 +256,7 @@ impl<'a> Parser<'a> {
                 .try_insert(&identifier_owned, entry_ptr.clone())
             {
                 return Err(parse_err(
-                    ParseErrVariant::TokenExists(&identifier.get_ident().unwrap()),
+                    ParseErrVariant::TokenExists(identifier.get_ident().unwrap().to_owned()),
                     identifier.span,
                 ));
             }
@@ -282,7 +287,7 @@ impl<'a> Parser<'a> {
                     .try_insert(&identifier_owned, Ptr::new(entry))
                 {
                     return Err(parse_err(
-                        ParseErrVariant::TokenExists(identifier.get_ident().unwrap()),
+                        ParseErrVariant::TokenExists(identifier.get_ident().unwrap().to_owned()),
                         identifier.span,
                     ));
                 }
@@ -328,7 +333,22 @@ impl<'a> Parser<'a> {
         let new_scope = Ptr::new(Scope::new(Some(scope.clone())));
         let (params_span, params) = self.parse_fn_params(new_scope.clone())?;
 
-        // // TODO: add function itself to scope for recursive calling
+        // Check if this function has been declared before
+        if let Some(def) = scope.borrow().find_definition(&identifier) {
+            if let TokenEntry::Function(ref fn_entry) = *def.borrow() {
+                if fn_entry.params != params || fn_entry.decl.is_some() {
+                    return Err(parse_err(
+                        ParseErrVariant::FnDeclarationConflict(identifier),
+                        start_span,
+                    ));
+                }
+            } else {
+                return Err(parse_err(
+                    ParseErrVariant::ExpectToBeFn(identifier),
+                    start_span,
+                ));
+            }
+        }
 
         let fn_scope_decl = Ptr::new(TokenEntry::Function(FnScopeDecl {
             returns_type,
@@ -340,6 +360,12 @@ impl<'a> Parser<'a> {
         scope
             .borrow_mut()
             .try_insert_or_replace_same(&identifier, fn_scope_decl.clone());
+
+        let has_no_def = self.lexer.try_consume(TokenVariant::Semicolon);
+
+        if has_no_def {
+            return Ok(start_span + params_span);
+        }
 
         let fn_body = self.parse_block_no_scope(new_scope.clone())?;
         let body_span = fn_body.span();
@@ -382,7 +408,7 @@ impl<'a> Parser<'a> {
                 .find_definition(var_type_decl)
                 .ok_or_else(|| {
                     parse_err(
-                        ParseErrVariant::CannotFindType(var_type_decl),
+                        ParseErrVariant::CannotFindType(var_type_decl.to_owned()),
                         var_type_ident.span,
                     )
                 })?;
@@ -830,7 +856,10 @@ impl<'a, 'b> ExprParser<'a, 'b> {
 
     fn parse_ident(&mut self, ident: &'a str, span: Span) -> LoopCtrl<Option<ExprPart>> {
         match self.scope.find_definition(ident) {
-            None => self.meltdown(parse_err(ParseErrVariant::CannotFindIdent(ident), span)),
+            None => self.meltdown(parse_err(
+                ParseErrVariant::CannotFindIdent(ident.to_owned()),
+                span,
+            )),
             Some(def_ptr) => {
                 let is_fn_lparen_span = self.lexer.try_consume_log_span(TokenVariant::LParenthesis);
                 let is_fn = is_fn_lparen_span.is_some();
@@ -841,12 +870,17 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                         TokenEntry::Function(ref decl) => {
                             self.op_stack
                                 .push(ExprPart::Op(OpVar::_Lpr, is_fn_lparen_span.unwrap()));
-                            self.op_stack
-                                .push(ExprPart::FnCall(Identifier(ident.to_owned(), span), decl.params.len()));
+                            self.op_stack.push(ExprPart::FnCall(
+                                Identifier(ident.to_owned(), span),
+                                decl.params.len(),
+                            ));
                             self.suggest_unary = true;
                             Continue
                         }
-                        _ => self.meltdown(parse_err(ParseErrVariant::CannotFindFn(ident), span)),
+                        _ => self.meltdown(parse_err(
+                            ParseErrVariant::CannotFindFn(ident.to_owned()),
+                            span,
+                        )),
                     }
                 } else {
                     // is variable
@@ -855,7 +889,10 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                             self.suggest_unary = false;
                             Stop(Some(ExprPart::Var(Identifier(ident.to_owned(), span))))
                         }
-                        _ => self.meltdown(parse_err(ParseErrVariant::CannotFindVar(ident), span)),
+                        _ => self.meltdown(parse_err(
+                            ParseErrVariant::CannotFindVar(ident.to_owned()),
+                            span,
+                        )),
                     }
                 }
             }
