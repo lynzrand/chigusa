@@ -163,8 +163,8 @@ impl<'a> Parser<'a> {
         scope.try_insert(
             "print",
             Ptr::new(TokenEntry::Function(FnScopeDecl {
-                returns_type: void_type.clone(),
-                params: vec![int_type.clone()],
+                returns_type: "void".to_owned(),
+                params: vec!["int".to_owned()],
                 is_ffi: true,
                 decl: None,
             })),
@@ -200,7 +200,7 @@ impl<'a> Parser<'a> {
             })
             .and_then(|ptr_token| {
                 if ptr_token.borrow().is_type() {
-                    Ok(ptr_token)
+                    Ok(type_name.to_owned())
                 } else {
                     Err(parse_err(
                         ParseErrVariant::ExpectToBeType(type_name.to_owned()),
@@ -326,7 +326,7 @@ impl<'a> Parser<'a> {
     fn parse_fn_decl_rest(
         &mut self,
         scope: Ptr<Scope>,
-        returns_type: Ptr<TokenEntry>,
+        returns_type: String,
         identifier: String,
         start_span: Span,
     ) -> ParseResult<'a, Span> {
@@ -383,10 +383,7 @@ impl<'a> Parser<'a> {
         Ok(body_span + start_span)
     }
 
-    fn parse_fn_params(
-        &mut self,
-        scope: Ptr<Scope>,
-    ) -> ParseResult<'a, (Span, Vec<Ptr<TokenEntry>>)> {
+    fn parse_fn_params(&mut self, scope: Ptr<Scope>) -> ParseResult<'a, (Span, Vec<String>)> {
         let mut params = Vec::new();
         let mut span = self
             .lexer
@@ -411,6 +408,16 @@ impl<'a> Parser<'a> {
                         ParseErrVariant::CannotFindType(var_type_decl.to_owned()),
                         var_type_ident.span,
                     )
+                })
+                .and_then(|entry| {
+                    if entry.borrow().is_type() {
+                        Ok(var_type_decl.to_owned())
+                    } else {
+                        Err(parse_err(
+                            ParseErrVariant::ExpectToBeType(var_type_decl.to_owned()),
+                            var_type_ident.span,
+                        ))
+                    }
                 })?;
 
             let var_ident_token = self.lexer.expect(TokenVariant::Identifier(""))?;
@@ -421,10 +428,17 @@ impl<'a> Parser<'a> {
 
             let token_entry = Ptr::new(TokenEntry::Variable(VarScopeDecl { is_const, var_type }));
 
-            scope
+            if !scope
                 .borrow_mut()
-                .try_insert(var_ident, token_entry.clone());
-            params.push(token_entry.clone());
+                .try_insert(var_ident, token_entry.clone())
+            {
+                return Err(parse_err(
+                    ParseErrVariant::TokenExists(var_ident.to_owned()),
+                    var_ident_token.span,
+                ));
+            }
+
+            params.push(var_ident.to_owned());
         }
 
         self.lexer.expect(TokenVariant::RParenthesis)?;
@@ -435,7 +449,7 @@ impl<'a> Parser<'a> {
     fn parse_single_var_decl(
         &mut self,
         scope: Ptr<Scope>,
-        var_type: Ptr<TokenEntry>,
+        var_type: String,
         identifier: &str,
         identifier_span: Span,
         is_const: bool,

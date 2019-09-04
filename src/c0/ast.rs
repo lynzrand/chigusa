@@ -63,7 +63,7 @@ pub enum TokenEntry {
 #[derive(Debug, Eq, PartialEq)]
 pub struct VarScopeDecl {
     pub is_const: bool,
-    pub var_type: Ptr<TokenEntry>,
+    pub var_type: String,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -74,8 +74,8 @@ pub struct TypeScopeDecl {
 
 #[derive(Debug, Eq, PartialEq)]
 pub struct FnScopeDecl {
-    pub returns_type: Ptr<TokenEntry>,
-    pub params: Vec<Ptr<TokenEntry>>,
+    pub returns_type: String,
+    pub params: Vec<String>,
     pub is_ffi: bool,
     pub decl: Option<FnDeclaration>,
 }
@@ -219,6 +219,7 @@ impl Scope {
                 .and_then(|p| p.borrow().find_definition(token))
         })
     }
+
 
     pub fn find_definition_skip(&self, token: &str, skip: usize) -> Option<Ptr<TokenEntry>> {
         if skip <= 0 {
