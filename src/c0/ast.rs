@@ -220,6 +220,7 @@ impl Scope {
         })
     }
 
+    // pub fn token_exists(&self, )
 
     pub fn find_definition_skip(&self, token: &str, skip: usize) -> Option<Ptr<TokenEntry>> {
         if skip <= 0 {
