@@ -24,6 +24,10 @@ impl AstNode for Program {
     fn span(&self) -> Span {
         self.span
     }
+
+    fn return_type(&self, scope: &Scope) -> Option<&str> {
+        None
+    }
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -38,6 +42,9 @@ impl AstNode for FnDeclaration {
     fn span(&self) -> Span {
         self.span
     }
+    fn return_type(&self, scope: &super::ast::Scope) -> Option<&str> {
+        None
+    }
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -50,6 +57,9 @@ pub struct Block {
 impl AstNode for Block {
     fn span(&self) -> Span {
         self.span
+    }
+    fn return_type(&self, scope: &Scope) -> Option<&str> {
+        None
     }
 }
 
@@ -270,6 +280,17 @@ impl AstNode for Statement {
             Empty(span) => *span,
         }
     }
+    fn return_type(&self, scope: &Scope) -> Option<&str> {
+        use Statement::*;
+        match self {
+            If(i) => None,
+            While(w) => None,
+            Return(r) => None,
+            Expr(e) => e.return_type(scope),
+            Block(b) => None,
+            Empty(span) => None,
+        }
+    }
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -281,6 +302,9 @@ pub struct ReturnStatement {
 impl AstNode for ReturnStatement {
     fn span(&self) -> Span {
         self.span
+    }
+    fn return_type(&self, scope: &Scope) -> Option<&str> {
+        None
     }
 }
 
@@ -296,6 +320,9 @@ impl AstNode for IfStatement {
     fn span(&self) -> Span {
         self.span
     }
+    fn return_type(&self, scope: &Scope) -> Option<&str> {
+        None
+    }
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -308,6 +335,9 @@ pub struct WhileStatement {
 impl AstNode for WhileStatement {
     fn span(&self) -> Span {
         self.span
+    }
+    fn return_type(&self, scope: &Scope) -> Option<&str> {
+        None
     }
 }
 
@@ -322,6 +352,9 @@ pub struct VarDecalaration {
 impl AstNode for VarDecalaration {
     fn span(&self) -> Span {
         self.span
+    }
+    fn return_type(&self, scope: &Scope) -> Option<&str> {
+        None
     }
 }
 
@@ -349,6 +382,18 @@ impl AstNode for Expr {
             Empty(span) => *span,
         }
     }
+
+    fn return_type(&self, scope: &Scope) -> Option<&str> {
+        match self {
+            Int(i) => i.return_type(),
+            Str(s) => s.return_type(),
+            BinOp(b) => b.return_type(),
+            UnaOp(u) => u.return_type(),
+            Var(i) => i.return_type(),
+            FnCall(f) => f.return_type(),
+            Empty(span) => "void",
+        }
+    }
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -357,6 +402,11 @@ pub struct Identifier(pub String, pub Span);
 impl AstNode for Identifier {
     fn span(&self) -> Span {
         self.1
+    }
+    fn return_type(&self, scope: &Scope) -> Option<&str> {
+        // scope
+        //     .find_definition(&self.0)
+        //     .and_then(|def| def.borrow().get)
     }
 }
 #[derive(Debug, Eq, PartialEq)]

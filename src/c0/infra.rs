@@ -309,6 +309,7 @@ impl<T> IntoPtr<T> for Rc<RefCell<T>> {
 
 pub trait AstNode {
     fn span(&self) -> Span;
+    fn return_type(&self, scope: &super::ast::Scope) -> Option<&str>;
 }
 
 #[inline]
