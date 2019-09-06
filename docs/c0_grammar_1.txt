@@ -1,0 +1,73 @@
+// # Basic grammar elements
+Identifier: [a-zA-Z] [_0-9a-zA-Z]* | _ [_0-9a-zA-Z]+
+
+DecimalInteger: "0" | [1-9] [0-9]+
+DecimalFractionalPart: "." [0-9]+
+DecimalExponentPart: [Ee] [+-]? [0-9]+
+HexadecimalNumber: "0x" [0-9a-fA-F]+
+IntegerLiteral: (DecimalInteger | HexadecimalNumber) 
+FloatLiteral: DecimalInteger DecimalFractionalPart DecimalExponentPart?
+    | DecimalInteger DecimalExponentPart
+
+EscapedChar: "\" ([ntrb\\'"] | 'u' [0-9a-fA-F]{4})
+Char: [^\\'"] | EscapedChar
+CharLiteral: "'" Char "'"
+StringLiteral: "\"" Char* "\""
+
+BooleanLiteral: "true" | "false"
+
+Comment: "//" .* "\n"
+
+Literal: IntegerLiteral | FloatLiteral | CharLiteral | StringLiteral | BooleanLiteral
+
+// # Keywords
+//
+// These keywords may appear in following definitions as their raw forms, 
+// i.e. kwReturn as "return".
+//
+// Most keywords' names are their raw forms prepended by "kw"
+kwReturn: "return"
+kwAs: "as"
+kwIf: "if"
+kwWhile: "while"
+
+// # Items
+GenericTypeAnnotation: "<" TypeDeclaration ("," TypeDeclaration)* (";" TypeDeclaration)? ">"
+GenericTypeDeclaration: Identifier GenericTypeAnnotation?
+ArrayTypeDeclaration: "[" TypeDeclaration (";" IntegerLiteral)? "]"
+ReferenceTypeDeclaration: "&" TypeDeclaration
+TypeDeclaration: ReferenceTypeDeclaration | ArrayTypeDeclaration | GenericTypeDeclaration
+
+// # Expressions
+LiteralExpr: Literal
+
+IdentifierExpr: Identifier
+
+// These operators follows the precedence rule defined elsewhere
+PrecedingUnaryOperator: "+" | "-" | "*" | "&" | "!" | "~" | "++" | "--"
+ProcedingUnaryOperator: "++" | "--"
+BinaryOperator: "+" | "-" | "*" | "/" | "%" | "^" | "&" | "|" | "&&" | "||" | ">>" | "<<"
+UnaryOperation: PrecedingUnaryOperator Expr | Expr ProcedingUnaryOperator
+BinaryOperation: Expr BinaryOperator Expr
+OperationExpr: UnaryOperation | BinaryOperation
+
+FnCallExpr: Expr "(" Expr ("," Expr)* ")"
+
+IndexExpr: Expr "[" Expr "]"
+
+StructChildExpr: Expr "." Identifier
+
+StructConstructExpr: Identifier "{" (Identifier ":" Expr)* "}"
+
+Expr: LiteralExpr | IdentifierExpr | OperationExpr | FnCallExpr | IndexExpr 
+    | StructChildExpr | StructConstructExpr
+
+// # Statements
+SingleVariableDeclaration: Identifier ("=" Expr)?
+VariableDeclaration: TypeDeclaration SingleVariableDeclaration ("," SingleVariableDeclaration)+
+
+ExprStatement: Expr
+
+// # Control Blocks
+//
+// These 
