@@ -2,7 +2,7 @@
 pub mod spec;
 
 /// Compiler to compile from AST to Kurumi OpCode
-pub mod compiler;
+// pub mod compiler;
 
 /// The virtual machine to be run
 pub mod vm;

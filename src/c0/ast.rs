@@ -11,7 +11,94 @@ use std::iter::Iterator;
 use std::ops::{Deref, DerefMut};
 use std::rc::{Rc, Weak};
 
-// ==============
+pub type TypeDisc = u64;
+
+pub struct Program {
+    pub all_vars: Vec<u64>,
+}
+
+pub enum TypeDef {
+    Primitive(PrimitiveType),
+    Struct(StructType),
+    Function(FunctionType),
+    Ref,
+    Array,
+}
+
+pub struct PrimitiveType {
+    pub occupy_bytes: usize,
+    pub is_signed: bool,
+    pub is_float: bool,
+}
+
+pub struct StructType {
+    /// Fields of this struct, described as universal identifiers
+    pub field_types: Vec<TypeDisc>,
+    pub field_offsets: Vec<usize>,
+    pub occupy_bytes: usize,
+}
+
+pub struct FunctionType {
+    pub params: Vec<TypeDisc>,
+    pub return_type: TypeDisc,
+}
+
+pub struct RefType {
+    pub target: TypeDisc,
+}
+
+pub struct ArrayType {
+    pub target: TypeDisc,
+    pub length: usize,
+}
+
+pub struct Stmt {}
+
+pub enum StmtVariant {
+    Expr,
+    Return,
+    Break,
+    Empty,
+}
+
+pub struct Expr {
+    pub var: ExprVariant,
+    pub typ: TypeDef,
+}
+
+pub enum ExprVariant {
+    Literal,
+    TypeConversion,
+    UnaryOp,
+    BinaryOp,
+    FunctionCall,
+    GetChild,
+
+    /// If conditional.
+    ///
+    /// `if` `(` Expression `)` (Expression | Statement)
+    /// (`else` (Expression | Statement))?
+    IfConditional,
+
+    /// While conditional. Takes the value on break or the last iteration as its
+    /// return value.
+    ///
+    /// `while` `(` Expression `)` BlockExpression
+    WhileConditional,
+
+    /// Block expression. Similar to that in Rust.
+    ///
+    /// `{` Statement* Expression? `}`
+    Block,
+}
+
+pub struct Block {
+    pub vars: Vec<u64>,
+    pub stmts: Vec<Stmt>,
+    pub return_type: TypeDisc,
+}
+
+pub struct BinaryOp {}
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum OpVar {
