@@ -60,6 +60,7 @@ pub struct ArrayType {
 
 pub struct Stmt {
     pub var: StmtVariant,
+    pub span: Span,
 }
 
 pub enum StmtVariant {
