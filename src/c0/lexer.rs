@@ -1,5 +1,6 @@
 use super::infra::*;
 use lazy_static::lazy_static;
+use ramp;
 use std::collections::HashMap;
 use std::iter::{Iterator, Peekable};
 use std::str::{Chars, FromStr};
@@ -10,6 +11,7 @@ use std::{cell::RefCell, fmt, fmt::Display, fmt::Formatter, hash::Hash, rc::Rc, 
 /// self-explanatory.
 pub enum TokenVariant<'a> {
     Const,
+    As,
     If,
     Else,
     While,
@@ -34,8 +36,9 @@ pub enum TokenVariant<'a> {
     GreaterThan,
     GreaterOrEqualThan,
     Identifier(&'a str),
-    IntegerLiteral(i64),
+    IntegerLiteral(ramp::Int),
     StringLiteral(String),
+    BooleanLiteral(bool),
     LParenthesis,
     RParenthesis,
     LCurlyBrace,
@@ -50,6 +53,7 @@ impl<'a> Display for TokenVariant<'a> {
         use self::TokenVariant::*;
         match self {
             Const => write!(f, "Const"),
+            As => write!(f, "As"),
             If => write!(f, "If"),
             Else => write!(f, "Else"),
             While => write!(f, "While"),
@@ -76,6 +80,7 @@ impl<'a> Display for TokenVariant<'a> {
             Identifier(ident) => write!(f, "Identifier({})", ident),
             IntegerLiteral(num) => write!(f, "Integer({})", num),
             StringLiteral(string) => write!(f, "String(\"{}\")", string),
+            BooleanLiteral(b) => write!(f, "Bool(\"{}\")", b),
             LParenthesis => write!(f, "("),
             RParenthesis => write!(f, ")"),
             LCurlyBrace => write!(f, "{{\n"),
@@ -198,6 +203,29 @@ impl<'a> Lexer<'a> {
     /// Lex a number
     fn lex_number(&mut self, iter: &mut Peekable<StringPosIter>) -> Token<'a> {
         let start_pos = iter.peek().expect("This value should be valid").0;
+
+        // radix check
+        let radix = if iter.peek().map_or(false, |ch_ind| ch_ind.1 == '0') {
+            // this digit is '0'. consume and advance
+            iter.next();
+            match iter.peek().map_or('_', |i| i.1) {
+                'b' => 2,
+                'o' => 8,
+                'x' => 16,
+                '0'..='9' => 10,
+                _ => {
+                    // This does not match any number format, return zero
+                    return Token {
+                        var: TokenVariant::IntegerLiteral(ramp::Int::zero()),
+                        src: &self.src[start_pos.index..start_pos.index + 1],
+                        span: Span::from(start_pos, start_pos.bump()),
+                    };
+                }
+            }
+        } else {
+            10
+        };
+
         while iter.peek().map_or(false, |ch_ind| (*ch_ind).1.is_digit(10)) {
             iter.next();
         }
@@ -207,7 +235,9 @@ impl<'a> Lexer<'a> {
         let end = end_pos.index;
 
         Token {
-            var: TokenVariant::IntegerLiteral(i64::from_str(&self.src[start..end]).unwrap()),
+            var: TokenVariant::IntegerLiteral(
+                ramp::Int::from_str_radix(&self.src[start..end], radix).unwrap(),
+            ),
             src: &self.src[start..end],
             span: Span::from(start_pos, end_pos),
         }
@@ -283,6 +313,9 @@ impl<'a> Lexer<'a> {
             "while" => TokenVariant::While,
             "return" => TokenVariant::Return,
             "const" => TokenVariant::Const,
+            "as" => TokenVariant::As,
+            "true" => TokenVariant::BooleanLiteral(true),
+            "false" => TokenVariant::BooleanLiteral(false),
             _ => TokenVariant::Identifier(&self.src[start.index..end.index]),
         };
 
@@ -410,9 +443,9 @@ mod test {
             .map(|token| token.var)
             .collect();
         let expected = vec![
-            TokenVariant::IntegerLiteral(123),
+            TokenVariant::IntegerLiteral(123.into()),
             TokenVariant::Plus,
-            TokenVariant::IntegerLiteral(456),
+            TokenVariant::IntegerLiteral(456.into()),
         ];
         assert_eq!(real, expected);
     }
@@ -437,7 +470,7 @@ mod test {
             TokenVariant::Identifier("int"),
             TokenVariant::Identifier("x"),
             TokenVariant::Assign,
-            TokenVariant::IntegerLiteral(3),
+            TokenVariant::IntegerLiteral(3.into()),
             TokenVariant::Semicolon,
         ];
         assert_eq!(real, expected);
