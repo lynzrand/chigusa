@@ -5,6 +5,8 @@
 
 use super::infra::*;
 use indexmap::IndexMap;
+use once_cell::{self, sync::*};
+use regex;
 use std::cell::{Ref, RefCell, RefMut};
 use std::collections::HashMap;
 use std::iter::Iterator;
@@ -30,9 +32,16 @@ pub enum SymbolDef {
     },
 }
 
+pub enum ScopeError {
+    NameConflict,
+    InvalidSymbol,
+    InvalidName,
+}
+pub type ScopeResult<T> = Result<T, ScopeError>;
+
 pub struct Scope {
     pub last: Option<Ptr<Scope>>,
-    pub defs: HashMap<String, Ptr<SymbolDef>>,
+    pub defs: IndexMap<String, Ptr<SymbolDef>>,
 }
 
 impl Scope {
@@ -43,7 +52,26 @@ impl Scope {
                 .and_then(|last| last.borrow().find_def(name))
         })
     }
+
+    pub fn find_def_self(&self, name: &str) -> Option<Ptr<SymbolDef>> {
+        self.defs.get(name).map(|def| def.clone())
+    }
+
+    pub fn insert_def(&mut self, name: &str, def: SymbolDef) -> ScopeResult<()> {
+        if self.defs.contains_key(name) {
+            Err(ScopeError::NameConflict)
+        } else {
+            if ident_regex.is_match(name) {
+                self.defs.insert(name.to_owned(), Ptr::new(def));
+                Ok(())
+            } else {
+                Err(ScopeError::InvalidName)
+            }
+        }
+    }
 }
+static ident_regex: Lazy<regex::Regex> =
+    Lazy::new(|| regex::Regex::new("^[_a-zA-Z][_a-zA-Z0-9]*$").unwrap());
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum TypeDef {
