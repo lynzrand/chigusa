@@ -19,49 +19,82 @@ pub struct Program {
     pub types: Vec<TypeDef>,
 }
 
+pub enum SymbolDef {
+    Typ {
+        def: TypeDef,
+    },
+    Var {
+        typ: TypeDef,
+        is_const: bool,
+        is_callable: bool,
+    },
+}
+
 pub struct Scope {
     pub last: Option<Ptr<Scope>>,
-    pub types: Vec<usize>,
-    pub vars: Vec<usize>,
+    pub defs: HashMap<String, Ptr<SymbolDef>>,
+}
+
+impl Scope {
+    pub fn find_def(&self, name: &str) -> Option<Ptr<SymbolDef>> {
+        self.defs.get(name).map(|def| def.clone()).or_else(|| {
+            self.last
+                .as_ref()
+                .and_then(|last| last.borrow().find_def(name))
+        })
+    }
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum TypeDef {
+    /// A primitive type. Either an integer or a IEEE-754 floating point
+    ///
+    /// Only integers of length 1 (bool), 8, 16, 32 and 64, and floats of length
+    /// 32, 64 are supported.
     Primitive(PrimitiveType),
+    /// A struct type. Contains multiple fields at different offsets.
     Struct(StructType),
+    /// A function type. Contains a vector of input parameters and one return
+    /// value.
     Function(FunctionType),
+    /// A reference type. This is the "pointer" to type called in other languages.
     Ref(RefType),
+    /// An array of items. Optionally contains a length parameter.
     Array(ArrayType),
+    /// Unit type. Also called "void" if you like that name.
     Unit,
+    /// This type is unknown. Might be resolved later.
     Unknown,
+    /// Crap. We've found a type error.
     TypeErr,
 }
 
 impl TypeDef {
-    pub fn can_implicit_conv_to(&self, other: &TypeDef) -> bool {
-        use TypeDef::*;
-        match other {
-            Unit | Unknown | TypeErr => true,
-            _ => match self {
-                Primitive(p) => {
-                    if let Primitive(o) = other {
-                        if o.occupy_bytes >= p.occupy_bytes && o.var == p.var {
-                            true
-                        } else {
-                            false
-                        }
-                    } else {
-                        false
-                    }
-                }
-                Ref(r) => {
-                    // TODO: r.target == Unit
-                    false
-                }
-                _ => false,
-            },
-        }
-    }
+    // Nope. No implicit conversion here!
+    // pub fn can_implicit_conv_to(&self, other: &TypeDef) -> bool {
+    //     use TypeDef::*;
+    //     match other {
+    //         Unit | Unknown | TypeErr => true,
+    //         _ => match self {
+    //             Primitive(p) => {
+    //                 if let Primitive(o) = other {
+    //                     if o.occupy_bytes >= p.occupy_bytes && o.var == p.var {
+    //                         true
+    //                     } else {
+    //                         false
+    //                     }
+    //                 } else {
+    //                     false
+    //                 }
+    //             }
+    //             Ref(r) => {
+    //                 // TODO: r.target == Unit
+    //                 false
+    //             }
+    //             _ => false,
+    //         },
+    //     }
+    // }
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
