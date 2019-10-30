@@ -5,8 +5,8 @@
 pub mod c0;
 
 /// Middle intermediate representation.
-/// 
-/// This is where type checking happens. This module compiles AST into MIR and 
+///
+/// This is where type checking happens. This module compiles AST into MIR and
 /// checks types and other constraints.
 pub mod mir;
 
@@ -16,4 +16,3 @@ pub mod kurumi;
 
 #[cfg(llvm)]
 pub mod llvm;
-

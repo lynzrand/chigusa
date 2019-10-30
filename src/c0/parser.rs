@@ -4,6 +4,7 @@ use super::lexer::*;
 use bimap::BiMap;
 use std::iter::Peekable;
 
+use either::Either;
 use LoopCtrl::*;
 
 pub trait IntoParser<'a> {
@@ -104,13 +105,63 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn p_stmt_or_expr(&mut self) -> either::Either<Stmt, Expr> {
+    fn p_stmt_or_expr(&mut self, scope: Ptr<Scope>) -> ParseResult<Either<Stmt, Expr>> {
         let next = self.lexer.peek().unwrap();
+
+        match next.var {
+            TokenVariant::While => self.p_while_stmt(scope).map(|inner| Either::Left(inner)),
+            TokenVariant::If => self.p_if_expr(scope).map(|inner| Either::Right(inner)),
+            TokenVariant::Identifier(i) => match scope.borrow().find_def(i) {
+                None => Err(parse_err(
+                    ParseErrVariant::CannotFindIdent(i.to_owned()),
+                    next.span,
+                )),
+                Some(def) => match &*def.borrow() {
+                    SymbolDef::Typ { .. } => self
+                        .p_decl_stmt(scope.clone())
+                        .map(|inner| Either::Left(inner)),
+                    SymbolDef::Var { .. } => {
+                        self.p_expr(scope.clone()).map(|inner| Either::Right(inner))
+                    }
+                },
+            },
+            _ => Err(parse_err(
+                ParseErrVariant::UnexpectedToken(next.var.clone()),
+                next.span,
+            )),
+        }
+        // match scope.borrow().find_def();
+
+        // unimplemented!()
+    }
+
+    fn p_block_expr(&mut self, scope: Ptr<Scope>) -> ParseResult<Expr> {
         unimplemented!()
     }
 
-    fn p_expr(&mut self) {
+    fn p_block_expr_no_scope(&mut self, scope: Ptr<Scope>) -> ParseResult<Expr> {
         unimplemented!()
+    }
+
+    fn p_fn(&mut self, scope: Ptr<Scope>) -> ParseResult<Stmt> {
+        unimplemented!()
+    }
+
+    fn p_while_stmt(&mut self, scope: Ptr<Scope>) -> ParseResult<Stmt> {
+        unimplemented!()
+    }
+
+    fn p_if_expr(&mut self, scope: Ptr<Scope>) -> ParseResult<Expr> {
+        unimplemented!()
+    }
+
+    fn p_decl_stmt(&mut self, scope: Ptr<Scope>) -> ParseResult<Stmt> {
+        unimplemented!()
+    }
+
+    fn p_expr(&mut self, scope: Ptr<Scope>) -> ParseResult<Expr> {
+        let stack = Vec::<Expr>::new();
+        unimplemented!();
     }
 
     fn p_literal(&mut self) -> ParseResult<Expr> {
