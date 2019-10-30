@@ -118,17 +118,14 @@ impl<'a> Parser<'a> {
         match t.var {
             TokenVariant::IntegerLiteral(i) => Ok(Expr {
                 var: ExprVariant::Literal(Literal::Integer { val: i }),
-                typ: unimplemented!(), // TODO: type i64
                 span: t.span,
             }),
             TokenVariant::StringLiteral(s) => Ok(Expr {
                 var: ExprVariant::Literal(Literal::String { val: s }),
-                typ: unimplemented!(), // TODO: type String
                 span: t.span,
             }),
             TokenVariant::BooleanLiteral(b) => Ok(Expr {
                 var: ExprVariant::Literal(Literal::Boolean { val: b }),
-                typ: unimplemented!(), // TODO: type i1
                 span: t.span,
             }),
             _ => Err(parse_err(ParseErrVariant::InternalErr, t.span)),

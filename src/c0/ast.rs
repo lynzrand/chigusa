@@ -185,7 +185,6 @@ pub enum StmtVariant {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Expr {
     pub var: ExprVariant,
-    pub typ: TypeDef,
     pub span: Span,
 }
 
