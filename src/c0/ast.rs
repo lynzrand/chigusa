@@ -5,6 +5,8 @@
 
 use super::infra::*;
 use indexmap::IndexMap;
+use once_cell::{self, sync::*};
+use regex;
 use std::cell::{Ref, RefCell, RefMut};
 use std::collections::HashMap;
 use std::iter::Iterator;
@@ -14,29 +16,129 @@ use std::rc::{Rc, Weak};
 pub type TypeIdent = u64;
 
 pub struct Program {
-    pub all_vars: Vec<u64>,
-    pub all_types: Vec<u64>,
+    pub scope: Ptr<Scope>,
+    pub vars: Vec<VarDef>,
+    pub types: Vec<TypeDef>,
 }
 
+pub enum SymbolDef {
+    Typ {
+        def: TypeDef,
+    },
+    Var {
+        typ: TypeDef,
+        is_const: bool,
+        is_callable: bool,
+    },
+}
+
+pub enum ScopeError {
+    NameConflict,
+    InvalidSymbol,
+    InvalidName,
+}
+pub type ScopeResult<T> = Result<T, ScopeError>;
+
+pub struct Scope {
+    pub last: Option<Ptr<Scope>>,
+    pub defs: IndexMap<String, Ptr<SymbolDef>>,
+}
+
+impl Scope {
+    pub fn find_def(&self, name: &str) -> Option<Ptr<SymbolDef>> {
+        self.defs.get(name).map(|def| def.clone()).or_else(|| {
+            self.last
+                .as_ref()
+                .and_then(|last| last.borrow().find_def(name))
+        })
+    }
+
+    pub fn find_def_self(&self, name: &str) -> Option<Ptr<SymbolDef>> {
+        self.defs.get(name).map(|def| def.clone())
+    }
+
+    pub fn insert_def(&mut self, name: &str, def: SymbolDef) -> ScopeResult<()> {
+        if self.defs.contains_key(name) {
+            Err(ScopeError::NameConflict)
+        } else {
+            if ident_regex.is_match(name) {
+                self.defs.insert(name.to_owned(), Ptr::new(def));
+                Ok(())
+            } else {
+                Err(ScopeError::InvalidName)
+            }
+        }
+    }
+}
+static ident_regex: Lazy<regex::Regex> =
+    Lazy::new(|| regex::Regex::new("^[_a-zA-Z][_a-zA-Z0-9]*$").unwrap());
+
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub enum TypeDef {
+    /// A primitive type. Either an integer or a IEEE-754 floating point
+    ///
+    /// Only integers of length 1 (bool), 8, 16, 32 and 64, and floats of length
+    /// 32, 64 are supported.
     Primitive(PrimitiveType),
+    /// A struct type. Contains multiple fields at different offsets.
     Struct(StructType),
+    /// A function type. Contains a vector of input parameters and one return
+    /// value.
     Function(FunctionType),
+    /// A reference type. This is the "pointer" to type called in other languages.
     Ref(RefType),
+    /// An array of items. Optionally contains a length parameter.
     Array(ArrayType),
+    /// Unit type. Also called "void" if you like that name.
+    Unit,
+    /// This type is unknown. Might be resolved later.
+    Unknown,
+    /// Crap. We've found a type error.
+    TypeErr,
 }
 
+impl TypeDef {
+    // Nope. No implicit conversion here!
+    // pub fn can_implicit_conv_to(&self, other: &TypeDef) -> bool {
+    //     use TypeDef::*;
+    //     match other {
+    //         Unit | Unknown | TypeErr => true,
+    //         _ => match self {
+    //             Primitive(p) => {
+    //                 if let Primitive(o) = other {
+    //                     if o.occupy_bytes >= p.occupy_bytes && o.var == p.var {
+    //                         true
+    //                     } else {
+    //                         false
+    //                     }
+    //                 } else {
+    //                     false
+    //                 }
+    //             }
+    //             Ref(r) => {
+    //                 // TODO: r.target == Unit
+    //                 false
+    //             }
+    //             _ => false,
+    //         },
+    //     }
+    // }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub enum PrimitiveTypeVar {
     SignedInt,
     UnsignedInt,
     Float,
 }
 
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct PrimitiveType {
     pub occupy_bytes: usize,
     pub var: PrimitiveTypeVar,
 }
 
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct StructType {
     /// Fields of this struct, described as universal identifiers
     pub field_types: Vec<TypeIdent>,
@@ -44,25 +146,35 @@ pub struct StructType {
     pub occupy_bytes: usize,
 }
 
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct FunctionType {
     pub params: Vec<TypeIdent>,
     pub return_type: TypeIdent,
 }
 
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct RefType {
     pub target: TypeIdent,
 }
 
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ArrayType {
     pub target: TypeIdent,
     pub length: usize,
 }
 
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct VarDef {
+    pub typ: TypeDef,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Stmt {
     pub var: StmtVariant,
     pub span: Span,
 }
 
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub enum StmtVariant {
     Expr(Expr),
     Return(Expr),
@@ -70,12 +182,13 @@ pub enum StmtVariant {
     Empty,
 }
 
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Expr {
     pub var: ExprVariant,
-    pub typ: TypeDef,
     pub span: Span,
 }
 
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub enum ExprVariant {
     Literal(Literal),
     TypeConversion(TypeConversion),
@@ -103,57 +216,67 @@ pub enum ExprVariant {
     Block(Block),
 }
 
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub enum Literal {
     Integer { val: ramp::int::Int },
-    Float { val: f64 },
-    Struct { typ: u64, fields: Vec<Expr> },
+    Float { val: ramp::int::Int, exp: u64 },
+    Struct { typ: TypeDef, fields: Vec<Expr> },
     Boolean { val: bool },
     String { val: String },
 }
 
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct TypeConversion {
     pub from: TypeIdent,
     pub expr: Ptr<Expr>,
 }
 
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct IfConditional {
     pub cond: Ptr<Expr>,
     pub if_block: Ptr<Expr>,
     pub else_block: Option<Ptr<Expr>>,
 }
 
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct WhileConditional {
     pub cond: Ptr<Expr>,
     pub block: Ptr<Block>,
 }
 
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Block {
-    pub vars: Vec<u64>,
+    pub vars: Vec<usize>,
     pub stmts: Vec<Stmt>,
     pub return_type: TypeIdent,
     pub val: Ptr<Expr>,
 }
 
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct BinaryOp {
     pub lhs: Ptr<Expr>,
     pub rhs: Ptr<Expr>,
     pub op: OpVar,
 }
 
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct UnaryOp {
     pub tgt: Ptr<Expr>,
     pub op: OpVar,
 }
 
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct FunctionCall {
-    pub func: u64,
+    pub func: usize,
     pub params: Vec<Expr>,
 }
 
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct StructChild {
-    pub idx: u64,
+    pub idx: usize,
 }
 
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ArrayChild {
     pub idx: Ptr<Expr>,
 }

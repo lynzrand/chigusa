@@ -293,7 +293,7 @@ impl<T> Ptr<T> {
 
 impl<T> Clone for Ptr<T> {
     fn clone(&self) -> Self {
-        Ptr(self.0.clone())
+        Ptr(Rc::clone(&self.0))
     }
 }
 
