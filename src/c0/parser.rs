@@ -82,7 +82,14 @@ impl<'a> Parser<'a> {
 
     fn p_stmt_or_expr(&mut self) -> either::Either<Stmt, Expr> {
         let next = self.lexer.peek().unwrap();
+
+
+        unimplemented!()
     }
 
-    fn p_expr(&mut self) {}
+    fn p_expr(&mut self)->ParseResult<Expr> {
+        unimplemented!()
+    }
+
+    
 }

@@ -131,6 +131,7 @@ pub struct Block {
     pub vars: Vec<u64>,
     pub stmts: Vec<Stmt>,
     pub return_type: TypeIdent,
+    pub val: Ptr<Expr>,
 }
 
 pub struct BinaryOp {

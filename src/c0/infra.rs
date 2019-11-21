@@ -446,6 +446,18 @@ impl<'a> Display for ParseError<'a> {
     }
 }
 
+impl <'a> std::error::Error for ParseError<'a>{
+    fn description(&self) -> &str {
+        "description() is deprecated; use Display"
+    }
+    fn cause(&self) -> Option<&dyn std::error::Error> {
+        self.source()
+    }
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> { None }
+    
+
+}
+
 #[derive(Debug)]
 pub enum ParseErrVariant<'a> {
     ExpectToken(TokenVariant<'a>),
