@@ -109,6 +109,7 @@ impl TypeVar {
 pub struct Parser<'a> {
     lexer: LexerWrapped<'a>,
     type_var: TypeVar,
+    cur_token: Token<'a>,
 }
 
 impl<'a> Parser<'a> {
@@ -116,6 +117,11 @@ impl<'a> Parser<'a> {
         Parser {
             lexer: lexer.peekable(),
             type_var: TypeVar::new(),
+            cur_token: Token {
+                var: TokenVariant::Dummy,
+                // src: Span::zero(),
+                span: Span::zero(),
+            },
         }
     }
 

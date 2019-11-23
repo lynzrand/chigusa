@@ -46,6 +46,7 @@ pub enum TokenVariant<'a> {
     Assign,
     Comma,
     EndOfFile,
+    Dummy,
 }
 
 impl<'a> Display for TokenVariant<'a> {
@@ -98,9 +99,6 @@ impl<'a> Display for TokenVariant<'a> {
 pub struct Token<'a> {
     /// Its variant
     pub var: TokenVariant<'a>,
-
-    /// its source string
-    pub src: &'a str,
 
     /// The space the token occupies
     pub span: Span,
@@ -217,7 +215,7 @@ impl<'a> Lexer<'a> {
                     // This does not match any number format, return zero
                     return Token {
                         var: TokenVariant::IntegerLiteral(ramp::Int::zero()),
-                        src: &self.src[start_pos.index..start_pos.index + 1],
+                        // src: &self.src[start_pos.index..start_pos.index + 1],
                         span: Span::from(start_pos, start_pos.bump()),
                     };
                 }
@@ -238,7 +236,7 @@ impl<'a> Lexer<'a> {
             var: TokenVariant::IntegerLiteral(
                 ramp::Int::from_str_radix(&self.src[start..end], radix).unwrap(),
             ),
-            src: &self.src[start..end],
+            // src: &self.src[start..end],
             span: Span::from(start_pos, end_pos),
         }
     }
