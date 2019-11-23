@@ -141,7 +141,7 @@ impl Parser {
         match next.var {
             TokenVariant::While => self.p_while_stmt(scope).map(|inner| Either::Left(inner)),
             TokenVariant::If => self.p_if_expr(scope).map(|inner| Either::Right(inner)),
-            TokenVariant::Identifier(i) => match scope.borrow().find_def(i) {
+            TokenVariant::Identifier(i) => match scope.borrow().find_def(&i) {
                 None => Err(parse_err(
                     ParseErrVariant::CannotFindIdent(i.to_owned()),
                     next.span,

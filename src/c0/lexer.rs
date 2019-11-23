@@ -36,9 +36,7 @@ pub enum TokenVariant {
     GreaterThan,
     GreaterOrEqualThan,
     Identifier(String),
-    IntegerLiteral(ramp::Int),
-    StringLiteral(String),
-    BooleanLiteral(bool),
+    Literal(Literal),
     LParenthesis,
     RParenthesis,
     LCurlyBrace,
@@ -79,9 +77,7 @@ impl Display for TokenVariant {
             GreaterThan => write!(f, ">"),
             GreaterOrEqualThan => write!(f, ">="),
             Identifier(ident) => write!(f, "Identifier({})", ident),
-            IntegerLiteral(num) => write!(f, "Integer({})", num),
-            StringLiteral(string) => write!(f, "String(\"{}\")", string),
-            BooleanLiteral(b) => write!(f, "Bool(\"{}\")", b),
+            Literal(b) => write!(f, "Literal(\"{}\")", b),
             LParenthesis => write!(f, "("),
             RParenthesis => write!(f, ")"),
             LCurlyBrace => write!(f, "{{\n"),
@@ -90,6 +86,26 @@ impl Display for TokenVariant {
             Comma => write!(f, ","),
             EndOfFile => write!(f, "#"),
             // _ => write!(f, "???"),
+        }
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, Hash, Clone)]
+enum Literal {
+    Char(char),
+    String(String),
+    Boolean(bool),
+    Integer(ramp::Int),
+}
+
+impl Display for Literal {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        use self::Literal::*;
+        match self {
+            Char(c) => write!(f, "Char({})", c.escape_debug()),
+            String(s) => write!(f, "String(\"{}\")", s.escape_debug()),
+            Boolean(b) => write!(f, "Boolean({})", b),
+            Integer(i) => write!(f, "Integer({})", i),
         }
     }
 }
@@ -185,43 +201,31 @@ impl Iterator for StringPosIter {
 }
 
 pub struct Lexer {
-    lexer: LexerInner,
     iter: Peekable<StringPosIter>,
-}
-
-impl Lexer {
-    pub fn new(iter: Box<dyn Iterator<Item = char>>) -> Lexer {
-        Lexer {
-            lexer: LexerInner::new(),
-            iter: StringPosIter::new(iter).peekable(),
-        }
-    }
-}
-pub struct LexerInner {
-    // src: Box<dyn Iterator<Item = (Pos, char)>>,
-    completed: bool,
 }
 
 impl Iterator for Lexer {
     type Item = Token;
     fn next(&mut self) -> Option<Token> {
-        self.lexer.get_next_token(&mut self.iter)
+        self.get_next_token()
     }
 }
 
-impl LexerInner {
-    pub fn new() -> LexerInner {
-        Self { completed: false }
+impl Lexer {
+    pub fn new(iter: Box<dyn Iterator<Item = char>>) -> Lexer {
+        Lexer {
+            iter: StringPosIter::new(iter).peekable(),
+        }
     }
 
     /// **Not Intended For Direct Use.**
     ///
     /// This method requires creating a character index iterator for the `src`
     /// field. Thus it must be used inside an `LexerIterator`.
-    pub fn get_next_token(&mut self, iter: &mut Peekable<StringPosIter>) -> Option<Token> {
-        Self::skip_spaces(iter);
+    pub fn get_next_token(&mut self) -> Option<Token> {
+        Self::skip_spaces(&mut self.iter);
         // the first character of next token
-        let c = match iter.peek() {
+        let c = match self.iter.peek() {
             Some((_, '\0')) => return None,
             Some((_, c)) => c,
             // spaces may occur at the end of file
@@ -229,27 +233,27 @@ impl LexerInner {
         };
 
         Some(match c {
-            '0'..='9' => self.lex_number(iter),
-            'a'..='z' | 'A'..='Z' | '_' => self.lex_identifier(iter),
-            '\"' => self.lex_string_literal(iter),
-            '\'' => self.lex_char_literal(iter),
+            '0'..='9' => self.lex_number(),
+            'a'..='z' | 'A'..='Z' | '_' => self.lex_identifier(),
+            '\"' => self.lex_string_literal(),
+            '\'' => self.lex_char_literal(),
             '+' | '-' | '*' | '/' | '<' | '>' | '=' | '!' | '|' | '&' | '^' | '(' | ')' | '{'
-            | '}' | ',' | ';' => self.lex_operator(iter),
+            | '}' | ',' | ';' => self.lex_operator(),
             // TODO: Add to errors and skip this line
             _ => panic!("Unexpected character '{}'", c),
         })
     }
 
     /// Lex a number
-    fn lex_number(&mut self, iter: &mut Peekable<StringPosIter>) -> Token {
-        let start_pos = iter.peek().expect("This value should be valid").0;
+    fn lex_number(&mut self) -> Token {
+        let start_pos = self.iter.peek().expect("This value should be valid").0;
         let number = String::new();
 
         // radix check
-        let radix = if iter.peek().map_or(false, |ch_ind| ch_ind.1 == '0') {
+        let radix = if self.iter.peek().map_or(false, |ch_ind| ch_ind.1 == '0') {
             // this digit is '0'. consume and advance
-            iter.next();
-            match iter.peek().map_or('_', |i| i.1) {
+            self.iter.next();
+            match self.iter.peek().map_or('_', |i| i.1) {
                 'b' => 2,
                 'o' => 8,
                 'x' => 16,
@@ -257,7 +261,7 @@ impl LexerInner {
                 _ => {
                     // This does not match any number format, return zero
                     return Token {
-                        var: TokenVariant::IntegerLiteral(ramp::Int::zero()),
+                        var: TokenVariant::Literal(Literal::Integer(ramp::Int::zero())),
                         // src: &self.src[start_pos.index..start_pos.index + 1],
                         span: Span::from(start_pos, start_pos.bump()),
                     };
@@ -267,29 +271,64 @@ impl LexerInner {
             10
         };
 
-        while iter.peek().map_or(false, |ch_ind| (*ch_ind).1.is_digit(10)) {
-            number.push(iter.next().unwrap().1);
+        while self
+            .iter
+            .peek()
+            .map_or(false, |ch_ind| (*ch_ind).1.is_digit(10))
+        {
+            number.push(self.iter.next().unwrap().1);
         }
 
-        let end_pos = iter.peek().unwrap().0;
+        let end_pos = self.iter.peek().unwrap().0;
 
         let start = start_pos.index;
         let end = end_pos.index;
 
         Token {
-            var: TokenVariant::IntegerLiteral(ramp::Int::from_str_radix(&number, radix).unwrap()),
+            var: TokenVariant::Literal(Literal::Integer(
+                ramp::Int::from_str_radix(&number, radix).unwrap(),
+            )),
             // src: &self.src[start..end],
             span: Span::from(start_pos, end_pos),
         }
     }
 
-    fn lex_char_literal(&mut self, iter: &mut Peekable<StringPosIter>) -> Token {
-        unimplemented!()
+    fn lex_char_literal(&mut self) -> Token {
+        let (start, start_quote) = self.iter.next().expect("Should be valid");
+        if start_quote != '\'' {
+            panic!(
+                "A character literal must start with a quotation mark! found at {}",
+                start
+            );
+        }
+
+        let ch = match self
+            .iter
+            .next()
+            .expect("A character literal should have a character")
+            .1
+        {
+            '\\' => Self::unescape_character(&mut self.iter),
+            ch @ _ => ch,
+        };
+
+        let (end, end_quote) = self.iter.next().expect("Should be valid");
+        if end_quote != '\'' {
+            panic!(
+                "A character literal must end with a quotation mark! found at {}",
+                start
+            );
+        }
+
+        Token {
+            var: TokenVariant::Literal(Literal::Char(ch)),
+            span: Span::from(start, end),
+        }
     }
 
     /// Lex a string literal.
-    fn lex_string_literal(&mut self, iter: &mut Peekable<StringPosIter>) -> Token {
-        let (start, start_quotation_mark) = iter.next().expect("This value should be valid");
+    fn lex_string_literal(&mut self) -> Token {
+        let (start, start_quotation_mark) = self.iter.next().expect("This value should be valid");
 
         if start_quotation_mark != '"' {
             panic!(
@@ -302,11 +341,13 @@ impl LexerInner {
         let mut tgt_string = String::new();
 
         loop {
-            let (this_index, this_char) = iter.next().expect("Unexpected EOF in string literal");
+            let (this_index, this_char) =
+                self.iter.next().expect("Unexpected EOF in string literal");
             match this_char {
                 '\\' => {
                     // Deal with escaping stuff
-                    let (_, next_char) = iter.next().expect("Unexpected EOF in string literal");
+                    let (_, next_char) =
+                        self.iter.next().expect("Unexpected EOF in string literal");
                     let pushed_char = match next_char {
                         'n' => '\n',
                         't' => '\t',
@@ -335,22 +376,23 @@ impl LexerInner {
         }
 
         Token {
-            var: TokenVariant::StringLiteral(tgt_string),
+            var: TokenVariant::Literal(Literal::String(tgt_string)),
             span: Span::from(start, end),
         }
     }
 
     /// Lex an identifier.
-    fn lex_identifier(&mut self, iter: &mut Peekable<StringPosIter>) -> Token {
-        let start = iter.peek().expect("This value should be valid").0;
+    fn lex_identifier(&mut self) -> Token {
+        let start = self.iter.peek().expect("This value should be valid").0;
         let ident = String::new();
-        while iter
+        while self
+            .iter
             .peek()
             .map_or(false, |ch_ind| (*ch_ind).1.is_alphanumeric())
         {
-            ident.push(iter.next().unwrap().1);
+            ident.push(self.iter.next().unwrap().1);
         }
-        let end = iter.peek().unwrap().0;
+        let end = self.iter.peek().unwrap().0;
         let variation = match &ident[..] {
             "if" => TokenVariant::If,
             "else" => TokenVariant::Else,
@@ -358,8 +400,8 @@ impl LexerInner {
             "return" => TokenVariant::Return,
             "const" => TokenVariant::Const,
             "as" => TokenVariant::As,
-            "true" => TokenVariant::BooleanLiteral(true),
-            "false" => TokenVariant::BooleanLiteral(false),
+            "true" => TokenVariant::Literal(Literal::Boolean(true)),
+            "false" => TokenVariant::Literal(Literal::Boolean(false)),
             _ => TokenVariant::Identifier(ident),
         };
 
@@ -370,14 +412,14 @@ impl LexerInner {
     }
 
     /// Lex an operator.
-    fn lex_operator(&mut self, iter: &mut Peekable<StringPosIter>) -> Token {
-        let (start, first_char) = iter.next().expect("This value should be valid");
+    fn lex_operator(&mut self) -> Token {
+        let (start, first_char) = self.iter.next().expect("This value should be valid");
         let mut end = start.inc();
         let second_char: Option<char> =
             OperatorCombination
                 .get(&first_char)
                 .map_or(None, |vec: &Box<Vec<char>>| {
-                    iter.peek().map_or(None, |&(_, ch)| {
+                    self.iter.peek().map_or(None, |&(_, ch)| {
                         if vec[..].contains(&ch) {
                             Some(ch)
                         } else {
@@ -386,7 +428,7 @@ impl LexerInner {
                     })
                 });
         if second_char.is_some() {
-            iter.next();
+            self.iter.next();
             end = end.inc();
         }
 
@@ -456,6 +498,52 @@ impl LexerInner {
             Some((_, ch)) => ch.is_whitespace(),
         } {
             iter.next();
+        }
+    }
+
+    /// Unescape a character. The escape sequence follows JSON's rules.
+    ///
+    /// `iter` should be in the state described below (aka before the first
+    /// escaped character):
+    ///
+    /// ```plaintext
+    ///     "\n"
+    ///       ^ next
+    ///     "\u1234"
+    ///       ^ next
+    ///     "\u{56789}"
+    ///       ^ next
+    /// ```
+    ///
+    /// # Rules
+    ///
+    /// | Sequence | Meaning |
+    /// | -------- | ------------ |
+    /// | `\n`     | Line Feed (LF)   |
+    /// | `\r`     | Carrige Return (CR) |
+    /// | `\t`     | Tab character |
+    /// | `\\`     | Backslash (`\`) |
+    /// | `\'`     | Signle quote (`'`) |
+    /// | `\"`     | Double quote (`"`) |
+    /// | `\xNN`   | Character of value `0xNN` |
+    /// | `\uNNNN` | Unicode character of value `0xNNNN` |
+    /// | `\u{NN...N} | Unicode character of value `0xNN...N` |
+    fn unescape_character(iter: &mut Peekable<StringPosIter>) -> char {
+        match iter.next().expect("Bad escaped value").1 {
+            'n' => '\n',
+            't' => '\t',
+            'r' => '\r',
+            '\\' => '\\',
+            '"' => '"',
+            '\'' => '\'',
+
+            'x' => unimplemented!("Read two characters in and make it a hexadecimal"),
+
+            'u' => match iter.next().expect("Bad escape value") {
+                _ => unimplemented!("Read 4 chars in or until closed curly brace"),
+            },
+
+            ch @ _ => panic!("Bad escape: {}", ch),
         }
     }
 }
