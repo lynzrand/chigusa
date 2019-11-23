@@ -293,7 +293,7 @@ impl<T> Ptr<T> {
 
 impl<T> Clone for Ptr<T> {
     fn clone(&self) -> Self {
-        Ptr(self.0.clone())
+        Ptr(Rc::clone(&self.0))
     }
 }
 
@@ -309,7 +309,7 @@ impl<T> IntoPtr<T> for Rc<RefCell<T>> {
 
 pub trait AstNode {
     fn span(&self) -> Span;
-    fn return_type(&self, scope: &super::ast::Scope) -> Option<&str>;
+    // fn return_type(&self, scope: &super::ast::Scope) -> Option<&str>;
 }
 
 #[inline]
@@ -444,6 +444,18 @@ impl<'a> Display for ParseError<'a> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:#?} at {}", self.var, self.span)
     }
+}
+
+impl <'a> std::error::Error for ParseError<'a>{
+    fn description(&self) -> &str {
+        "description() is deprecated; use Display"
+    }
+    fn cause(&self) -> Option<&dyn std::error::Error> {
+        self.source()
+    }
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> { None }
+    
+
 }
 
 #[derive(Debug)]

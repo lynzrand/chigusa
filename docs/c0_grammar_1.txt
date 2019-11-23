@@ -9,7 +9,7 @@ IntegerLiteral: (DecimalInteger | HexadecimalNumber)
 FloatLiteral: DecimalInteger DecimalFractionalPart DecimalExponentPart?
     | DecimalInteger DecimalExponentPart
 
-EscapedChar: "\" ([ntrb\\'"] | 'u' [0-9a-fA-F]{4})
+EscapedChar: "\" ([ntrb\\'"] | "u{" [0-9a-fA-F]{4} "}")
 Char: [^\\'"] | EscapedChar
 CharLiteral: "'" Char "'"
 StringLiteral: "\"" Char* "\""
@@ -30,8 +30,13 @@ kwReturn: "return"
 kwAs: "as"
 kwIf: "if"
 kwWhile: "while"
+kwBreak: "break"
+kwConst: "const"
 
 // # Items
+
+// The latter `;` is used only for function pointers,
+// e.g. `Fn<int, double; bool>` for `bool (int, double)`
 GenericTypeAnnotation: "<" TypeDeclaration ("," TypeDeclaration)* (";" TypeDeclaration)? ">"
 GenericTypeDeclaration: Identifier GenericTypeAnnotation?
 ArrayTypeDeclaration: "[" TypeDeclaration (";" IntegerLiteral)? "]"
@@ -39,9 +44,11 @@ ReferenceTypeDeclaration: "&" TypeDeclaration
 TypeDeclaration: ReferenceTypeDeclaration | ArrayTypeDeclaration | GenericTypeDeclaration
 
 // # Expressions
+//
+// "Expression" is abbreviated as "Expr" below.
 LiteralExpr: Literal
 
-IdentifierExpr: Identifier
+IdentifierExpr: Identifier<Variable>
 
 // These operators follows the precedence rule defined elsewhere
 PrecedingUnaryOperator: "+" | "-" | "*" | "&" | "!" | "~" | "++" | "--"
@@ -55,19 +62,40 @@ FnCallExpr: Expr "(" Expr ("," Expr)* ")"
 
 IndexExpr: Expr "[" Expr "]"
 
-StructChildExpr: Expr "." Identifier
+StructChildExpr: Expr "." Identifier<StructChild>
 
-StructConstructExpr: Identifier "{" (Identifier ":" Expr)* "}"
+StructConstructExpr: Identifier<Type+StructName> "{" (Identifier ":" Expr)* "}"
+
+TypeCastExpr: Expr "as" TypeDefinition
+
+BlockExprBody: Stmt* Expr | Stmt*
+BlockExpr: "{" BlockExprBody "}"
 
 Expr: LiteralExpr | IdentifierExpr | OperationExpr | FnCallExpr | IndexExpr 
-    | StructChildExpr | StructConstructExpr
+    | StructChildExpr | StructConstructExpr | TypeCastExpr | IfExpr | WhileExpr
+
+// # Flow Control
+
+IfExpr: "if" "(" Expr<bool|int> ")" BlockExpr ("else" BlockExpr)?
+WhileExpr: "while" "(" Expr<bool|int> ")" Stmt
+BreakStmt: "break" Expr? ";"
+ReturnStmt: "return" Expr? ";"
 
 // # Statements
-SingleVariableDeclaration: Identifier ("=" Expr)?
-VariableDeclaration: TypeDeclaration SingleVariableDeclaration ("," SingleVariableDeclaration)+
-
-ExprStatement: Expr
-
-// # Control Blocks
 //
-// These 
+// "Statement" is abbreviated as "Stmt" below.
+SingleVarDecl: Identifier ("=" Expr)?
+VarDecl: "const"? TypeDeclaration SingleVarDecl ("," SingleVarDecl)+
+
+EmptyStmt: ";"
+
+ExprStmt: Expr ";"
+
+// # Large Structures
+FnParamDecl: "(" (TypeDefinition Identifier)* ")"
+FnDecl: TypeDefinition Identifier FnParamsDecl (BlockExpr | ";")
+
+// structs are identified directly by their name; no "struct"
+StructDecl: "struct" Identifier "{" (TypeDefinition Identifier ",") "}"
+
+Program: (StructDecl | FnDecl | VarDecl)*
