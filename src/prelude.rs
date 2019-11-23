@@ -1,4 +1,4 @@
-use super::lexer::TokenVariant;
+use crate::c0::lexer::TokenVariant;
 use std::str::{Chars, FromStr};
 use std::{
     cell::{Ref, RefCell, RefMut},
@@ -221,55 +221,6 @@ impl std::ops::Add for Span {
     }
 */
 
-pub struct StringPosIter<'a> {
-    chars: std::iter::Chain<Chars<'a>, std::iter::Once<char>>,
-    pos: Pos,
-    is_last_cr: bool,
-}
-
-impl<'a> StringPosIter<'a> {
-    pub fn new(string: &'a str) -> StringPosIter<'a> {
-        let chars = string.chars().chain(std::iter::once('\0'));
-        StringPosIter {
-            chars,
-            pos: Pos::zero(),
-            is_last_cr: false,
-        }
-    }
-}
-
-impl<'a> Iterator for StringPosIter<'a> {
-    type Item = (Pos, char);
-    fn next(&mut self) -> Option<Self::Item> {
-        let next_char = self.chars.next();
-        match next_char {
-            None => None,
-            Some(ch) => {
-                let ret = Some((self.pos, ch));
-                match ch {
-                    '\n' => {
-                        if !self.is_last_cr {
-                            self.pos.lf_self();
-                        } else {
-                            self.pos.bump_self();
-                        }
-                        self.is_last_cr = false;
-                    }
-                    '\r' => {
-                        self.pos.lf_self();
-                        self.is_last_cr = true;
-                    }
-                    _ => {
-                        self.is_last_cr = false;
-                        self.pos.inc_self();
-                    }
-                };
-                ret
-            }
-        }
-    }
-}
-
 #[derive(Eq, PartialEq, Debug)]
 pub struct Ptr<T>(Rc<RefCell<T>>);
 
@@ -416,102 +367,4 @@ macro_rules! set {
             temp_set // Return the populated HashSet
         }
     };
-}
-
-pub type ParseResult<'a, T> = Result<T, ParseError<'a>>;
-
-pub fn parse_err<'a>(var: ParseErrVariant<'a>, span: Span) -> ParseError<'a> {
-    ParseError { var, span }
-}
-
-pub fn parse_err_z<'a>(var: ParseErrVariant<'a>) -> ParseError<'a> {
-    ParseError {
-        var,
-        span: Span::zero(),
-    }
-}
-
-/// An error present in parsing process.
-///
-/// > When span is not avaliable, use Span::zero().
-#[derive(Debug)]
-pub struct ParseError<'a> {
-    pub var: ParseErrVariant<'a>,
-    pub span: Span,
-}
-
-impl<'a> Display for ParseError<'a> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:#?} at {}", self.var, self.span)
-    }
-}
-
-impl <'a> std::error::Error for ParseError<'a>{
-    fn description(&self) -> &str {
-        "description() is deprecated; use Display"
-    }
-    fn cause(&self) -> Option<&dyn std::error::Error> {
-        self.source()
-    }
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> { None }
-    
-
-}
-
-#[derive(Debug)]
-pub enum ParseErrVariant<'a> {
-    ExpectToken(TokenVariant<'a>),
-    UnexpectedToken(TokenVariant<'a>),
-    UnexpectedTokenMsg(TokenVariant<'a>, &'static str),
-    NoConstFns,
-    CannotFindIdent(String),
-    CannotFindType(String),
-    CannotFindVar(String),
-    CannotFindFn(String),
-    ExpectToBeType(String),
-    ExpectToBeVar(String),
-    ExpectToBeFn(String),
-    UnsupportedToken(TokenVariant<'a>),
-    TokenExists(String),
-    FnDeclarationConflict(String),
-    EarlyEof,
-    UnbalancedParenthesisExpectL,
-    UnbalancedParenthesisExpectR,
-    MissingOperandUnary,
-    MissingOperandL,
-    MissingOperandR,
-    NotMatchFnArguments(usize, usize),
-    InternalErr,
-}
-
-impl<'a> ParseErrVariant<'a> {
-    pub fn get_err_code(&self) -> usize {
-        use self::ParseErrVariant::*;
-        match self {
-            ExpectToken(_) => 1,
-            NoConstFns => 2,
-            InternalErr => 1023,
-            _ => 1024,
-        }
-    }
-
-    pub fn get_err_desc(&self) -> String {
-        use self::ParseErrVariant::*;
-        match self {
-            ExpectToken(token) => format!("Expected {}", token),
-            NoConstFns => "Functions cannot be marked as constant".to_string(),
-            InternalErr => "Something went wrong inside the compiler".to_string(),
-            _ => "Unknown Error".to_string(),
-        }
-    }
-}
-
-impl<'a> Display for ParseErrVariant<'a> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "E{:4}: {}", self.get_err_code(), self.get_err_desc())
-    }
-}
-
-pub fn str_span(s: &str, span: Span) -> &str {
-    &s[span.start.index..span.end.index]
 }

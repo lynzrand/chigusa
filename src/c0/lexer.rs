@@ -135,18 +135,62 @@ static OperatorCombination: Lazy<HashMap<char, Box<Vec<char>>>> = Lazy::new(|| {
     .collect()
 });
 
-pub struct LexerInner<'a> {
-    src: Box<dyn Iterator<Item = (Pos, char)>>,
-    completed: bool,
+pub struct StringPosIter {
+    chars: std::iter::Chain<Box<dyn Iterator<Item = char>>, std::iter::Once<char>>,
+    pos: Pos,
+    is_last_cr: bool,
 }
 
-pub struct Lexer<'a> {
-    lexer: LexerInner<'a>,
-    iter: Option<Peekable<StringPosIter<'a>>>,
+impl StringPosIter {
+    pub fn new(src: Box<dyn Iterator<Item = char>>) -> StringPosIter {
+        let chars = src.chain(std::iter::once('\0'));
+        StringPosIter {
+            chars,
+            pos: Pos::zero(),
+            is_last_cr: false,
+        }
+    }
 }
 
-impl<'a> Lexer<'a> {
-    pub fn new(src: LexerInner<'a>) -> Lexer<'a> {
+impl Iterator for StringPosIter {
+    type Item = (Pos, char);
+    fn next(&mut self) -> Option<Self::Item> {
+        let next_char = self.chars.next();
+        match next_char {
+            None => None,
+            Some(ch) => {
+                let ret = Some((self.pos, ch));
+                match ch {
+                    '\n' => {
+                        if !self.is_last_cr {
+                            self.pos.lf_self();
+                        } else {
+                            self.pos.bump_self();
+                        }
+                        self.is_last_cr = false;
+                    }
+                    '\r' => {
+                        self.pos.lf_self();
+                        self.is_last_cr = true;
+                    }
+                    _ => {
+                        self.is_last_cr = false;
+                        self.pos.inc_self();
+                    }
+                };
+                ret
+            }
+        }
+    }
+}
+
+pub struct Lexer {
+    lexer: LexerInner,
+    iter: Option<Peekable<StringPosIter>>,
+}
+
+impl Lexer {
+    pub fn new(src: LexerInner) -> Lexer {
         let mut new_iter = Lexer {
             lexer: src,
             iter: None,
@@ -155,27 +199,28 @@ impl<'a> Lexer<'a> {
         new_iter
     }
 }
+pub struct LexerInner {
+    // src: Box<dyn Iterator<Item = (Pos, char)>>,
+    completed: bool,
+}
 
-impl<'a> Iterator for Lexer<'a> {
-    type Item = Token<'a>;
-    fn next(&mut self) -> Option<Token<'a>> {
+impl Iterator for Lexer {
+    type Item = Token;
+    fn next(&mut self) -> Option<Token> {
         self.lexer.get_next_token(self.iter.as_mut().expect(""))
     }
 }
 
-impl<'a> LexerInner<'a> {
-    pub fn new(src: &'a str) -> LexerInner<'a> {
-        Self {
-            src,
-            completed: false,
-        }
+impl LexerInner {
+    pub fn new() -> LexerInner {
+        Self { completed: false }
     }
 
     /// **Not Intended For Direct Use.**
     ///
     /// This method requires creating a character index iterator for the `src`
     /// field. Thus it must be used inside an `LexerIterator`.
-    pub fn get_next_token(&mut self, iter: &mut Peekable<StringPosIter>) -> Option<Token<'a>> {
+    pub fn get_next_token(&mut self, iter: &mut Peekable<StringPosIter>) -> Option<Token> {
         Self::skip_spaces(iter);
         // the first character of next token
         let c = match iter.peek() {
@@ -197,8 +242,9 @@ impl<'a> LexerInner<'a> {
     }
 
     /// Lex a number
-    fn lex_number(&mut self, iter: &mut Peekable<StringPosIter>) -> Token<'a> {
+    fn lex_number(&mut self, iter: &mut Peekable<StringPosIter>) -> Token {
         let start_pos = iter.peek().expect("This value should be valid").0;
+        let number = String::new();
 
         // radix check
         let radix = if iter.peek().map_or(false, |ch_ind| ch_ind.1 == '0') {
@@ -223,7 +269,7 @@ impl<'a> LexerInner<'a> {
         };
 
         while iter.peek().map_or(false, |ch_ind| (*ch_ind).1.is_digit(10)) {
-            iter.next();
+            number.push(iter.next().unwrap().1);
         }
         let end_pos = iter.peek().unwrap().0;
 
@@ -240,7 +286,7 @@ impl<'a> LexerInner<'a> {
     }
 
     /// Lex a string literal.
-    fn lex_string_literal(&mut self, iter: &mut Peekable<StringPosIter>) -> Token<'a> {
+    fn lex_string_literal(&mut self, iter: &mut Peekable<StringPosIter>) -> Token {
         let (start, start_quotation_mark) = iter.next().expect("This value should be valid");
 
         if start_quotation_mark != '"' {
@@ -288,13 +334,12 @@ impl<'a> LexerInner<'a> {
 
         Token {
             var: TokenVariant::StringLiteral(tgt_string),
-            src: &self.src[start.index..end.index],
             span: Span::from(start, end),
         }
     }
 
     /// Lex an identifier.
-    fn lex_identifier(&mut self, iter: &mut Peekable<StringPosIter>) -> Token<'a> {
+    fn lex_identifier(&mut self, iter: &mut Peekable<StringPosIter>) -> Token {
         let start = iter.peek().expect("This value should be valid").0;
         while iter
             .peek()
@@ -317,13 +362,12 @@ impl<'a> LexerInner<'a> {
 
         Token {
             var: variation,
-            src: &self.src[start.index..end.index],
             span: Span::from(start, end),
         }
     }
 
     /// Lex an operator.
-    fn lex_operator(&mut self, iter: &mut Peekable<StringPosIter>) -> Token<'a> {
+    fn lex_operator(&mut self, iter: &mut Peekable<StringPosIter>) -> Token {
         let (start, first_char) = iter.next().expect("This value should be valid");
         let mut end = start.inc();
         let second_char: Option<char> =
@@ -402,7 +446,6 @@ impl<'a> LexerInner<'a> {
 
         Token {
             var: variation,
-            src: &self.src[start.index..end.index],
             span: Span::from(start, end),
         }
     }
@@ -418,9 +461,9 @@ impl<'a> LexerInner<'a> {
     }
 }
 
-impl<'a> IntoIterator for LexerInner<'a> {
-    type Item = Token<'a>;
-    type IntoIter = Lexer<'a>;
+impl IntoIterator for LexerInner {
+    type Item = Token;
+    type IntoIter = Lexer;
     fn into_iter(self) -> Self::IntoIter {
         Lexer::new(self)
     }

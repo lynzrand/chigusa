@@ -1,4 +1,5 @@
 use super::ast::*;
+use super::err::*;
 use super::lexer::*;
 use crate::prelude::*;
 use bimap::BiMap;
@@ -7,18 +8,18 @@ use std::iter::Peekable;
 use either::Either;
 use LoopCtrl::*;
 
-pub trait IntoParser<'a> {
-    fn into_parser(self) -> Parser<'a>;
+pub trait IntoParser {
+    fn into_parser(self) -> Parser;
 }
 
-impl<'a> IntoParser<'a> for Lexer<'a> {
-    fn into_parser(self) -> Parser<'a> {
+impl IntoParser for Lexer {
+    fn into_parser(self) -> Parser {
         Parser::new(self)
     }
 }
 
-pub trait TokenIterator<'a>: Iterator<Item = Token<'a>> + itertools::PeekingNext {
-    fn expect(&mut self, token: TokenVariant<'a>) -> ParseResult<'a, Token<'a>> {
+pub trait TokenIterator: Iterator<Item = Token> + itertools::PeekingNext {
+    fn expect(&mut self, token: TokenVariant) -> ParseResult<Token> {
         // * separated variables because lifetime concerns.
         match self.next() {
             Some(t) => {
@@ -32,7 +33,7 @@ pub trait TokenIterator<'a>: Iterator<Item = Token<'a>> + itertools::PeekingNext
         }
     }
 
-    fn expect_peek(&mut self, token: TokenVariant<'a>) -> ParseResult<'a, Token<'a>> {
+    fn expect_peek(&mut self, token: TokenVariant) -> ParseResult<Token> {
         // * separated variables because lifetime concerns.
         match self.peeking_next(|_| false) {
             Some(t) => {
@@ -48,10 +49,10 @@ pub trait TokenIterator<'a>: Iterator<Item = Token<'a>> + itertools::PeekingNext
 
     fn expect_map_or<T>(
         &mut self,
-        token: TokenVariant<'a>,
-        map: impl FnOnce(Token<'a>) -> T,
-        f: impl FnOnce(Token<'a>) -> Result<T, ParseError<'a>>,
-    ) -> ParseResult<'a, T> {
+        token: TokenVariant,
+        map: impl FnOnce(Token) -> T,
+        f: impl FnOnce(Token) -> Result<T, ParseError>,
+    ) -> ParseResult<T> {
         let next = self.next();
         match next {
             Some(v) => {
@@ -65,14 +66,14 @@ pub trait TokenIterator<'a>: Iterator<Item = Token<'a>> + itertools::PeekingNext
         }
     }
 
-    fn try_consume(&mut self, token: TokenVariant<'a>) -> bool {
+    fn try_consume(&mut self, token: TokenVariant) -> bool {
         match self.peeking_next(|v| variant_eq(&v.var, &token)) {
             Some(_) => true,
             None => false,
         }
     }
 
-    fn try_consume_log_span(&mut self, token: TokenVariant<'a>) -> Option<Span> {
+    fn try_consume_log_span(&mut self, token: TokenVariant) -> Option<Span> {
         match self.peeking_next(|v| variant_eq(&v.var, &token)) {
             Some(v) => Some(v.span),
             None => None,
@@ -80,9 +81,9 @@ pub trait TokenIterator<'a>: Iterator<Item = Token<'a>> + itertools::PeekingNext
     }
 }
 
-type LexerWrapped<'a> = Peekable<Lexer<'a>>;
+type LexerWrapped = Peekable<Lexer>;
 
-impl<'a> TokenIterator<'a> for LexerWrapped<'a> {}
+impl TokenIterator for LexerWrapped {}
 
 pub struct TypeVar {
     types: Vec<TypeDef>,
@@ -106,14 +107,14 @@ impl TypeVar {
     }
 }
 
-pub struct Parser<'a> {
-    lexer: LexerWrapped<'a>,
+pub struct Parser {
+    lexer: LexerWrapped,
     type_var: TypeVar,
-    cur_token: Token<'a>,
+    cur_token: Token,
 }
 
-impl<'a> Parser<'a> {
-    pub fn new(lexer: Lexer<'a>) -> Parser<'a> {
+impl Parser {
+    pub fn new(lexer: Lexer) -> Parser {
         Parser {
             lexer: lexer.peekable(),
             type_var: TypeVar::new(),

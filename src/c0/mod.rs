@@ -6,3 +6,5 @@ pub mod parser;
 
 /// Abstract Syntax Tree Components
 pub mod ast;
+
+pub mod err;
