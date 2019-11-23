@@ -174,6 +174,12 @@ pub struct Stmt {
     pub span: Span,
 }
 
+impl AstNode for Stmt {
+    fn span(&self) -> Span {
+        self.span
+    }
+}
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum StmtVariant {
     Expr(Expr),
@@ -186,6 +192,12 @@ pub enum StmtVariant {
 pub struct Expr {
     pub var: ExprVariant,
     pub span: Span,
+}
+
+impl AstNode for Expr {
+    fn span(&self) -> Span {
+        self.span
+    }
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]

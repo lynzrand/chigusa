@@ -32,6 +32,20 @@ pub trait TokenIterator<'a>: Iterator<Item = Token<'a>> + itertools::PeekingNext
         }
     }
 
+    fn expect_peek(&mut self, token: TokenVariant<'a>) -> ParseResult<'a, Token<'a>> {
+        // * separated variables because lifetime concerns.
+        match self.peeking_next(|_| false) {
+            Some(t) => {
+                if variant_eq(&t.var, &token) {
+                    Ok(t)
+                } else {
+                    Err(parse_err(ParseErrVariant::ExpectToken(token), t.span))
+                }
+            }
+            None => Err(parse_err(ParseErrVariant::ExpectToken(token), Span::zero())),
+        }
+    }
+
     fn expect_map_or<T>(
         &mut self,
         token: TokenVariant<'a>,
@@ -73,8 +87,8 @@ impl<'a> TokenIterator<'a> for LexerWrapped<'a> {}
 pub struct TypeVar {
     types: Vec<TypeDef>,
     type_names: BiMap<usize, String>,
-    vars: Vec<VarDef>,
-    var_names: BiMap<usize, String>,
+    // vars: Vec<VarDef>,
+    // var_names: BiMap<usize, String>,
 }
 
 impl TypeVar {
@@ -82,8 +96,8 @@ impl TypeVar {
         TypeVar {
             types: Vec::new(),
             type_names: BiMap::new(),
-            vars: Vec::new(),
-            var_names: BiMap::new(),
+            // vars: Vec::new(),
+            // var_names: BiMap::new(),
         }
     }
 
@@ -103,6 +117,15 @@ impl<'a> Parser<'a> {
             lexer: lexer.peekable(),
             type_var: TypeVar::new(),
         }
+    }
+
+    pub fn parse(&mut self) -> ParseResult<Program> {
+        unimplemented!();
+        // Ok(Program {
+        //     scope: (),
+        //     vars: (),
+        //     types: (),
+        // })
     }
 
     fn p_stmt_or_expr(&mut self, scope: Ptr<Scope>) -> ParseResult<Either<Stmt, Expr>> {
@@ -130,9 +153,6 @@ impl<'a> Parser<'a> {
                 next.span,
             )),
         }
-        // match scope.borrow().find_def();
-
-        // unimplemented!()
     }
 
     fn p_block_expr(&mut self, scope: Ptr<Scope>) -> ParseResult<Expr> {
@@ -152,9 +172,45 @@ impl<'a> Parser<'a> {
     }
 
     fn p_if_expr(&mut self, scope: Ptr<Scope>) -> ParseResult<Expr> {
-        unimplemented!()
-    }
+        let start_span = self.lexer.expect(TokenVariant::If)?.span;
+        self.lexer.expect_peek(TokenVariant::LParenthesis);
 
+        let mut span = start_span;
+
+        let cond = Ptr::new(self.p_expr(scope.clone())?);
+        let if_block = Ptr::new(
+            if self.lexer.expect_peek(TokenVariant::LCurlyBrace).is_ok() {
+                self.p_block_expr(scope.clone())
+            } else {
+                self.p_expr(scope.clone())
+            }?,
+        );
+
+        span = span + if_block.borrow().span();
+        let else_span = self.lexer.try_consume_log_span(TokenVariant::Else);
+        let else_block = if else_span.is_some() {
+            Some(Ptr::new(
+                if self.lexer.expect_peek(TokenVariant::LCurlyBrace).is_ok() {
+                    self.p_block_expr(scope.clone())
+                } else {
+                    self.p_expr(scope.clone())
+                }?,
+            ))
+        } else {
+            None
+        };
+
+        else_block.as_ref().map(|e| span = span + e.borrow().span());
+
+        Ok(Expr {
+            var: ExprVariant::IfConditional(IfConditional {
+                cond,
+                if_block,
+                else_block,
+            }),
+            span,
+        })
+    }
     fn p_decl_stmt(&mut self, scope: Ptr<Scope>) -> ParseResult<Stmt> {
         unimplemented!()
     }
