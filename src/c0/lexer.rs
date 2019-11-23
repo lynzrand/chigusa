@@ -1,5 +1,5 @@
-use super::infra::*;
-use lazy_static::lazy_static;
+use crate::prelude::*;
+use once_cell::sync::*;
 use ramp;
 use std::collections::HashMap;
 use std::iter::{Iterator, Peekable};
@@ -9,7 +9,7 @@ use std::{cell::RefCell, fmt, fmt::Display, fmt::Formatter, hash::Hash, rc::Rc, 
 #[derive(Debug, Eq, PartialEq, Hash, Clone)]
 /// This enum defines the variants of token in C0 language. Variants are pretty
 /// self-explanatory.
-pub enum TokenVariant<'a> {
+pub enum TokenVariant {
     Const,
     As,
     If,
@@ -35,7 +35,7 @@ pub enum TokenVariant<'a> {
     LessOrEqualThan,
     GreaterThan,
     GreaterOrEqualThan,
-    Identifier(&'a str),
+    Identifier(String),
     IntegerLiteral(ramp::Int),
     StringLiteral(String),
     BooleanLiteral(bool),
@@ -49,7 +49,7 @@ pub enum TokenVariant<'a> {
     Dummy,
 }
 
-impl<'a> Display for TokenVariant<'a> {
+impl Display for TokenVariant {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         use self::TokenVariant::*;
         match self {
@@ -96,16 +96,16 @@ impl<'a> Display for TokenVariant<'a> {
 
 /// A single token
 #[derive(Debug, Clone)]
-pub struct Token<'a> {
+pub struct Token {
     /// Its variant
-    pub var: TokenVariant<'a>,
+    pub var: TokenVariant,
 
     /// The space the token occupies
     pub span: Span,
 }
 
-impl<'a> Token<'a> {
-    pub fn get_ident(&self) -> Result<&'a str, ()> {
+impl Token {
+    pub fn get_ident(&self) -> Result<&str, ()> {
         match self.var {
             TokenVariant::Identifier(s) => Ok(s),
             _ => Err(()),
@@ -113,43 +113,41 @@ impl<'a> Token<'a> {
     }
 }
 
-impl<'a> Display for Token<'a> {
+impl Display for Token {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.var)
+        write!(f, "Token{{var: {}, span: {} }}", self.var, self.span)
     }
 }
 
-lazy_static! {
-    static ref __OP_COMBINATION: HashMap<char, Box<Vec<char>>> = {
-        [
-            ('<', Box::new(vec!['='])),
-            ('>', Box::new(vec!['='])),
-            ('=', Box::new(vec!['='])),
-            ('!', Box::new(vec!['='])),
-            ('+', Box::new(vec!['+'])),
-            ('-', Box::new(vec!['-'])),
-            ('&', Box::new(vec!['&'])),
-            ('|', Box::new(vec!['|'])),
-        ]
-        .iter()
-        .cloned()
-        .collect()
-    };
-}
+static OperatorCombination: Lazy<HashMap<char, Box<Vec<char>>>> = Lazy::new(|| {
+    [
+        ('<', Box::new(vec!['='])),
+        ('>', Box::new(vec!['='])),
+        ('=', Box::new(vec!['='])),
+        ('!', Box::new(vec!['='])),
+        ('+', Box::new(vec!['+'])),
+        ('-', Box::new(vec!['-'])),
+        ('&', Box::new(vec!['&'])),
+        ('|', Box::new(vec!['|'])),
+    ]
+    .iter()
+    .cloned()
+    .collect()
+});
 
-pub struct Lexer<'a> {
-    src: &'a str,
+pub struct LexerInner<'a> {
+    src: Box<dyn Iterator<Item = (Pos, char)>>,
     completed: bool,
 }
 
-pub struct LexerIterator<'a> {
-    lexer: Lexer<'a>,
+pub struct Lexer<'a> {
+    lexer: LexerInner<'a>,
     iter: Option<Peekable<StringPosIter<'a>>>,
 }
 
-impl<'a> LexerIterator<'a> {
-    pub fn new(src: Lexer<'a>) -> LexerIterator<'a> {
-        let mut new_iter = LexerIterator {
+impl<'a> Lexer<'a> {
+    pub fn new(src: LexerInner<'a>) -> Lexer<'a> {
+        let mut new_iter = Lexer {
             lexer: src,
             iter: None,
         };
@@ -158,15 +156,15 @@ impl<'a> LexerIterator<'a> {
     }
 }
 
-impl<'a> Iterator for LexerIterator<'a> {
+impl<'a> Iterator for Lexer<'a> {
     type Item = Token<'a>;
     fn next(&mut self) -> Option<Token<'a>> {
         self.lexer.get_next_token(self.iter.as_mut().expect(""))
     }
 }
 
-impl<'a> Lexer<'a> {
-    pub fn new(src: &'a str) -> Lexer<'a> {
+impl<'a> LexerInner<'a> {
+    pub fn new(src: &'a str) -> LexerInner<'a> {
         Self {
             src,
             completed: false,
@@ -329,7 +327,7 @@ impl<'a> Lexer<'a> {
         let (start, first_char) = iter.next().expect("This value should be valid");
         let mut end = start.inc();
         let second_char: Option<char> =
-            __OP_COMBINATION
+            OperatorCombination
                 .get(&first_char)
                 .map_or(None, |vec: &Box<Vec<char>>| {
                     iter.peek().map_or(None, |&(_, ch)| {
@@ -420,11 +418,11 @@ impl<'a> Lexer<'a> {
     }
 }
 
-impl<'a> IntoIterator for Lexer<'a> {
+impl<'a> IntoIterator for LexerInner<'a> {
     type Item = Token<'a>;
-    type IntoIter = LexerIterator<'a>;
+    type IntoIter = Lexer<'a>;
     fn into_iter(self) -> Self::IntoIter {
-        LexerIterator::new(self)
+        Lexer::new(self)
     }
 }
 
@@ -436,7 +434,7 @@ mod test {
 
     #[test]
     fn test_lex_number() {
-        let real: Vec<TokenVariant> = Lexer::new("123+456")
+        let real: Vec<TokenVariant> = LexerInner::new("123+456")
             .into_iter()
             .map(|token| token.var)
             .collect();
@@ -450,7 +448,7 @@ mod test {
 
     #[test]
     fn test_lex_string() {
-        let real: Vec<TokenVariant> = Lexer::new(r#""123+\r\n\t456""#)
+        let real: Vec<TokenVariant> = LexerInner::new(r#""123+\r\n\t456""#)
             .into_iter()
             .map(|token| token.var)
             .collect();
@@ -460,7 +458,7 @@ mod test {
 
     #[test]
     fn test_lex_ident() {
-        let real: Vec<TokenVariant> = Lexer::new("int x = 3;")
+        let real: Vec<TokenVariant> = LexerInner::new("int x = 3;")
             .into_iter()
             .map(|token| token.var)
             .collect();
@@ -478,7 +476,7 @@ mod test {
     fn test_lex_ops() {
         use TokenVariant::*;
         let real: Vec<TokenVariant> =
-            Lexer::new("+ - * / ++ -- ! != == >= > <= < & | && || ^ ( ) { } = ,")
+            LexerInner::new("+ - * / ++ -- ! != == >= > <= < & | && || ^ ( ) { } = ,")
                 .into_iter()
                 .map(|token| token.var)
                 .collect();
@@ -514,7 +512,7 @@ mod test {
     #[test]
     #[should_panic]
     fn test_lexing_panic_op() {
-        let real: Vec<TokenVariant> = Lexer::new("int x = what?is:this;")
+        let real: Vec<TokenVariant> = LexerInner::new("int x = what?is:this;")
             .into_iter()
             .map(|token| token.var)
             .collect();
@@ -523,7 +521,7 @@ mod test {
     #[test]
     #[should_panic]
     fn test_lexing_panic_string_escape() {
-        let real: Vec<TokenVariant> = Lexer::new(r#""\y""#)
+        let real: Vec<TokenVariant> = LexerInner::new(r#""\y""#)
             .into_iter()
             .map(|token| token.var)
             .collect();
@@ -532,7 +530,7 @@ mod test {
     #[test]
     #[should_panic]
     fn test_lexing_panic_string_eol() {
-        let real: Vec<TokenVariant> = Lexer::new(
+        let real: Vec<TokenVariant> = LexerInner::new(
             r#""
         ""#,
         )

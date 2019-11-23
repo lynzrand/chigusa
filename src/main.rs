@@ -9,6 +9,6 @@ int main(){ printf("aaa", x); }
 "#;
 
 fn main() {
-    let vec: Vec<lexer::Token> = lexer::Lexer::new(__INPUT_CODE).into_iter().collect();
+    let vec: Vec<lexer::Token> = lexer::LexerInner::new(__INPUT_CODE).into_iter().collect();
     print!("{:#?}", vec);
 }

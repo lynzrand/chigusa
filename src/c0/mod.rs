@@ -6,6 +6,3 @@ pub mod parser;
 
 /// Abstract Syntax Tree Components
 pub mod ast;
-
-/// Infrastructures like `Pos`, `Span` and some common traits
-pub mod infra;

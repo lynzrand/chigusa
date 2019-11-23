@@ -1,6 +1,6 @@
 use super::ast::*;
-use super::infra::*;
 use super::lexer::*;
+use crate::prelude::*;
 use bimap::BiMap;
 use std::iter::Peekable;
 
@@ -11,7 +11,7 @@ pub trait IntoParser<'a> {
     fn into_parser(self) -> Parser<'a>;
 }
 
-impl<'a> IntoParser<'a> for LexerIterator<'a> {
+impl<'a> IntoParser<'a> for Lexer<'a> {
     fn into_parser(self) -> Parser<'a> {
         Parser::new(self)
     }
@@ -80,7 +80,7 @@ pub trait TokenIterator<'a>: Iterator<Item = Token<'a>> + itertools::PeekingNext
     }
 }
 
-type LexerWrapped<'a> = Peekable<LexerIterator<'a>>;
+type LexerWrapped<'a> = Peekable<Lexer<'a>>;
 
 impl<'a> TokenIterator<'a> for LexerWrapped<'a> {}
 
@@ -113,7 +113,7 @@ pub struct Parser<'a> {
 }
 
 impl<'a> Parser<'a> {
-    pub fn new(lexer: LexerIterator<'a>) -> Parser<'a> {
+    pub fn new(lexer: Lexer<'a>) -> Parser<'a> {
         Parser {
             lexer: lexer.peekable(),
             type_var: TypeVar::new(),

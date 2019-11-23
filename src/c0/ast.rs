@@ -3,7 +3,7 @@
     https://github.com/rust-lang/rust/blob/master/src/libsyntax/ast.rs
 */
 
-use super::infra::*;
+use crate::prelude::*;
 use indexmap::IndexMap;
 use once_cell::{self, sync::*};
 use regex;

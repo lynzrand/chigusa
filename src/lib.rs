@@ -16,3 +16,5 @@ pub mod kurumi;
 
 #[cfg(llvm)]
 pub mod llvm;
+
+pub mod prelude;
