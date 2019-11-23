@@ -261,6 +261,7 @@ pub struct Block {
     pub vars: Vec<usize>,
     pub stmts: Vec<Stmt>,
     pub return_type: TypeIdent,
+    pub val: Ptr<Expr>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
