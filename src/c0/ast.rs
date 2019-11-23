@@ -237,6 +237,20 @@ pub enum Literal {
     String { val: String },
 }
 
+impl From<super::lexer::Literal> for Literal {
+    fn from(lit: super::lexer::Literal) -> Self {
+        use super::lexer::Literal::*;
+        match lit {
+            Integer(i) => Literal::Integer { val: i },
+            String(s) => Literal::String { val: s },
+            Boolean(b) => Literal::Boolean { val: b },
+            Char(c) => Literal::Integer {
+                val: (c as u32).into(),
+            },
+        }
+    }
+}
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct TypeConversion {
     pub from: TypeIdent,

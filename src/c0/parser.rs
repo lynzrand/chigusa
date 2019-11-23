@@ -1,3 +1,4 @@
+use super::ast::Literal;
 use super::ast::*;
 use super::err::*;
 use super::lexer::*;
@@ -230,16 +231,8 @@ impl Parser {
     fn p_literal(&mut self) -> ParseResult<Expr> {
         let t = self.lexer.next().unwrap();
         match t.var {
-            TokenVariant::IntegerLiteral(i) => Ok(Expr {
-                var: ExprVariant::Literal(Literal::Integer { val: i }),
-                span: t.span,
-            }),
-            TokenVariant::StringLiteral(s) => Ok(Expr {
-                var: ExprVariant::Literal(Literal::String { val: s }),
-                span: t.span,
-            }),
-            TokenVariant::BooleanLiteral(b) => Ok(Expr {
-                var: ExprVariant::Literal(Literal::Boolean { val: b }),
+            TokenVariant::Literal(i) => Ok(Expr {
+                var: ExprVariant::Literal(i.into()),
                 span: t.span,
             }),
             _ => Err(parse_err(ParseErrVariant::InternalErr, t.span)),

@@ -45,6 +45,7 @@ pub enum TokenVariant {
     Comma,
     EndOfFile,
     Dummy,
+    Error,
 }
 
 impl Display for TokenVariant {
@@ -84,14 +85,16 @@ impl Display for TokenVariant {
             RCurlyBrace => write!(f, "\n}}\n"),
             Assign => write!(f, "="),
             Comma => write!(f, ","),
-            EndOfFile => write!(f, "#"),
+            EndOfFile => write!(f, "#EOF"),
+            Dummy => write!(f, "<dummy>"),
+            Error => write!(f, "<Error token>"),
             // _ => write!(f, "???"),
         }
     }
 }
 
 #[derive(Debug, Eq, PartialEq, Hash, Clone)]
-enum Literal {
+pub enum Literal {
     Char(char),
     String(String),
     Boolean(bool),
@@ -122,7 +125,7 @@ pub struct Token {
 
 impl Token {
     pub fn get_ident(&self) -> Result<&str, ()> {
-        match self.var {
+        match &self.var {
             TokenVariant::Identifier(s) => Ok(&s),
             _ => Err(()),
         }
@@ -247,7 +250,7 @@ impl Lexer {
     /// Lex a number
     fn lex_number(&mut self) -> Token {
         let start_pos = self.iter.peek().expect("This value should be valid").0;
-        let number = String::new();
+        let mut number = String::new();
 
         // radix check
         let radix = if self.iter.peek().map_or(false, |ch_ind| ch_ind.1 == '0') {
@@ -344,34 +347,16 @@ impl Lexer {
             let (this_index, this_char) =
                 self.iter.next().expect("Unexpected EOF in string literal");
             match this_char {
-                '\\' => {
-                    // Deal with escaping stuff
-                    let (_, next_char) =
-                        self.iter.next().expect("Unexpected EOF in string literal");
-                    let pushed_char = match next_char {
-                        'n' => '\n',
-                        't' => '\t',
-                        'r' => '\r',
-                        '\\' => '\\',
-                        '"' => '"',
-                        // 'u'=>,
-                        _ => panic!(
-                            "Invalid escape sequence '\\{}' at {}",
-                            this_char, this_index
-                        ),
-                    };
-                    tgt_string.push(pushed_char);
-                }
+                '\\' => tgt_string.push(Self::unescape_character(&mut self.iter)),
+
                 '"' => {
                     end = this_index.map_inc(-1, 0, -1);
                     break;
                 }
-                '\n' | '\r' => {
-                    panic!("Unexpected EOL in string literal");
-                }
-                _ => {
-                    tgt_string.push(this_char);
-                }
+
+                '\n' | '\r' => panic!("Unexpected EOL in string literal"),
+
+                _ => tgt_string.push(this_char),
             }
         }
 
@@ -384,7 +369,7 @@ impl Lexer {
     /// Lex an identifier.
     fn lex_identifier(&mut self) -> Token {
         let start = self.iter.peek().expect("This value should be valid").0;
-        let ident = String::new();
+        let mut ident = String::new();
         while self
             .iter
             .peek()
