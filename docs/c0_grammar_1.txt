@@ -1,24 +1,33 @@
 // # Basic grammar elements
-Identifier: [a-zA-Z] [_0-9a-zA-Z]* | _ [_0-9a-zA-Z]+
+Identifier: [a-zA-Z] [_0-9a-zA-Z]* 
 
 DecimalInteger: "0" | [1-9] [0-9]+
 DecimalFractionalPart: "." [0-9]+
 DecimalExponentPart: [Ee] [+-]? [0-9]+
 HexadecimalNumber: "0x" [0-9a-fA-F]+
-IntegerLiteral: (DecimalInteger | HexadecimalNumber) 
-FloatLiteral: DecimalInteger DecimalFractionalPart DecimalExponentPart?
-    | DecimalInteger DecimalExponentPart
+// IntegerLiteral: (DecimalInteger | HexadecimalNumber) 
+// FloatLiteral: 
+//     DecimalInteger DecimalFractionalPart DecimalExponentPart?
+//     | DecimalInteger DecimalExponentPart
 
-EscapedChar: "\" ([ntrb\\'"] | "u{" [0-9a-fA-F]{4} "}")
+NumberLiteral: DecimalInteger (
+    DecimalFractionalPart DecimalExponentPart?
+    | DecimalExponentPart 
+)?
+
+EscapedChar: "\" ([ntr\\'"] | "x" HexadecimalNumber{2} | "u" [0-9a-fA-F]{4} )
 Char: [^\\'"] | EscapedChar
+
 CharLiteral: "'" Char "'"
 StringLiteral: "\"" Char* "\""
 
 BooleanLiteral: "true" | "false"
 
-Comment: "//" .* "\n"
+SingleLineComment: "//" .* "\n"
+MultilineComment: "/*" .* "*/"
 
 Literal: IntegerLiteral | FloatLiteral | CharLiteral | StringLiteral | BooleanLiteral
+
 
 // # Keywords
 //
@@ -30,8 +39,16 @@ kwReturn: "return"
 kwAs: "as"
 kwIf: "if"
 kwWhile: "while"
+kwFor: "for"
+kwDo: "do"
 kwBreak: "break"
+kwContinue: "continue"
 kwConst: "const"
+kwStruct: "struct"
+kwSwitch: "switch"
+kwCase: "case"
+kwDefault: "default"
+
 
 // # Items
 
@@ -41,6 +58,7 @@ GenericTypeAnnotation: "<" TypeDeclaration ("," TypeDeclaration)* (";" TypeDecla
 GenericTypeDeclaration: Identifier GenericTypeAnnotation?
 ArrayTypeDeclaration: "[" TypeDeclaration (";" IntegerLiteral)? "]"
 ReferenceTypeDeclaration: "&" TypeDeclaration
+
 TypeDeclaration: ReferenceTypeDeclaration | ArrayTypeDeclaration | GenericTypeDeclaration
 
 // # Expressions
@@ -53,49 +71,79 @@ IdentifierExpr: Identifier<Variable>
 // These operators follows the precedence rule defined elsewhere
 PrecedingUnaryOperator: "+" | "-" | "*" | "&" | "!" | "~" | "++" | "--"
 ProcedingUnaryOperator: "++" | "--"
-BinaryOperator: "+" | "-" | "*" | "/" | "%" | "^" | "&" | "|" | "&&" | "||" | ">>" | "<<"
+
+BinaryOperator: "+" | "-" | "*" | "/" | "%" | "^" 
+    | "&" | "|" | "&&" | "||" | ">>" | "<<" | "<" | "<=" | "==" | "!=" | ">=" | ">"
+
 UnaryOperation: PrecedingUnaryOperator Expr | Expr ProcedingUnaryOperator
 BinaryOperation: Expr BinaryOperator Expr
+
 OperationExpr: UnaryOperation | BinaryOperation
 
 FnCallExpr: Expr "(" Expr ("," Expr)* ")"
 
-IndexExpr: Expr "[" Expr "]"
+IndexBracket: "[" Expr "]"
+IndexExpr: Expr IndexBracket
 
-StructChildExpr: Expr "." Identifier<StructChild>
+StructChild: "." Identifier<StructChild>
+StructChildExpr: Expr StructChild
 
 StructConstructExpr: Identifier<Type+StructName> "{" (Identifier ":" Expr)* "}"
 
 TypeCastExpr: Expr "as" TypeDefinition
 
-BlockExprBody: Stmt* Expr | Stmt*
-BlockExpr: "{" BlockExprBody "}"
 
 Expr: LiteralExpr | IdentifierExpr | OperationExpr | FnCallExpr | IndexExpr 
-    | StructChildExpr | StructConstructExpr | TypeCastExpr | IfExpr | WhileExpr
+    | StructChildExpr | StructConstructExpr | TypeCastExpr
 
-// # Flow Control
+LValue: IdentifierExpr (IndexBracket | StructChildExpr)*
+RValue: Expr
 
-IfExpr: "if" "(" Expr<bool|int> ")" BlockExpr ("else" BlockExpr)?
-WhileExpr: "while" "(" Expr<bool|int> ")" Stmt
-BreakStmt: "break" Expr? ";"
-ReturnStmt: "return" Expr? ";"
+
 
 // # Statements
 //
 // "Statement" is abbreviated as "Stmt" below.
+
+// ## Flow Control
+
+IfStmt: "if" "(" Expr<bool|int> ")" BlockExpr ("else" BlockExpr)?
+
+WhileStmt: "while" "(" Expr<bool|int> ")" Stmt
+
+DoWhileStmt: "do" Stmt "while" "(" Expr<bool|int> ")" ";"
+
+ForLoopStmt: "for" "(" VarDecl ";" Expr ";" Expr ")" Stmt
+
+BreakStmt: "break" ";"
+
+ContinueStmt: "continue" ";"
+
+ReturnStmt: "return" Expr? ";"
+
+BlockStmt: "{" Stmt* "}"
+
+// ## Declaration
+
 SingleVarDecl: Identifier ("=" Expr)?
-VarDecl: "const"? TypeDeclaration SingleVarDecl ("," SingleVarDecl)+
+VarDecl: "const"? TypeDeclaration SingleVarDecl ("," SingleVarDecl)?
+VarDeclStmt: VarDecl ";"
 
 EmptyStmt: ";"
 
 ExprStmt: Expr ";"
 
+Stmt: IfStmt | WhileStmt | DoWhileStmt | ForLoopStmt | BreakStmt | ContinueStmt 
+    | ReturnStmt | VarDeclStmt | ExprStmt | EmptyStmt | BlockStmt
+
+
+
 // # Large Structures
-FnParamDecl: "(" (TypeDefinition Identifier)* ")"
+FnParamDecl: "(" (TypeDefinition Identifier ( "," TypeDefiniiton Identifier )* )? ")"
 FnDecl: TypeDefinition Identifier FnParamsDecl (BlockExpr | ";")
 
 // structs are identified directly by their name; no "struct"
-StructDecl: "struct" Identifier "{" (TypeDefinition Identifier ",") "}"
+StructDecl: "struct" Identifier ( "{" (
+    TypeDefinition Identifier ( "," TypeDefinition Identifier)* )? "}" )?
 
 Program: (StructDecl | FnDecl | VarDecl)*

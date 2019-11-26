@@ -10,12 +10,15 @@ use std::{cell::RefCell, fmt, fmt::Display, fmt::Formatter, hash::Hash, rc::Rc, 
 /// This enum defines the variants of token in C0 language. Variants are pretty
 /// self-explanatory.
 pub enum TokenVariant {
+    // Keywords
     Const,
     As,
     If,
     Else,
     While,
     Return,
+
+    // Operators
     Semicolon,
     Minus,
     Plus,
@@ -35,14 +38,18 @@ pub enum TokenVariant {
     LessOrEqualThan,
     GreaterThan,
     GreaterOrEqualThan,
-    Identifier(String),
-    Literal(Literal),
     LParenthesis,
     RParenthesis,
     LCurlyBrace,
     RCurlyBrace,
     Assign,
     Comma,
+
+    // Identifier
+    Identifier(String),
+    Literal(Literal),
+
+    // Special
     EndOfFile,
     Dummy,
     Error,
@@ -58,6 +65,7 @@ impl Display for TokenVariant {
             Else => write!(f, "Else"),
             While => write!(f, "While"),
             Return => write!(f, "Return"),
+
             Semicolon => write!(f, ";\n"),
             Minus => write!(f, "-"),
             Plus => write!(f, "+"),
@@ -77,14 +85,16 @@ impl Display for TokenVariant {
             LessOrEqualThan => write!(f, "<="),
             GreaterThan => write!(f, ">"),
             GreaterOrEqualThan => write!(f, ">="),
-            Identifier(ident) => write!(f, "Identifier({})", ident),
-            Literal(b) => write!(f, "Literal(\"{}\")", b),
             LParenthesis => write!(f, "("),
             RParenthesis => write!(f, ")"),
             LCurlyBrace => write!(f, "{{\n"),
             RCurlyBrace => write!(f, "\n}}\n"),
             Assign => write!(f, "="),
             Comma => write!(f, ","),
+
+            Identifier(ident) => write!(f, "Identifier({})", ident),
+            Literal(b) => write!(f, "Literal(\"{}\")", b),
+
             EndOfFile => write!(f, "#EOF"),
             Dummy => write!(f, "<dummy>"),
             Error => write!(f, "<Error token>"),

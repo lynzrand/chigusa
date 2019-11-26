@@ -127,6 +127,10 @@ impl Parser {
         }
     }
 
+    fn eat_token(&mut self, accept: &[TokenVariant], decline: &[TokenVariant]) -> bool {
+        unimplemented!()
+    }
+
     pub fn parse(&mut self) -> ParseResult<Program> {
         unimplemented!();
         // Ok(Program {
