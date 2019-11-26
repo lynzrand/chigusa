@@ -53,12 +53,27 @@ kwDefault: "default"
 // # Items
 
 // The latter `;` is used only for function pointers,
-// e.g. `Fn<int, double; bool>` for `bool (int, double)`
+// e.g. `Fn<int, double; bool>` for `(int, double) -> bool`
 GenericTypeAnnotation: "<" TypeDeclaration ("," TypeDeclaration)* (";" TypeDeclaration)? ">"
+
+// Generic type, e.g. `Struct<T>`
 GenericTypeDeclaration: Identifier GenericTypeAnnotation?
+
+// Array type, e.g. `[int]`, `[long, 4]`
 ArrayTypeDeclaration: "[" TypeDeclaration (";" IntegerLiteral)? "]"
+
+// Reference type, e.g. `&int`, `&Fn<int, double; void>`
 ReferenceTypeDeclaration: "&" TypeDeclaration
 
+// Note:
+// C0 has 7 types built in:
+// - bool (u0)
+// - char (u8)
+// - int (i32)
+// - long (i64)
+// - float (f32)
+// - double (f64)
+// - void 
 TypeDeclaration: ReferenceTypeDeclaration | ArrayTypeDeclaration | GenericTypeDeclaration
 
 // # Expressions
@@ -69,6 +84,9 @@ LiteralExpr: Literal
 IdentifierExpr: Identifier<Variable>
 
 // These operators follows the precedence rule defined elsewhere
+// 
+// Note:
+// `&x`: get 
 PrecedingUnaryOperator: "+" | "-" | "*" | "&" | "!" | "~" | "++" | "--"
 ProcedingUnaryOperator: "++" | "--"
 
@@ -139,7 +157,7 @@ Stmt: IfStmt | WhileStmt | DoWhileStmt | ForLoopStmt | BreakStmt | ContinueStmt
 
 
 // # Large Structures
-FnParamDecl: "(" (TypeDefinition Identifier ( "," TypeDefiniiton Identifier )* )? ")"
+FnParamsDecl: "(" (TypeDefinition Identifier ( "," TypeDefiniiton Identifier )* )? ")"
 FnDecl: TypeDefinition Identifier FnParamsDecl (BlockExpr | ";")
 
 // structs are identified directly by their name; no "struct"
