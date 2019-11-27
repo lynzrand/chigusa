@@ -52,6 +52,7 @@ impl Display for ParseError {
 #[derive(Debug)]
 pub enum ParseErrVariant {
     InvalidToken(String),
+    BadEscaping { cause: Box<dyn Fail> },
 
     ExpectToken(TokenType),
     ExpectTokenOneOf(Vec<TokenType>),

@@ -270,6 +270,13 @@ impl Parser {
         todo!()
     }
 
+    /// Parse an identifier or function call.
+    ///
+    /// This parser accepts a starting state when `self.cur` is the first `Identifier`
+    fn p_ident_or_fn(&mut self, scope: Ptr<Scope>) -> ParseResult<Expr> {
+        todo!()
+    }
+
     fn p_literal(&mut self) -> ParseResult<Expr> {
         let t = self.lexer.next().unwrap();
         match t.var {
@@ -284,6 +291,93 @@ impl Parser {
                 )),
                 t.span,
             )),
+        }
+    }
+}
+
+trait IntoOperator {
+    fn into_op(&self, suggest_unary: bool) -> Option<OpVar>;
+}
+
+impl IntoOperator for TokenType {
+    fn into_op(&self, suggest_unary: bool) -> Option<OpVar> {
+        use OpVar::*;
+        use TokenType::*;
+        if suggest_unary {
+            match self {
+                Minus => Some(Neg),
+                Multiply => Some(Der),
+                BinaryAnd => Some(Ref),
+                Increase => Some(Inb),
+                Decrease => Some(Deb),
+                LParenthesis => Some(_Lpr),
+                _ => None,
+            }
+        } else {
+            match self {
+                Minus => Some(Sub),
+                Plus => Some(Add),
+                Multiply => Some(Mul),
+                Divide => Some(Div),
+                Not => Some(Inv),
+                BinaryAnd => Some(Ban),
+                BinaryOr => Some(Bor),
+                TokenType::And => Some(OpVar::And),
+                TokenType::Or => Some(OpVar::Or),
+                TokenType::Xor => Some(OpVar::Xor),
+                Increase => Some(Ina),
+                Decrease => Some(Dea),
+                Equals => Some(Eq),
+                NotEquals => Some(Neq),
+                LessThan => Some(Lt),
+                GreaterThan => Some(Gt),
+                LessOrEqualThan => Some(Lte),
+                GreaterOrEqualThan => Some(Gte),
+                Assign => Some(_Asn),
+                Comma => Some(_Com),
+                LParenthesis => Some(_Lpr),
+                RParenthesis => Some(_Rpr),
+                _ => None,
+            }
+        }
+    }
+}
+
+trait Operator {
+    fn priority(&self) -> isize;
+    fn is_right_associative(&self) -> bool;
+    fn is_left_associative(&self) -> bool {
+        !self.is_right_associative()
+    }
+}
+
+impl Operator for OpVar {
+    fn priority(&self) -> isize {
+        // According to https://zh.cppreference.com/w/cpp/language/operator_precedence
+        use OpVar::*;
+        match self {
+            _Dum => -50,
+            _Lpr | _Rpr => -10,
+            _Com => -4,
+            _Asn | _Csn => 0,
+            Eq | Neq => 2,
+            Gt | Lt | Gte | Lte => 3,
+            Or => 4,
+            And => 5,
+            Bor => 6,
+            Xor => 7,
+            Ban => 8,
+            Add | Sub => 15,
+            Mul | Div => 20,
+            Neg | Inv | Bin | Ref | Der | Ina | Inb | Dea | Deb => 40,
+        }
+    }
+
+    fn is_right_associative(&self) -> bool {
+        use OpVar::*;
+        match self {
+            Neg | Inv | Bin | Ref | Der | _Asn | _Lpr | _Rpr => true,
+            _ => false,
         }
     }
 }

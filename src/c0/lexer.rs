@@ -4,7 +4,16 @@ use ramp;
 use std::collections::HashMap;
 use std::iter::{Iterator, Peekable};
 use std::str::{Chars, FromStr};
-use std::{cell::RefCell, fmt, fmt::Display, fmt::Formatter, hash::Hash, rc::Rc, string::String};
+use std::{
+    cell::RefCell,
+    convert::{Into, TryInto},
+    fmt,
+    fmt::Display,
+    fmt::Formatter,
+    hash::Hash,
+    rc::Rc,
+    string::String,
+};
 
 #[derive(Debug, Eq, PartialEq, Hash, Clone)]
 /// This enum defines the variants of token in C0 language. Variants are pretty
@@ -40,6 +49,8 @@ pub enum TokenType {
     GreaterOrEqualThan,
     LParenthesis,
     RParenthesis,
+    LBracket,
+    RBracket,
     LCurlyBrace,
     RCurlyBrace,
     Assign,
@@ -87,6 +98,8 @@ impl Display for TokenType {
             GreaterOrEqualThan => write!(f, ">="),
             LParenthesis => write!(f, "("),
             RParenthesis => write!(f, ")"),
+            LBracket => write!(f, "["),
+            RBracket => write!(f, "]"),
             LCurlyBrace => write!(f, "{{\n"),
             RCurlyBrace => write!(f, "\n}}\n"),
             Assign => write!(f, "="),
@@ -262,8 +275,8 @@ impl Lexer {
             'a'..='z' | 'A'..='Z' | '_' => self.lex_identifier(),
             '\"' => self.lex_string_literal(),
             '\'' => self.lex_char_literal(),
-            '+' | '-' | '*' | '/' | '<' | '>' | '=' | '!' | '|' | '&' | '^' | '(' | ')' | '{'
-            | '}' | ',' | ';' => self.lex_operator(),
+            '+' | '-' | '*' | '/' | '<' | '>' | '=' | '!' | '|' | '&' | '^' | '(' | ')' | '['
+            | ']' | '{' | '}' | ',' | ';' => self.lex_operator(),
             // TODO: Add to errors and skip this line
             _ => panic!("Unexpected character '{}'", c),
         })
@@ -489,6 +502,8 @@ impl Lexer {
             '^' => TokenType::Xor,
             '(' => TokenType::LParenthesis,
             ')' => TokenType::RParenthesis,
+            '[' => TokenType::LBracket,
+            ']' => TokenType::RBracket,
             '{' => TokenType::LCurlyBrace,
             '}' => TokenType::RCurlyBrace,
             ',' => TokenType::Comma,
@@ -540,6 +555,7 @@ impl Lexer {
     /// | `\uNNNN` | Unicode character of value `0xNNNN` |
     /// | `\u{NN...N} | Unicode character of value `0xNN...N` |
     fn unescape_character(iter: &mut Peekable<StringPosIter>) -> char {
+        // TODO: Return a result so we can continue to parse
         match iter.next().expect("Bad escaped value").1 {
             'n' => '\n',
             't' => '\t',
@@ -548,10 +564,24 @@ impl Lexer {
             '"' => '"',
             '\'' => '\'',
 
-            'x' => unimplemented!("Read two characters in and make it a hexadecimal"),
+            'x' => {
+                let x: String = iter.take(2).map(|x| x.1).collect();
+                let x = u8::from_str_radix(&x, 16).expect("Bad escaping");
+                x as char
+            }
 
-            'u' => match iter.next().expect("Bad escape value") {
-                _ => unimplemented!("Read 4 chars in or until closed curly brace"),
+            'u' => match iter.next().expect("Bad escape value").1 {
+                '{' => {
+                    let x: String = iter.take_while(|x| x.1 != '}').map(|x| x.1).collect();
+                    let x = u32::from_str_radix(&x, 16).expect("Bad escaping");
+                    x.try_into().expect("Bad escaped value")
+                }
+                '0'..='9' | 'a'..='f' | 'A'..='F' => {
+                    let x: String = iter.take(4).map(|x| x.1).collect();
+                    let x = u32::from_str_radix(&x, 16).expect("Bad escaping");
+                    x.try_into().expect("Bad escaped value")
+                }
+                _ => panic!("Bad escaping"),
             },
 
             ch @ _ => panic!("Bad escape: {}", ch),
