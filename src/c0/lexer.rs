@@ -191,14 +191,20 @@ static OperatorCombination: Lazy<HashMap<char, Box<Vec<char>>>> = Lazy::new(|| {
     .collect()
 });
 
-pub struct StringPosIter {
-    chars: std::iter::Chain<Box<dyn Iterator<Item = char>>, std::iter::Once<char>>,
+pub struct StringPosIter<T>
+where
+    T: Iterator<Item = char>,
+{
+    chars: std::iter::Chain<T, std::iter::Once<char>>,
     pos: Pos,
     is_last_cr: bool,
 }
 
-impl StringPosIter {
-    pub fn new(src: Box<dyn Iterator<Item = char>>) -> StringPosIter {
+impl<T> StringPosIter<T>
+where
+    T: Iterator<Item = char>,
+{
+    pub fn new(src: T) -> StringPosIter<T> {
         let chars = src.chain(std::iter::once('\0'));
         StringPosIter {
             chars,
@@ -208,7 +214,10 @@ impl StringPosIter {
     }
 }
 
-impl Iterator for StringPosIter {
+impl<T> Iterator for StringPosIter<T>
+where
+    T: Iterator<Item = char>,
+{
     type Item = (Pos, char);
     fn next(&mut self) -> Option<Self::Item> {
         let next_char = self.chars.next();
@@ -240,20 +249,29 @@ impl Iterator for StringPosIter {
     }
 }
 
-pub struct Lexer {
-    iter: Peekable<StringPosIter>,
+pub struct Lexer<T>
+where
+    T: Iterator<Item = char>,
+{
+    iter: Peekable<StringPosIter<T>>,
     err: Option<Vec<super::err::ParseError>>,
 }
 
-impl Iterator for Lexer {
+impl<T> Iterator for Lexer<T>
+where
+    T: Iterator<Item = char>,
+{
     type Item = Token;
     fn next(&mut self) -> Option<Token> {
         self.get_next_token()
     }
 }
 
-impl Lexer {
-    pub fn new(iter: Box<dyn Iterator<Item = char>>) -> Lexer {
+impl<T> Lexer<T>
+where
+    T: Iterator<Item = char>,
+{
+    pub fn new(iter: T) -> Lexer<T> {
         Lexer {
             iter: StringPosIter::new(iter).peekable(),
             err: None,
@@ -518,7 +536,7 @@ impl Lexer {
     }
 
     /// Skip spaces and stop before the next non-space character.
-    fn skip_spaces(iter: &mut Peekable<StringPosIter>) {
+    fn skip_spaces(iter: &mut Peekable<StringPosIter<T>>) {
         while match iter.peek() {
             None => false,
             Some((_, ch)) => ch.is_whitespace(),
@@ -554,7 +572,7 @@ impl Lexer {
     /// | `\xNN`   | Character of value `0xNN` |
     /// | `\uNNNN` | Unicode character of value `0xNNNN` |
     /// | `\u{NN...N} | Unicode character of value `0xNN...N` |
-    fn unescape_character(iter: &mut Peekable<StringPosIter>) -> char {
+    fn unescape_character(iter: &mut Peekable<StringPosIter<T>>) -> char {
         // TODO: Return a result so we can continue to parse
         match iter.next().expect("Bad escaped value").1 {
             'n' => '\n',

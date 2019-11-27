@@ -10,12 +10,18 @@ use std::iter::Peekable;
 use either::Either;
 use LoopCtrl::*;
 
-pub trait IntoParser {
-    fn into_parser(self) -> Parser;
+pub trait IntoParser<T>
+where
+    T: Iterator<Item = Token>,
+{
+    fn into_parser(self) -> Parser<T>;
 }
 
-impl IntoParser for Lexer {
-    fn into_parser(self) -> Parser {
+impl<L> IntoParser<Lexer<L>> for Lexer<L>
+where
+    L: Iterator<Item = char>,
+{
+    fn into_parser(self) -> Parser<Lexer<L>> {
         Parser::new(self)
     }
 }
@@ -109,14 +115,20 @@ impl TypeVar {
     }
 }
 
-pub struct Parser {
-    lexer: Lexer,
+pub struct Parser<T>
+where
+    T: Iterator<Item = Token>,
+{
+    lexer: T,
     type_var: TypeVar,
     cur: Token,
 }
 
-impl Parser {
-    pub fn new(mut lexer: Lexer) -> Parser {
+impl<T> Parser<T>
+where
+    T: Iterator<Item = Token>,
+{
+    pub fn new(mut lexer: T) -> Parser<T> {
         let first_tok = lexer.next();
         let mut parser = Parser {
             lexer: lexer,
@@ -127,8 +139,10 @@ impl Parser {
         parser
     }
 
-    fn bump(&mut self) {
-        self.cur = self.lexer.next().unwrap_or_else(|| Token::eof());
+    fn bump(&mut self) -> Token {
+        let mut next = self.lexer.next().unwrap_or_else(|| Token::eof());
+        std::mem::swap(&mut self.cur, &mut next);
+        next
     }
 
     fn check(&self, accept: &TokenType) -> bool {
@@ -141,6 +155,19 @@ impl Parser {
             true
         } else {
             false
+        }
+    }
+
+    fn check_report(&mut self, accept: &TokenType) -> ParseResult<()> {
+        if self.check(accept) {
+            Ok(())
+        } else {
+            Err(parse_err(
+                // We used clone here, because once we meet an error we no longer
+                // need to worry about performance. Things're gonna fail anyway.
+                ParseErrVariant::ExpectToken(accept.clone()),
+                self.cur.span,
+            ))
         }
     }
 
@@ -167,6 +194,19 @@ impl Parser {
             true
         } else {
             false
+        }
+    }
+
+    fn check_one_of_report(&mut self, accept: &[TokenType]) -> ParseResult<()> {
+        if self.check_one_of(accept) {
+            Ok(())
+        } else {
+            Err(parse_err(
+                // We used clone here, because once we meet an error we no longer
+                // need to worry about performance. Things're gonna fail anyway.
+                ParseErrVariant::ExpectTokenOneOf(accept.iter().map(|x| x.clone()).collect()),
+                self.cur.span,
+            ))
         }
     }
 
@@ -274,7 +314,23 @@ impl Parser {
     ///
     /// This parser accepts a starting state when `self.cur` is the first `Identifier`
     fn p_ident_or_fn(&mut self, scope: Ptr<Scope>) -> ParseResult<Expr> {
-        todo!()
+        let cur = self.bump();
+        self.check_report(&TokenType::Identifier(String::new()))?;
+        if self.check(&TokenType::LParenthesis) {
+            self.p_fn_call(&cur, scope)
+        } else {
+            //* No parenthesis -> simple identifier!
+            Ok(Expr {
+                var: ExprVariant::Ident(Identifier {
+                    name: cur.get_ident().unwrap().to_owned(),
+                }),
+                span: cur.span,
+            })
+        }
+    }
+
+    fn p_fn_call(&mut self, fn_tok: &Token, scope: Ptr<Scope>) -> ParseResult<Expr> {
+        todo!("Parse function call starting from left parenthesis")
     }
 
     fn p_literal(&mut self) -> ParseResult<Expr> {

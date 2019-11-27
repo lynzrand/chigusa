@@ -202,6 +202,7 @@ impl AstNode for Expr {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum ExprVariant {
+    Ident(Identifier),
     Literal(Literal),
     TypeConversion(TypeConversion),
     UnaryOp(UnaryOp),
@@ -209,23 +210,26 @@ pub enum ExprVariant {
     FunctionCall(FunctionCall),
     StructChild(StructChild),
     ArrayChild(ArrayChild),
+    // /// If conditional.
+    // ///
+    // /// `if` `(` Expression `)` (Expression | Statement)
+    // /// (`else` (Expression | Statement))?
+    // IfConditional(IfConditional),
 
-    /// If conditional.
-    ///
-    /// `if` `(` Expression `)` (Expression | Statement)
-    /// (`else` (Expression | Statement))?
-    IfConditional(IfConditional),
+    // /// While conditional. Takes the value on break or the last iteration as its
+    // /// return value.
+    // ///
+    // /// `while` `(` Expression `)` BlockExpression
+    // WhileConditional(WhileConditional),
 
-    /// While conditional. Takes the value on break or the last iteration as its
-    /// return value.
-    ///
-    /// `while` `(` Expression `)` BlockExpression
-    WhileConditional(WhileConditional),
-
-    /// Block expression. Similar to that in Rust.
-    ///
-    /// `{` Statement* Expression? `}`
-    Block(Block),
+    // /// Block expression. Similar to that in Rust.
+    // ///
+    // /// `{` Statement* Expression? `}`
+    // Block(Block),
+}
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct Identifier {
+    pub name: String,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
