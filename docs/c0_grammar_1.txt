@@ -54,10 +54,12 @@ kwDefault: "default"
 
 // The latter `;` is used only for function pointers,
 // e.g. `Fn<int, double; bool>` for `(int, double) -> bool`
-GenericTypeAnnotation: "<" TypeDeclaration ("," TypeDeclaration)* (";" TypeDeclaration)? ">"
+//GenericTypeAnnotation: "<" TypeDeclaration ("," TypeDeclaration)* (";" TypeDeclaration)? ">"
 
 // Generic type, e.g. `Struct<T>`
-GenericTypeDeclaration: Identifier GenericTypeAnnotation?
+//GenericTypeDeclaration: Identifier GenericTypeAnnotation?
+
+BasicTypeDeclaration: Identifier 
 
 // Array type, e.g. `[int]`, `[long, 4]`
 ArrayTypeDeclaration: "[" TypeDeclaration (";" IntegerLiteral)? "]"
@@ -74,7 +76,7 @@ ReferenceTypeDeclaration: "&" TypeDeclaration
 // - float (f32)
 // - double (f64)
 // - void 
-TypeDeclaration: ReferenceTypeDeclaration | ArrayTypeDeclaration | GenericTypeDeclaration
+TypeDeclaration: ReferenceTypeDeclaration | ArrayTypeDeclaration | BasicTypeDeclaration
 
 // # Expressions
 //
@@ -84,9 +86,6 @@ LiteralExpr: Literal
 IdentifierExpr: Identifier<Variable>
 
 // These operators follows the precedence rule defined elsewhere
-// 
-// Note:
-// `&x`: get 
 PrecedingUnaryOperator: "+" | "-" | "*" | "&" | "!" | "~" | "++" | "--"
 ProcedingUnaryOperator: "++" | "--"
 

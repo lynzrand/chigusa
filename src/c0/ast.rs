@@ -230,8 +230,7 @@ pub enum ExprVariant {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum Literal {
-    Integer { val: ramp::int::Int },
-    Float { val: ramp::int::Int, exp: u64 },
+    Number { val: ramp::rational::Rational },
     Struct { typ: TypeDef, fields: Vec<Expr> },
     Boolean { val: bool },
     String { val: String },
@@ -241,10 +240,10 @@ impl From<super::lexer::Literal> for Literal {
     fn from(lit: super::lexer::Literal) -> Self {
         use super::lexer::Literal::*;
         match lit {
-            Integer(i) => Literal::Integer { val: i },
+            Number(i) => Literal::Number { val: i },
             String(s) => Literal::String { val: s },
             Boolean(b) => Literal::Boolean { val: b },
-            Char(c) => Literal::Integer {
+            Char(c) => Literal::Number {
                 val: (c as u32).into(),
             },
         }

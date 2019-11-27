@@ -9,7 +9,7 @@ use std::{cell::RefCell, fmt, fmt::Display, fmt::Formatter, hash::Hash, rc::Rc, 
 #[derive(Debug, Eq, PartialEq, Hash, Clone)]
 /// This enum defines the variants of token in C0 language. Variants are pretty
 /// self-explanatory.
-pub enum TokenVariant {
+pub enum TokenType {
     // Keywords
     Const,
     As,
@@ -55,9 +55,9 @@ pub enum TokenVariant {
     Error,
 }
 
-impl Display for TokenVariant {
+impl Display for TokenType {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        use self::TokenVariant::*;
+        use self::TokenType::*;
         match self {
             Const => write!(f, "Const"),
             As => write!(f, "As"),
@@ -108,7 +108,7 @@ pub enum Literal {
     Char(char),
     String(String),
     Boolean(bool),
-    Integer(ramp::Int),
+    Number(ramp::rational::Rational),
 }
 
 impl Display for Literal {
@@ -118,7 +118,7 @@ impl Display for Literal {
             Char(c) => write!(f, "Char({})", c.escape_debug()),
             String(s) => write!(f, "String(\"{}\")", s.escape_debug()),
             Boolean(b) => write!(f, "Boolean({})", b),
-            Integer(i) => write!(f, "Integer({})", i),
+            Number(i) => write!(f, "Integer({})", i),
         }
     }
 }
@@ -127,7 +127,7 @@ impl Display for Literal {
 #[derive(Debug, Clone)]
 pub struct Token {
     /// Its variant
-    pub var: TokenVariant,
+    pub var: TokenType,
 
     /// The space the token occupies
     pub span: Span,
@@ -136,8 +136,22 @@ pub struct Token {
 impl Token {
     pub fn get_ident(&self) -> Result<&str, ()> {
         match &self.var {
-            TokenVariant::Identifier(s) => Ok(&s),
+            TokenType::Identifier(s) => Ok(&s),
             _ => Err(()),
+        }
+    }
+
+    pub fn dummy() -> Token {
+        Token {
+            var: TokenType::Dummy,
+            span: Span::zero(),
+        }
+    }
+
+    pub fn eof() -> Token {
+        Token {
+            var: TokenType::EndOfFile,
+            span: Span::zero(),
         }
     }
 }
@@ -215,6 +229,7 @@ impl Iterator for StringPosIter {
 
 pub struct Lexer {
     iter: Peekable<StringPosIter>,
+    err: Option<Vec<super::err::ParseError>>,
 }
 
 impl Iterator for Lexer {
@@ -228,13 +243,10 @@ impl Lexer {
     pub fn new(iter: Box<dyn Iterator<Item = char>>) -> Lexer {
         Lexer {
             iter: StringPosIter::new(iter).peekable(),
+            err: None,
         }
     }
 
-    /// **Not Intended For Direct Use.**
-    ///
-    /// This method requires creating a character index iterator for the `src`
-    /// field. Thus it must be used inside an `LexerIterator`.
     pub fn get_next_token(&mut self) -> Option<Token> {
         Self::skip_spaces(&mut self.iter);
         // the first character of next token
@@ -257,12 +269,16 @@ impl Lexer {
         })
     }
 
+    fn skip_error(&mut self) -> Token {
+        todo!("This method should skip through an error token")
+    }
+
     /// Lex a number
     fn lex_number(&mut self) -> Token {
         let start_pos = self.iter.peek().expect("This value should be valid").0;
         let mut number = String::new();
 
-        // radix check
+        // radix check.
         let radix = if self.iter.peek().map_or(false, |ch_ind| ch_ind.1 == '0') {
             // this digit is '0'. consume and advance
             self.iter.next();
@@ -274,7 +290,7 @@ impl Lexer {
                 _ => {
                     // This does not match any number format, return zero
                     return Token {
-                        var: TokenVariant::Literal(Literal::Integer(ramp::Int::zero())),
+                        var: TokenType::Error,
                         // src: &self.src[start_pos.index..start_pos.index + 1],
                         span: Span::from(start_pos, start_pos.bump()),
                     };
@@ -298,8 +314,8 @@ impl Lexer {
         let end = end_pos.index;
 
         Token {
-            var: TokenVariant::Literal(Literal::Integer(
-                ramp::Int::from_str_radix(&number, radix).unwrap(),
+            var: TokenType::Literal(Literal::Number(
+                ramp::Int::from_str_radix(&number, radix).unwrap().into(),
             )),
             // src: &self.src[start..end],
             span: Span::from(start_pos, end_pos),
@@ -334,7 +350,7 @@ impl Lexer {
         }
 
         Token {
-            var: TokenVariant::Literal(Literal::Char(ch)),
+            var: TokenType::Literal(Literal::Char(ch)),
             span: Span::from(start, end),
         }
     }
@@ -371,7 +387,7 @@ impl Lexer {
         }
 
         Token {
-            var: TokenVariant::Literal(Literal::String(tgt_string)),
+            var: TokenType::Literal(Literal::String(tgt_string)),
             span: Span::from(start, end),
         }
     }
@@ -389,15 +405,15 @@ impl Lexer {
         }
         let end = self.iter.peek().unwrap().0;
         let variation = match &ident[..] {
-            "if" => TokenVariant::If,
-            "else" => TokenVariant::Else,
-            "while" => TokenVariant::While,
-            "return" => TokenVariant::Return,
-            "const" => TokenVariant::Const,
-            "as" => TokenVariant::As,
-            "true" => TokenVariant::Literal(Literal::Boolean(true)),
-            "false" => TokenVariant::Literal(Literal::Boolean(false)),
-            _ => TokenVariant::Identifier(ident),
+            "if" => TokenType::If,
+            "else" => TokenType::Else,
+            "while" => TokenType::While,
+            "return" => TokenType::Return,
+            "const" => TokenType::Const,
+            "as" => TokenType::As,
+            "true" => TokenType::Literal(Literal::Boolean(true)),
+            "false" => TokenType::Literal(Literal::Boolean(false)),
+            _ => TokenType::Identifier(ident),
         };
 
         Token {
@@ -429,54 +445,54 @@ impl Lexer {
 
         let variation = match first_char {
             '+' => match second_char {
-                None => TokenVariant::Plus,
-                Some('+') => TokenVariant::Increase,
+                None => TokenType::Plus,
+                Some('+') => TokenType::Increase,
                 _ => unreachable!(),
             },
             '-' => match second_char {
-                None => TokenVariant::Minus,
-                Some('-') => TokenVariant::Decrease,
+                None => TokenType::Minus,
+                Some('-') => TokenType::Decrease,
                 _ => unreachable!(),
             },
-            '*' => TokenVariant::Multiply,
-            '/' => TokenVariant::Divide,
+            '*' => TokenType::Multiply,
+            '/' => TokenType::Divide,
             '=' => match second_char {
-                None => TokenVariant::Assign,
-                Some('=') => TokenVariant::Equals,
+                None => TokenType::Assign,
+                Some('=') => TokenType::Equals,
                 _ => unreachable!(),
             },
             '<' => match second_char {
-                None => TokenVariant::LessThan,
-                Some('=') => TokenVariant::LessOrEqualThan,
+                None => TokenType::LessThan,
+                Some('=') => TokenType::LessOrEqualThan,
                 _ => unreachable!(),
             },
             '>' => match second_char {
-                None => TokenVariant::GreaterThan,
-                Some('=') => TokenVariant::GreaterOrEqualThan,
+                None => TokenType::GreaterThan,
+                Some('=') => TokenType::GreaterOrEqualThan,
                 _ => unreachable!(),
             },
             '!' => match second_char {
-                None => TokenVariant::Not,
-                Some('=') => TokenVariant::NotEquals,
+                None => TokenType::Not,
+                Some('=') => TokenType::NotEquals,
                 _ => unreachable!(),
             },
             '|' => match second_char {
-                None => TokenVariant::BinaryOr,
-                Some('|') => TokenVariant::Or,
+                None => TokenType::BinaryOr,
+                Some('|') => TokenType::Or,
                 _ => unreachable!(),
             },
             '&' => match second_char {
-                None => TokenVariant::BinaryAnd,
-                Some('&') => TokenVariant::And,
+                None => TokenType::BinaryAnd,
+                Some('&') => TokenType::And,
                 _ => unreachable!(),
             },
-            '^' => TokenVariant::Xor,
-            '(' => TokenVariant::LParenthesis,
-            ')' => TokenVariant::RParenthesis,
-            '{' => TokenVariant::LCurlyBrace,
-            '}' => TokenVariant::RCurlyBrace,
-            ',' => TokenVariant::Comma,
-            ';' => TokenVariant::Semicolon,
+            '^' => TokenType::Xor,
+            '(' => TokenType::LParenthesis,
+            ')' => TokenType::RParenthesis,
+            '{' => TokenType::LCurlyBrace,
+            '}' => TokenType::RCurlyBrace,
+            ',' => TokenType::Comma,
+            ';' => TokenType::Semicolon,
             _ => panic!("Unexpected character \'{}\' at {}", first_char, start),
         };
 

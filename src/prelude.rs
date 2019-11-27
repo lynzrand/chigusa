@@ -1,4 +1,4 @@
-use crate::c0::lexer::TokenVariant;
+use crate::c0::lexer::TokenType;
 use std::str::{Chars, FromStr};
 use std::{
     cell::{Ref, RefCell, RefMut},

@@ -1,4 +1,4 @@
-use crate::c0::lexer::TokenVariant;
+use crate::c0::lexer::TokenType;
 use crate::prelude::*;
 use std::str::{Chars, FromStr};
 use std::{
@@ -13,26 +13,34 @@ use std::{
     string::String,
 };
 
+use failure::*;
+
 pub type ParseResult<T> = Result<T, ParseError>;
 
 pub fn parse_err(var: ParseErrVariant, span: Span) -> ParseError {
-    ParseError { var, span }
+    ParseError {
+        var,
+        span,
+        backtrace: Backtrace::new(),
+    }
 }
 
 pub fn parse_err_z(var: ParseErrVariant) -> ParseError {
     ParseError {
         var,
         span: Span::zero(),
+        backtrace: Backtrace::new(),
     }
 }
 
 /// An error present in parsing process.
 ///
 /// > When span is not avaliable, use Span::zero().
-#[derive(Debug)]
+#[derive(Debug, Fail)]
 pub struct ParseError {
     pub var: ParseErrVariant,
     pub span: Span,
+    pub backtrace: Backtrace,
 }
 
 impl Display for ParseError {
@@ -41,42 +49,39 @@ impl Display for ParseError {
     }
 }
 
-impl std::error::Error for ParseError {
-    fn description(&self) -> &str {
-        "description() is deprecated; use Display"
-    }
-    fn cause(&self) -> Option<&dyn std::error::Error> {
-        self.source()
-    }
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        None
-    }
-}
-
 #[derive(Debug)]
 pub enum ParseErrVariant {
-    ExpectToken(TokenVariant),
-    UnexpectedToken(TokenVariant),
-    UnexpectedTokenMsg(TokenVariant, &'static str),
+    InvalidToken(String),
+
+    ExpectToken(TokenType),
+    ExpectTokenOneOf(Vec<TokenType>),
+    UnexpectedToken(TokenType),
+    UnexpectedTokenMsg { typ: TokenType, msg: &'static str },
     NoConstFns,
+
     CannotFindIdent(String),
     CannotFindType(String),
     CannotFindVar(String),
     CannotFindFn(String),
+
     ExpectToBeType(String),
     ExpectToBeVar(String),
     ExpectToBeFn(String),
-    UnsupportedToken(TokenVariant),
-    TokenExists(String),
-    FnDeclarationConflict(String),
+
+    UnsupportedToken(TokenType),
+
+    DuplicateDeclaration(String),
+    ConflictingDeclaration(String),
     EarlyEof,
-    UnbalancedParenthesisExpectL,
-    UnbalancedParenthesisExpectR,
+
     MissingOperandUnary,
     MissingOperandL,
     MissingOperandR,
+
     NotMatchFnArguments(usize, usize),
-    InternalErr,
+
+    CustomErr(String),
+    InternalErr(String),
 }
 
 impl ParseErrVariant {
@@ -85,7 +90,7 @@ impl ParseErrVariant {
         match self {
             ExpectToken(_) => 1,
             NoConstFns => 2,
-            InternalErr => 1023,
+            InternalErr(_) => 1023,
             _ => 1024,
         }
     }
@@ -95,7 +100,7 @@ impl ParseErrVariant {
         match self {
             ExpectToken(token) => format!("Expected {}", token),
             NoConstFns => "Functions cannot be marked as constant".to_string(),
-            InternalErr => "Something went wrong inside the compiler".to_string(),
+            InternalErr(msg) => format!("The compiler encountered an internal error: {}", msg),
             _ => "Unknown Error".to_string(),
         }
     }
