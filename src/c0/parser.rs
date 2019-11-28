@@ -224,23 +224,47 @@ where
     }
 
     pub fn parse(&mut self) -> ParseResult<Program> {
-        unimplemented!();
-        // Ok(Program {
-        //     scope: (),
-        //     vars: (),
-        //     types: (),
-        // })
+        self.p_program()
+    }
+
+    fn p_program(&mut self) -> ParseResult<Program> {
+        let mut root_scope = Ptr::new(Scope::new());
+        let mut stmts = Vec::new();
+        while self.cur.var != TokenType::EndOfFile {
+            stmts.push(self.p_stmt(root_scope.clone())?)
+        }
+        Ok(Program {
+            scope: root_scope,
+            vars: todo!(),
+            types: todo!(),
+        })
     }
 
     fn p_stmt(&mut self, scope: Ptr<Scope>) -> ParseResult<Stmt> {
+        match &self.cur.var {
+            TokenType::LCurlyBrace => self.p_block_stmt(scope),
+            TokenType::Identifier(id) => {
+                //
+                todo!("Check if identifier is a function/type")
+            }
+            TokenType::If => self.p_if_stmt(scope),
+            TokenType::While => self.p_while_stmt(scope),
+            TokenType::Const => self.p_decl_stmt(scope),
+            TokenType::LParenthesis
+            | TokenType::LBracket
+            | TokenType::Literal(..)
+            | TokenType::Multiply
+            | TokenType::Increase
+            | TokenType::Decrease => self.p_expr_stmt(scope),
+            _ => todo!(),
+        }
+    }
+
+    fn p_block_stmt(&mut self, scope: Ptr<Scope>) -> ParseResult<Stmt> {
         unimplemented!()
     }
 
-    fn p_block_stmt(&mut self, scope: Ptr<Scope>) -> ParseResult<Expr> {
-        unimplemented!()
-    }
-
-    fn p_block_stmt_no_scope(&mut self, scope: Ptr<Scope>) -> ParseResult<Expr> {
+    fn p_block_stmt_no_scope(&mut self, scope: Ptr<Scope>) -> ParseResult<Stmt> {
         unimplemented!()
     }
 
@@ -252,7 +276,7 @@ where
         unimplemented!()
     }
 
-    fn p_if_stmt(&mut self, scope: Ptr<Scope>) -> ParseResult<Expr> {
+    fn p_if_stmt(&mut self, scope: Ptr<Scope>) -> ParseResult<Stmt> {
         let mut span = self.cur.span;
 
         self.expect_report(&TokenType::If)?;
@@ -294,11 +318,15 @@ where
         todo!()
     }
 
-    fn p_expr_stmt(&mut self, scope: Ptr<Scope>) -> ParseResult<Ptr<Expr>> {
+    fn p_expr_stmt(&mut self, scope: Ptr<Scope>) -> ParseResult<Stmt> {
         // TODO: Subject to change
         let expr = self.p_base_expr(&[TokenType::Semicolon], scope)?;
+        let span = expr.borrow().span();
         self.expect_report(&TokenType::Semicolon)?;
-        Ok(expr)
+        Ok(Stmt {
+            var: StmtVariant::Expr(expr),
+            span,
+        })
     }
 
     fn p_base_expr(

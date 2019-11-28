@@ -45,6 +45,20 @@ pub struct Scope {
 }
 
 impl Scope {
+    pub fn new() -> Scope {
+        Scope {
+            last: None,
+            defs: IndexMap::new(),
+        }
+    }
+
+    pub fn new_with_parent(parent: Ptr<Scope>) -> Scope {
+        Scope {
+            last: Some(parent),
+            defs: IndexMap::new(),
+        }
+    }
+
     pub fn find_def(&self, name: &str) -> Option<Ptr<SymbolDef>> {
         self.defs.get(name).map(|def| def.clone()).or_else(|| {
             self.last
@@ -182,9 +196,12 @@ impl AstNode for Stmt {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum StmtVariant {
-    Expr(Expr),
-    Return(Expr),
-    Break(Expr),
+    If(IfConditional),
+    While(WhileConditional),
+
+    Expr(Ptr<Expr>),
+    Return(Option<Ptr<Expr>>),
+    Break,
     Empty,
 }
 
@@ -277,8 +294,6 @@ pub struct WhileConditional {
 pub struct Block {
     pub vars: Vec<usize>,
     pub stmts: Vec<Stmt>,
-    pub return_type: TypeIdent,
-    pub val: Ptr<Expr>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
