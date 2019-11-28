@@ -294,50 +294,103 @@ where
         todo!()
     }
 
-    fn p_expr(&mut self, scope: Ptr<Scope>) -> ParseResult<Expr> {
-        let stack = Vec::<Expr>::new();
-        todo!();
+    fn p_expr(&mut self, scope: Ptr<Scope>) -> ParseResult<Ptr<Expr>> {
+        // TODO: Subject to change
+        self.p_base_expr(&[], scope)
+    }
+
+    fn p_base_expr(
+        &mut self,
+        close_delim: &[TokenType],
+        scope: Ptr<Scope>,
+    ) -> ParseResult<Ptr<Expr>> {
+        let mut expr = None;
+        while !self.check_one_of(close_delim) {
+            expr = Some(self.p_binary_op(expr, 0, scope.clone())?);
+        }
+        expr.ok_or_else(|| {
+            parse_err_z(ParseErrVariant::InternalErr(
+                "Invalid branching into expression parsing".into(),
+            ))
+        })
     }
 
     /// Parses a binary operator with at least the precedence specified.
     ///
     /// Design stolen from https://github.com/rust-lang/rust/blob/b5f265eeed23ac87ec6b4a7e6bc7cb4ea3e67c31/src/librustc_parse/parser/expr.rs#L141
-    fn p_binary_op(&mut self, expect_prec: i32, scope: Ptr<Scope>) -> ParseResult<Expr> {
-        todo!("Check out rustc's official implementation!")
+    fn p_binary_op(
+        &mut self,
+        lhs: Option<Ptr<Expr>>,
+        expect_prec: isize,
+        scope: Ptr<Scope>,
+    ) -> ParseResult<Ptr<Expr>> {
+        let lhs = if lhs.is_some() {
+            lhs.unwrap()
+        } else {
+            self.p_prefix_unary_op(scope.clone())?
+        };
+
+        // Op should be self.cur
+        if let Some(op) = self.cur.var.into_op(false, false) {
+            if (op.is_left_associative() && op.priority() > expect_prec)
+                || (op.is_right_associative() && op.priority() >= expect_prec)
+            {
+                self.bump();
+                let rhs = self.p_binary_op(None, op.priority(), scope.clone())?;
+                let span = { lhs.borrow().span() + rhs.borrow().span() };
+                Ok(Ptr::new(Expr {
+                    var: ExprVariant::BinaryOp(BinaryOp { lhs, rhs, op }),
+                    span,
+                }))
+            } else {
+                Ok(lhs)
+            }
+        } else {
+            Ok(lhs)
+        }
+
+        //   if op.prec() > min_accept {
+        //     eat()
+        //     let rhs = parse_binary(None, op.prec())
+        //     expr(lhs, op, rhs)
+        //   } else {
+        //     lhs
+
+        //     todo!("Check out rustc's official implementation!")
     }
 
-    fn p_prefix_unary_op(&mut self, expect_prec: i32, scope: Ptr<Scope>) -> ParseResult<Expr> {
+    fn p_prefix_unary_op(&mut self, scope: Ptr<Scope>) -> ParseResult<Ptr<Expr>> {
         todo!()
     }
 
-    fn p_postfix_unary_op(&mut self, expect_prec: i32, scope: Ptr<Scope>) -> ParseResult<Expr> {
+    fn p_postfix_unary_op(&mut self, scope: Ptr<Scope>) -> ParseResult<Ptr<Expr>> {
         todo!()
     }
 
-    fn p_item(&mut self, scope: Ptr<Scope>) -> ParseResult<Expr> {
+    fn p_item(&mut self, scope: Ptr<Scope>) -> ParseResult<Ptr<Expr>> {
         todo!("Parse items")
     }
 
     /// Parse an identifier or function call.
     ///
     /// This parser accepts a starting state when `self.cur` is the first `Identifier`
-    fn p_ident_or_fn(&mut self, scope: Ptr<Scope>) -> ParseResult<Expr> {
+    fn p_ident_or_fn(&mut self, scope: Ptr<Scope>) -> ParseResult<Ptr<Expr>> {
         let cur = self.bump();
         self.check_report(&TokenType::Identifier(String::new()))?;
         if self.check(&TokenType::LParenthesis) {
             self.p_fn_call(&cur, scope)
         } else {
             //* No parenthesis -> simple identifier!
-            Ok(Expr {
+            Ok(Ptr::new(Expr {
                 var: ExprVariant::Ident(Identifier {
                     name: cur.get_ident().unwrap().to_owned(),
                 }),
                 span: cur.span,
-            })
+            }))
         }
     }
 
-    fn p_fn_call(&mut self, fn_tok: &Token, scope: Ptr<Scope>) -> ParseResult<Expr> {
+    fn p_fn_call(&mut self, fn_tok: &Token, scope: Ptr<Scope>) -> ParseResult<Ptr<Expr>> {
         self.expect_report(&TokenType::LParenthesis)?;
 
         let func = scope
@@ -357,14 +410,14 @@ where
         let right_span = self.cur.span;
         self.expect_report(&TokenType::RParenthesis)?;
 
-        Ok(Expr {
+        Ok(Ptr::new(Expr {
             var: ExprVariant::FunctionCall(FunctionCall {
                 // TODO: How do we identify functions?
                 func: fn_tok.get_ident().unwrap().to_owned(),
                 params: expr_vec,
             }),
             span: fn_tok.span + right_span,
-        })
+        }))
     }
 
     fn p_literal(&mut self) -> ParseResult<Expr> {
@@ -389,11 +442,11 @@ trait IntoOperator {
     fn into_op(&self, suggest_unary: bool) -> Option<OpVar>;
 }
 
-impl IntoOperator for TokenType {
-    fn into_op(&self, suggest_unary: bool) -> Option<OpVar> {
+impl TokenType {
+    fn into_op(&self, unary_prefix: bool, unary_postfix: bool) -> Option<OpVar> {
         use OpVar::*;
         use TokenType::*;
-        if suggest_unary {
+        if unary_prefix {
             match self {
                 Minus => Some(Neg),
                 Multiply => Some(Der),
@@ -401,6 +454,12 @@ impl IntoOperator for TokenType {
                 Increase => Some(Inb),
                 Decrease => Some(Deb),
                 LParenthesis => Some(_Lpr),
+                _ => None,
+            }
+        } else if unary_postfix {
+            match self {
+                Increase => Some(Ina),
+                Decrease => Some(Dea),
                 _ => None,
             }
         } else {
@@ -415,8 +474,6 @@ impl IntoOperator for TokenType {
                 TokenType::And => Some(OpVar::And),
                 TokenType::Or => Some(OpVar::Or),
                 TokenType::Xor => Some(OpVar::Xor),
-                Increase => Some(Ina),
-                Decrease => Some(Dea),
                 Equals => Some(Eq),
                 NotEquals => Some(Neq),
                 LessThan => Some(Lt),
