@@ -296,7 +296,8 @@ pub struct UnaryOp {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct FunctionCall {
-    pub func: usize,
+    // TODO: Subject to change
+    pub func: String,
     pub params: Vec<Expr>,
 }
 

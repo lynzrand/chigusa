@@ -76,6 +76,8 @@ ReferenceTypeDeclaration: "&" TypeDeclaration
 // - float (f32)
 // - double (f64)
 // - void 
+// 
+// Please note that functions are yet to be first-class types.
 TypeDeclaration: ReferenceTypeDeclaration | ArrayTypeDeclaration | BasicTypeDeclaration
 
 // # Expressions
@@ -85,37 +87,38 @@ LiteralExpr: Literal
 
 IdentifierExpr: Identifier<Variable>
 
-// These operators follows the precedence rule defined elsewhere
-PrecedingUnaryOperator: "+" | "-" | "*" | "&" | "!" | "~" | "++" | "--"
-ProcedingUnaryOperator: "++" | "--"
+IndexOperator: "[" Expr "]"
+StructChildOperator: "." Identifier<StructChild>
 
-BinaryOperator: "+" | "-" | "*" | "/" | "%" | "^" 
-    | "&" | "|" | "&&" | "||" | ">>" | "<<" | "<" | "<=" | "==" | "!=" | ">=" | ">"
-
-UnaryOperation: PrecedingUnaryOperator Expr | Expr ProcedingUnaryOperator
-BinaryOperation: Expr BinaryOperator Expr
-
-OperationExpr: UnaryOperation | BinaryOperation
-
-FnCallExpr: Expr "(" Expr ("," Expr)* ")"
-
-IndexBracket: "[" Expr "]"
-IndexExpr: Expr IndexBracket
-
-StructChild: "." Identifier<StructChild>
-StructChildExpr: Expr StructChild
+// Subject to change. For now, functions are only accessible as identifiers.
+FnCallExpr: Identifier<Function> "(" Expr ("," Expr)* ")"
 
 StructConstructExpr: Identifier<Type+StructName> "{" (Identifier ":" Expr)* "}"
 
+// Unary operators are applied according to their order of appearance.
+PrecedingUnaryOperator: "+" | "-" | "*" | "&" | "!" | "~" | "++" | "--"
+ProcedingUnaryOperator: "++" | "--" | IndexOperator | StructChildOperator
+
+// Binary operators are applied according to precedence rules defined elsewhere.
+// Operators with the same precedence value are left associative, except for assignment ops.
+// i.e. `x = z = a + b - c` -> `(x = (z = ((a + b) - c)))`
+BinaryOperator: "+" | "-" | "*" | "/" | "%" | "^" | "="
+    | "&" | "|" | "&&" | "||" | ">>" | "<<" | "<" | "<=" | "==" | "!=" | ">=" | ">"
+
+Item: StructConstructExpr | LiteralExpr | FnCallExpr | IdentifierExpr
+
+ProceedingUnaryOperation: Expr ProceedingUnaryOperator
+
+PreceedingUnaryOperation: PreceedingUnaryOperator ProceedingUnaryOperation
+BinaryOperation: PreceedingUnaryOperation (BinaryOperator PreceedingUnaryOperation)*
+
 TypeCastExpr: Expr "as" TypeDefinition
 
+// Design stolen from https://github.com/rust-lang/rust/blob/b5f265eeed23ac87ec6b4a7e6bc7cb4ea3e67c31/src/librustc_parse/parser/expr.rs#L778
+BottomExpr: BinaryOperation | "(" BinaryOperation ")"
 
-Expr: LiteralExpr | IdentifierExpr | OperationExpr | FnCallExpr | IndexExpr 
-    | StructChildExpr | StructConstructExpr | TypeCastExpr
-
-LValue: IdentifierExpr (IndexBracket | StructChildExpr)*
-RValue: Expr
-
+// Expressions can be a LValue or RValue. Specs stolen from https://zh.cppreference.com/w/cpp/language/value_category
+Expr: BottomExpr
 
 
 // # Statements

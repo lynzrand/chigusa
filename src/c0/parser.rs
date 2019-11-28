@@ -306,8 +306,16 @@ where
         todo!("Check out rustc's official implementation!")
     }
 
-    fn p_unary_op(&mut self, expect_prec: i32, scope: Ptr<Scope>) -> ParseResult<Expr> {
+    fn p_prefix_unary_op(&mut self, expect_prec: i32, scope: Ptr<Scope>) -> ParseResult<Expr> {
         todo!()
+    }
+
+    fn p_postfix_unary_op(&mut self, expect_prec: i32, scope: Ptr<Scope>) -> ParseResult<Expr> {
+        todo!()
+    }
+
+    fn p_item(&mut self, scope: Ptr<Scope>) -> ParseResult<Expr> {
+        todo!("Parse items")
     }
 
     /// Parse an identifier or function call.
@@ -330,7 +338,33 @@ where
     }
 
     fn p_fn_call(&mut self, fn_tok: &Token, scope: Ptr<Scope>) -> ParseResult<Expr> {
-        todo!("Parse function call starting from left parenthesis")
+        self.expect_report(&TokenType::LParenthesis)?;
+
+        let func = scope
+            .borrow()
+            .find_def(fn_tok.get_ident().unwrap())
+            .ok_or(parse_err(
+                ParseErrVariant::CannotFindFn(fn_tok.get_ident().unwrap().to_owned()),
+                fn_tok.span,
+            ))?;
+
+        // The expressions in function call
+        let mut expr_vec = Vec::new();
+
+        while self.expect(&TokenType::Comma) {
+            expr_vec.push(self.p_expr(scope.clone())?);
+        }
+        let right_span = self.cur.span;
+        self.expect_report(&TokenType::RParenthesis)?;
+
+        Ok(Expr {
+            var: ExprVariant::FunctionCall(FunctionCall {
+                // TODO: How do we identify functions?
+                func: fn_tok.get_ident().unwrap().to_owned(),
+                params: expr_vec,
+            }),
+            span: fn_tok.span + right_span,
+        })
     }
 
     fn p_literal(&mut self) -> ParseResult<Expr> {
