@@ -446,19 +446,19 @@ impl Operator for OpVar {
         // According to https://zh.cppreference.com/w/cpp/language/operator_precedence
         use OpVar::*;
         match self {
-            _Dum => -50,
-            _Lpr | _Rpr => -10,
-            _Com => -4,
-            _Asn | _Csn => 0,
-            Eq | Neq => 2,
-            Gt | Lt | Gte | Lte => 3,
-            Or => 4,
-            And => 5,
-            Bor => 6,
-            Xor => 7,
-            Ban => 8,
-            Add | Sub => 15,
-            Mul | Div => 20,
+            _Dum => 0,
+            _Lpr | _Rpr => 2,
+            _Com => 8,
+            _Asn | _Csn => 10,
+            Eq | Neq => 13,
+            Gt | Lt | Gte | Lte => 14,
+            Or => 15,
+            And => 16,
+            Bor => 17,
+            Xor => 18,
+            Ban => 19,
+            Add | Sub => 20,
+            Mul | Div => 30,
             Neg | Inv | Bin | Ref | Der | Ina | Inb | Dea | Deb => 40,
         }
     }
