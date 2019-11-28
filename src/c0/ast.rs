@@ -290,7 +290,7 @@ pub struct BinaryOp {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct UnaryOp {
-    pub tgt: Ptr<Expr>,
+    pub val: Ptr<Expr>,
     pub op: OpVar,
 }
 

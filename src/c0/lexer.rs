@@ -55,6 +55,7 @@ pub enum TokenType {
     RCurlyBrace,
     Assign,
     Comma,
+    Dot,
 
     // Identifier
     Identifier(String),
@@ -104,6 +105,7 @@ impl Display for TokenType {
             RCurlyBrace => write!(f, "\n}}\n"),
             Assign => write!(f, "="),
             Comma => write!(f, ","),
+            Dot => write!(f, "."),
 
             Identifier(ident) => write!(f, "Identifier({})", ident),
             Literal(b) => write!(f, "Literal(\"{}\")", b),
@@ -525,6 +527,7 @@ where
             '{' => TokenType::LCurlyBrace,
             '}' => TokenType::RCurlyBrace,
             ',' => TokenType::Comma,
+            '.' => TokenType::Dot,
             ';' => TokenType::Semicolon,
             _ => panic!("Unexpected character \'{}\' at {}", first_char, start),
         };

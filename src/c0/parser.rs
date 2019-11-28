@@ -232,15 +232,15 @@ where
         // })
     }
 
-    fn p_stmt_or_expr(&mut self, scope: Ptr<Scope>) -> ParseResult<Either<Stmt, Expr>> {
+    fn p_stmt(&mut self, scope: Ptr<Scope>) -> ParseResult<Stmt> {
         unimplemented!()
     }
 
-    fn p_block_expr(&mut self, scope: Ptr<Scope>) -> ParseResult<Expr> {
+    fn p_block_stmt(&mut self, scope: Ptr<Scope>) -> ParseResult<Expr> {
         unimplemented!()
     }
 
-    fn p_block_expr_no_scope(&mut self, scope: Ptr<Scope>) -> ParseResult<Expr> {
+    fn p_block_stmt_no_scope(&mut self, scope: Ptr<Scope>) -> ParseResult<Expr> {
         unimplemented!()
     }
 
@@ -294,9 +294,11 @@ where
         todo!()
     }
 
-    fn p_expr(&mut self, scope: Ptr<Scope>) -> ParseResult<Ptr<Expr>> {
+    fn p_expr_stmt(&mut self, scope: Ptr<Scope>) -> ParseResult<Ptr<Expr>> {
         // TODO: Subject to change
-        self.p_base_expr(&[], scope)
+        let expr = self.p_base_expr(&[TokenType::Semicolon], scope)?;
+        self.expect_report(&TokenType::Semicolon)?;
+        Ok(expr)
     }
 
     fn p_base_expr(
@@ -348,27 +350,74 @@ where
         } else {
             Ok(lhs)
         }
-
-        //   if op.prec() > min_accept {
-        //     eat()
-        //     let rhs = parse_binary(None, op.prec())
-        //     expr(lhs, op, rhs)
-        //   } else {
-        //     lhs
-
-        //     todo!("Check out rustc's official implementation!")
     }
 
     fn p_prefix_unary_op(&mut self, scope: Ptr<Scope>) -> ParseResult<Ptr<Expr>> {
-        todo!()
+        let mut op_vec = Vec::new();
+        while let Some(op) = self.cur.var.into_op(true, false) {
+            op_vec.push((op, self.cur.span));
+            self.bump();
+        }
+        let mut expr = self.p_postfix_unary_op(scope)?;
+        while let Some((op, span)) = op_vec.pop() {
+            let span = span + expr.borrow().span();
+            expr = Ptr::new(Expr {
+                var: ExprVariant::UnaryOp(UnaryOp { op, val: expr }),
+                span,
+            });
+        }
+        Ok(expr)
     }
 
     fn p_postfix_unary_op(&mut self, scope: Ptr<Scope>) -> ParseResult<Ptr<Expr>> {
-        todo!()
+        let mut expr = self.p_item(scope)?;
+        loop {
+            if let Some(op) = self.cur.var.into_op(false, true) {
+                expr = Ptr::new(Expr {
+                    var: ExprVariant::UnaryOp(UnaryOp { op, val: expr }),
+                    span: self.cur.span,
+                });
+                self.bump();
+            } else if self.cur.var == TokenType::LBracket {
+                // Parse index operator
+                todo!("Parse index operator");
+            } else if self.cur.var == TokenType::Dot {
+                // Parse child operator
+                todo!("Parse child operator");
+            } else {
+                // There's no postfix unary operator for us to parse
+                break;
+            }
+        }
+        Ok(expr)
     }
 
     fn p_item(&mut self, scope: Ptr<Scope>) -> ParseResult<Ptr<Expr>> {
-        todo!("Parse items")
+        if self.cur.var == TokenType::LParenthesis {
+            // Start a new parsing cycle!
+            let expr = self.p_base_expr(&[TokenType::RParenthesis], scope);
+            self.expect_report(&TokenType::RParenthesis)?;
+            expr
+        } else {
+            if variant_eq(
+                &self.cur.var,
+                &TokenType::Literal(unsafe { std::mem::MaybeUninit::uninit().assume_init() }),
+            ) {
+                self.p_literal()
+            } else if variant_eq(&self.cur.var, &TokenType::Identifier(String::new())) {
+                self.p_ident_or_fn(scope)
+            } else {
+                Err(parse_err(
+                    ParseErrVariant::ExpectTokenOneOf(vec![
+                        TokenType::Literal(unsafe {
+                            std::mem::MaybeUninit::uninit().assume_init()
+                        }),
+                        TokenType::Identifier(String::new()),
+                    ]),
+                    self.cur.span,
+                ))
+            }
+        }
     }
 
     /// Parse an identifier or function call.
@@ -405,7 +454,7 @@ where
         let mut expr_vec = Vec::new();
 
         while self.expect(&TokenType::Comma) {
-            expr_vec.push(self.p_expr(scope.clone())?);
+            expr_vec.push(self.p_base_expr(&[TokenType::Comma], scope.clone())?);
         }
         let right_span = self.cur.span;
         self.expect_report(&TokenType::RParenthesis)?;
@@ -420,13 +469,13 @@ where
         }))
     }
 
-    fn p_literal(&mut self) -> ParseResult<Expr> {
+    fn p_literal(&mut self) -> ParseResult<Ptr<Expr>> {
         let t = self.lexer.next().unwrap();
         match t.var {
-            TokenType::Literal(i) => Ok(Expr {
+            TokenType::Literal(i) => Ok(Ptr::new(Expr {
                 var: ExprVariant::Literal(i.into()),
                 span: t.span,
-            }),
+            })),
             v @ _ => Err(parse_err(
                 ParseErrVariant::InternalErr(format!(
                     "Bad branching into literal parsing while getting a token type of {}",
