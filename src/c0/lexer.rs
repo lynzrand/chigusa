@@ -61,6 +61,9 @@ pub enum TokenType {
     Identifier(String),
     Literal(Literal),
 
+    // Comment, will be discarded before handed out
+    Comment(String),
+
     // Special
     EndOfFile,
     Dummy,
@@ -78,37 +81,39 @@ impl Display for TokenType {
             While => write!(f, "While"),
             Return => write!(f, "Return"),
 
-            Semicolon => write!(f, ";\n"),
-            Minus => write!(f, "-"),
-            Plus => write!(f, "+"),
-            Multiply => write!(f, "*"),
-            Divide => write!(f, "/"),
-            Not => write!(f, "!"),
-            BinaryAnd => write!(f, "&"),
-            BinaryOr => write!(f, "|"),
-            And => write!(f, "&&"),
-            Or => write!(f, "||"),
-            Xor => write!(f, "^"),
-            Increase => write!(f, "++"),
-            Decrease => write!(f, "--"),
-            Equals => write!(f, "=="),
-            NotEquals => write!(f, "!="),
-            LessThan => write!(f, "<"),
-            LessOrEqualThan => write!(f, "<="),
-            GreaterThan => write!(f, ">"),
-            GreaterOrEqualThan => write!(f, ">="),
-            LParenthesis => write!(f, "("),
-            RParenthesis => write!(f, ")"),
-            LBracket => write!(f, "["),
-            RBracket => write!(f, "]"),
-            LCurlyBrace => write!(f, "{{\n"),
-            RCurlyBrace => write!(f, "\n}}\n"),
-            Assign => write!(f, "="),
-            Comma => write!(f, ","),
-            Dot => write!(f, "."),
+            Semicolon => write!(f, "';'"),
+            Minus => write!(f, "'-'"),
+            Plus => write!(f, "'+'"),
+            Multiply => write!(f, "'*'"),
+            Divide => write!(f, "'/'"),
+            Not => write!(f, "'!'"),
+            BinaryAnd => write!(f, "'&'"),
+            BinaryOr => write!(f, "'|'"),
+            And => write!(f, "'&&'"),
+            Or => write!(f, "'||'"),
+            Xor => write!(f, "'^'"),
+            Increase => write!(f, "'++'"),
+            Decrease => write!(f, "'--'"),
+            Equals => write!(f, "'=='"),
+            NotEquals => write!(f, "'!='"),
+            LessThan => write!(f, "'<'"),
+            LessOrEqualThan => write!(f, "'<='"),
+            GreaterThan => write!(f, "'>'"),
+            GreaterOrEqualThan => write!(f, "'>='"),
+            LParenthesis => write!(f, "'('"),
+            RParenthesis => write!(f, "')'"),
+            LBracket => write!(f, "'['"),
+            RBracket => write!(f, "']'"),
+            LCurlyBrace => write!(f, "'{{'"),
+            RCurlyBrace => write!(f, "'}}'"),
+            Assign => write!(f, "'='"),
+            Comma => write!(f, "','"),
+            Dot => write!(f, "'.'"),
 
-            Identifier(ident) => write!(f, "Identifier({})", ident),
-            Literal(b) => write!(f, "Literal(\"{}\")", b),
+            Identifier(ident) => write!(f, "Identifier(\"{}\")", ident),
+            Literal(b) => write!(f, "Literal({})", b),
+
+            Comment(s) => write!(f, "Comment({})", s),
 
             EndOfFile => write!(f, "#EOF"),
             Dummy => write!(f, "<dummy>"),
@@ -187,6 +192,7 @@ static OperatorCombination: Lazy<HashMap<char, Box<Vec<char>>>> = Lazy::new(|| {
         ('-', Box::new(vec!['-'])),
         ('&', Box::new(vec!['&'])),
         ('|', Box::new(vec!['|'])),
+        ('/', Box::new(vec!['/', '*'])),
     ]
     .iter()
     .cloned()
@@ -265,7 +271,17 @@ where
 {
     type Item = Token;
     fn next(&mut self) -> Option<Token> {
-        self.get_next_token()
+        loop {
+            let tok = self.get_next_token();
+            if let Some(Token {
+                var: TokenType::Comment(..),
+                ..
+            }) = tok
+            {
+            } else {
+                break tok;
+            }
+        }
     }
 }
 
@@ -488,7 +504,12 @@ where
                 _ => unreachable!(),
             },
             '*' => TokenType::Multiply,
-            '/' => TokenType::Divide,
+            '/' => match second_char {
+                None => TokenType::Divide,
+                Some('*') => self.lex_comments(true),
+                Some('/') => self.lex_comments(false),
+                _ => unreachable!(),
+            },
             '=' => match second_char {
                 None => TokenType::Assign,
                 Some('=') => TokenType::Equals,
@@ -536,6 +557,33 @@ where
             var: variation,
             span: Span::from(start, end),
         }
+    }
+
+    fn lex_comments(&mut self, multiline: bool) -> TokenType {
+        let mut comment_data = String::new();
+        if multiline {
+            loop {
+                let c = self.iter.next();
+                match c {
+                    Some((_, '*')) => match self.iter.peek() {
+                        Some((_, '/')) => break,
+                        _ => comment_data.push('*'),
+                    },
+                    None => panic!("Incomplete comment at EOF"),
+                    Some((_, c)) => comment_data.push(c),
+                }
+            }
+        } else {
+            loop {
+                let c = self.iter.next();
+                match c {
+                    Some((_, '\r')) | Some((_, '\n')) => break,
+                    None => panic!("Incomplete comment at EOF"),
+                    Some((_, c)) => comment_data.push(c),
+                }
+            }
+        }
+        TokenType::Comment(comment_data)
     }
 
     /// Skip spaces and stop before the next non-space character.

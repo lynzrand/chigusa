@@ -120,7 +120,7 @@ where
     T: Iterator<Item = Token>,
 {
     lexer: T,
-    type_var: TypeVar,
+    // type_var: TypeVar,
     cur: Token,
 }
 
@@ -128,15 +128,15 @@ impl<T> Parser<T>
 where
     T: Iterator<Item = Token>,
 {
-    pub fn new(mut lexer: T) -> Parser<T> {
+    pub fn new(lexer: T) -> Parser<T> {
         log::trace!("Created a new parser.");
 
         let mut parser = Parser {
-            lexer: lexer,
-            type_var: TypeVar::new(),
+            lexer,
+            // type_var: TypeVar::new(),
             cur: Token::dummy(),
         };
-        parser.cur = parser.lexer.next().unwrap();
+        parser.bump();
         parser
     }
 
@@ -227,10 +227,12 @@ where
     }
 
     pub fn parse(&mut self) -> ParseResult<Program> {
+        log::trace!("Init parsing");
         self.p_program()
     }
 
     fn inject_std(scope: Ptr<Scope>) {
+        log::trace!("Injecting std types");
         let mut scope = scope.borrow_mut();
         scope
             .insert_def(
@@ -246,12 +248,14 @@ where
     }
 
     fn p_program(&mut self) -> ParseResult<Program> {
+        log::trace!("Parse program");
         let root_scope = Ptr::new(Scope::new());
         Self::inject_std(root_scope.clone());
         let mut stmts = Vec::new();
         while self.cur.var != TokenType::EndOfFile {
             stmts.push(self.p_stmt(root_scope.clone())?)
         }
+        log::trace!("Finished parsing program");
         Ok(Program {
             scope: root_scope,
             vars: todo!(),
@@ -260,11 +264,15 @@ where
     }
 
     fn p_stmt(&mut self, scope: Ptr<Scope>) -> ParseResult<Stmt> {
+        log::trace!("Parse statement");
+
         match &self.cur.var {
             TokenType::LCurlyBrace => self.p_block_stmt(scope),
             TokenType::Identifier(..) => self.p_decl_or_expr(scope),
             TokenType::If => self.p_if_stmt(scope),
             TokenType::While => self.p_while_stmt(scope),
+            // TokenType::Do => todo!("Parse do-while loop"),
+            // TokenType::For => todo!("Parse for loop"),
             TokenType::Const => self.p_decl_stmt(scope),
             TokenType::LParenthesis
             | TokenType::LBracket
@@ -272,7 +280,13 @@ where
             | TokenType::Multiply
             | TokenType::Increase
             | TokenType::Decrease => self.p_expr_stmt(scope),
-            _ => todo!(),
+            _ => Err(parse_err(
+                ParseErrVariant::UnexpectedTokenMsg {
+                    typ: self.cur.var.clone(),
+                    msg: "This token cannot start a statement",
+                },
+                self.cur.span,
+            )),
         }
     }
 
@@ -309,11 +323,15 @@ where
     }
 
     fn p_block_stmt(&mut self, scope: Ptr<Scope>) -> ParseResult<Stmt> {
+        log::trace!("Creating new scope for upcoming block");
+
         let new_scope = Ptr::new(Scope::new_with_parent(scope));
         self.p_block_stmt_no_scope(new_scope)
     }
 
     fn p_block_stmt_no_scope(&mut self, scope: Ptr<Scope>) -> ParseResult<Stmt> {
+        log::trace!("Parsing block");
+
         let l_span = self.cur.span;
         self.expect_report(&TokenType::LCurlyBrace)?;
         let mut stmts = Vec::new();
@@ -326,6 +344,8 @@ where
 
         let r_span = self.cur.span;
         self.expect_report(&TokenType::RCurlyBrace)?;
+
+        log::trace!("Block ends");
         Ok(Stmt {
             var: StmtVariant::Block(Block { scope, stmts }),
             span: l_span + r_span,
@@ -333,6 +353,8 @@ where
     }
 
     fn p_type_name(&mut self, scope: Ptr<Scope>) -> ParseResult<Ptr<TypeDef>> {
+        log::trace!("Parsing type name");
+
         let tok = self.bump();
         match tok.var {
             TokenType::BinaryAnd => Ok(Ptr::new(TypeDef::Ref(RefType {
@@ -373,11 +395,13 @@ where
 
     fn p_decl_stmt(&mut self, scope: Ptr<Scope>) -> ParseResult<Stmt> {
         // This is the identifier token
+
         let init_span = self.cur.span;
         let is_const = self.expect(&TokenType::Const);
         let typeDecl = self.p_type_name(scope.clone())?;
         let mut has_next = true;
         let mut exprs = Vec::new();
+        log::trace!("Parsing declaration statement, type is {:?}", typeDecl);
 
         while has_next {
             self.check_report(&TokenType::Identifier(String::new()))?;
@@ -395,6 +419,12 @@ where
                     is_callable: false,
                 },
             )?;
+
+            log::trace!(
+                "Parsing declaration, ident is {:?}, with value {:?}",
+                ident.get_ident().unwrap(),
+                init_val
+            );
 
             if let Some(val) = init_val {
                 let span = ident.span + val.borrow().span();
@@ -456,7 +486,7 @@ where
     ) -> ParseResult<Ptr<Expr>> {
         let mut expr = None;
         while !self.check_one_of(close_delim) {
-            expr = Some(self.p_binary_op(expr, 0, scope.clone())?);
+            expr = Some(self.p_binary_op(expr, 0, close_delim, scope.clone())?);
         }
         expr.ok_or_else(|| {
             parse_err_z(ParseErrVariant::InternalErr(
@@ -472,6 +502,7 @@ where
         &mut self,
         lhs: Option<Ptr<Expr>>,
         expect_prec: isize,
+        close_delim: &[TokenType],
         scope: Ptr<Scope>,
     ) -> ParseResult<Ptr<Expr>> {
         let lhs = if lhs.is_some() {
@@ -482,11 +513,12 @@ where
 
         // Op should be self.cur
         if let Some(op) = self.cur.var.into_op(false, false) {
-            if (op.is_left_associative() && op.priority() > expect_prec)
-                || (op.is_right_associative() && op.priority() >= expect_prec)
+            if !close_delim.contains(&self.cur.var)
+                && ((op.is_left_associative() && op.priority() > expect_prec)
+                    || (op.is_right_associative() && op.priority() >= expect_prec))
             {
                 self.bump();
-                let rhs = self.p_binary_op(None, op.priority(), scope.clone())?;
+                let rhs = self.p_binary_op(None, op.priority(), close_delim, scope.clone())?;
                 let span = { lhs.borrow().span() + rhs.borrow().span() };
                 Ok(Ptr::new(Expr {
                     var: ExprVariant::BinaryOp(BinaryOp { lhs, rhs, op }),
@@ -556,7 +588,7 @@ where
             })) {
                 self.p_literal()
             } else if self.check(&TokenType::Identifier(String::new())) {
-                self.p_ident_or_fn(scope)
+                self.p_ident_or_fn_call(scope)
             } else {
                 Err(parse_err(
                     ParseErrVariant::ExpectTokenOneOf(vec![
@@ -574,9 +606,9 @@ where
     /// Parse an identifier or function call.
     ///
     /// This parser accepts a starting state when `self.cur` is the first `Identifier`
-    fn p_ident_or_fn(&mut self, scope: Ptr<Scope>) -> ParseResult<Ptr<Expr>> {
-        let cur = self.bump();
+    fn p_ident_or_fn_call(&mut self, scope: Ptr<Scope>) -> ParseResult<Ptr<Expr>> {
         self.check_report(&TokenType::Identifier(String::new()))?;
+        let cur = self.bump();
         if self.check(&TokenType::LParenthesis) {
             self.p_fn_call(&cur, scope)
         } else {
@@ -621,7 +653,7 @@ where
     }
 
     fn p_literal(&mut self) -> ParseResult<Ptr<Expr>> {
-        let t = self.lexer.next().unwrap();
+        let t = self.bump();
         match t.var {
             TokenType::Literal(i) => Ok(Ptr::new(Expr {
                 var: ExprVariant::Literal(i.into()),
