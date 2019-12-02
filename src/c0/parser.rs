@@ -232,10 +232,10 @@ where
             .insert_def(
                 "int",
                 SymbolDef::Typ {
-                    def: TypeDef::Primitive(PrimitiveType {
+                    def: Ptr::new(TypeDef::Primitive(PrimitiveType {
                         var: PrimitiveTypeVar::SignedInt,
                         occupy_bytes: 4,
-                    }),
+                    })),
                 },
             )
             .expect("Failed to inject primitive type `int`");
@@ -369,8 +369,58 @@ where
 
     fn p_decl_stmt(&mut self, scope: Ptr<Scope>) -> ParseResult<Stmt> {
         // This is the identifier token
-        let typeDecl = self.p_type_name(scope)?;
-        todo!()
+        let init_span = self.cur.span;
+        let is_const = self.expect(&TokenType::Const);
+        let typeDecl = self.p_type_name(scope.clone())?;
+        let mut has_next = true;
+        let mut exprs = Vec::new();
+
+        while has_next {
+            self.check_report(&TokenType::Identifier(String::new()))?;
+            let ident = self.bump();
+            let init_val = if self.expect(&TokenType::Assign) {
+                Some(self.p_base_expr(&[TokenType::Comma, TokenType::Semicolon], scope.clone())?)
+            } else {
+                None
+            };
+            scope.borrow_mut().insert_def(
+                ident.get_ident().unwrap(),
+                SymbolDef::Var {
+                    typ: typeDecl.clone(),
+                    is_const,
+                    is_callable: false,
+                },
+            )?;
+
+            if let Some(val) = init_val {
+                let span = ident.span + val.borrow().span();
+                exprs.push(Ptr::new(Expr {
+                    var: ExprVariant::BinaryOp(BinaryOp {
+                        op: if is_const { OpVar::_Csn } else { OpVar::_Asn },
+                        lhs: Ptr::new(Expr {
+                            var: ExprVariant::Ident(Identifier {
+                                name: ident.get_ident().unwrap().into(),
+                            }),
+                            span: ident.span,
+                        }),
+                        rhs: val,
+                    }),
+                    span,
+                }))
+            }
+
+            has_next = self.expect(&TokenType::Comma);
+        }
+
+        let span = exprs
+            .iter()
+            .fold(init_span, |last, this| this.borrow().span() + last);
+
+        self.expect_report(&TokenType::Semicolon)?;
+        Ok(Stmt {
+            var: StmtVariant::ManyExpr(exprs),
+            span,
+        })
     }
 
     fn p_while_stmt(&mut self, scope: Ptr<Scope>) -> ParseResult<Stmt> {
@@ -497,12 +547,11 @@ where
             self.expect_report(&TokenType::RParenthesis)?;
             expr
         } else {
-            if variant_eq(
-                &self.cur.var,
-                &TokenType::Literal(unsafe { std::mem::MaybeUninit::uninit().assume_init() }),
-            ) {
+            if self.check(&TokenType::Literal(unsafe {
+                std::mem::MaybeUninit::uninit().assume_init()
+            })) {
                 self.p_literal()
-            } else if variant_eq(&self.cur.var, &TokenType::Identifier(String::new())) {
+            } else if self.check(&TokenType::Identifier(String::new())) {
                 self.p_ident_or_fn(scope)
             } else {
                 Err(parse_err(
@@ -576,7 +625,7 @@ where
             })),
             v @ _ => Err(parse_err(
                 ParseErrVariant::InternalErr(format!(
-                    "Bad branching into literal parsing while getting a token type of {}",
+                    "Bad branching into literal parsing while getting a token type of `{}`",
                     v
                 )),
                 t.span,

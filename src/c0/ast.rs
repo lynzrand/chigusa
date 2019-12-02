@@ -26,10 +26,10 @@ pub struct Program {
 #[derive(Debug, Eq, PartialEq)]
 pub enum SymbolDef {
     Typ {
-        def: TypeDef,
+        def: Ptr<TypeDef>,
     },
     Var {
-        typ: TypeDef,
+        typ: Ptr<TypeDef>,
         is_const: bool,
         is_callable: bool,
     },
@@ -204,6 +204,9 @@ pub enum StmtVariant {
     While(WhileConditional),
     Block(Block),
     Expr(Ptr<Expr>),
+    // TODO: Workaround for declaration and similar statements that results
+    // in multiple expressions
+    ManyExpr(Vec<Ptr<Expr>>),
     Return(Option<Ptr<Expr>>),
     Break,
     Empty,
