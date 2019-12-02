@@ -129,6 +129,8 @@ where
     T: Iterator<Item = Token>,
 {
     pub fn new(mut lexer: T) -> Parser<T> {
+        log::trace!("Created a new parser.");
+
         let mut parser = Parser {
             lexer: lexer,
             type_var: TypeVar::new(),
@@ -141,6 +143,8 @@ where
     fn bump(&mut self) -> Token {
         let mut next = self.lexer.next().unwrap_or_else(|| Token::eof());
         std::mem::swap(&mut self.cur, &mut next);
+
+        log::trace!("Switching to next token; is: {:#}", self.cur);
         next
     }
 
