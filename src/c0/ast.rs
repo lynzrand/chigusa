@@ -21,6 +21,7 @@ pub struct Program {
     pub types: Vec<TypeDef>,
 }
 
+#[derive(Debug, Eq, PartialEq)]
 pub enum SymbolDef {
     Typ {
         def: TypeDef,
@@ -39,6 +40,7 @@ pub enum ScopeError {
 }
 pub type ScopeResult<T> = Result<T, ScopeError>;
 
+#[derive(Debug, Eq, PartialEq)]
 pub struct Scope {
     pub last: Option<Ptr<Scope>>,
     pub defs: IndexMap<String, Ptr<SymbolDef>>,
@@ -103,10 +105,15 @@ pub enum TypeDef {
     Ref(RefType),
     /// An array of items. Optionally contains a length parameter.
     Array(ArrayType),
+
     /// Unit type. Also called "void" if you like that name.
     Unit,
-    /// This type is unknown. Might be resolved later.
+    /// This type is unknown. It should be resolved according to other information
     Unknown,
+
+    /// This type is explicitly named but not resolved. Feeling cute, might resolve later
+    NamedType(String),
+
     /// Crap. We've found a type error.
     TypeErr,
 }
@@ -155,31 +162,31 @@ pub struct PrimitiveType {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct StructType {
     /// Fields of this struct, described as universal identifiers
-    pub field_types: Vec<TypeIdent>,
+    pub field_types: Vec<Ptr<TypeDef>>,
     pub field_offsets: Vec<usize>,
     pub occupy_bytes: usize,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct FunctionType {
-    pub params: Vec<TypeIdent>,
-    pub return_type: TypeIdent,
+    pub params: Vec<Ptr<TypeDef>>,
+    pub return_type: Ptr<TypeDef>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct RefType {
-    pub target: TypeIdent,
+    pub target: Ptr<TypeDef>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ArrayType {
-    pub target: TypeIdent,
-    pub length: usize,
+    pub target: Ptr<TypeDef>,
+    pub length: Option<usize>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct VarDef {
-    pub typ: TypeDef,
+    pub typ: Ptr<TypeDef>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -198,7 +205,7 @@ impl AstNode for Stmt {
 pub enum StmtVariant {
     If(IfConditional),
     While(WhileConditional),
-
+    Block(Block),
     Expr(Ptr<Expr>),
     Return(Option<Ptr<Expr>>),
     Break,
@@ -292,7 +299,7 @@ pub struct WhileConditional {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Block {
-    pub vars: Vec<usize>,
+    pub scope: Ptr<Scope>,
     pub stmts: Vec<Stmt>,
 }
 

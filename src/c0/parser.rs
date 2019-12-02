@@ -129,7 +129,6 @@ where
     T: Iterator<Item = Token>,
 {
     pub fn new(mut lexer: T) -> Parser<T> {
-        let first_tok = lexer.next();
         let mut parser = Parser {
             lexer: lexer,
             type_var: TypeVar::new(),
@@ -228,7 +227,7 @@ where
     }
 
     fn p_program(&mut self) -> ParseResult<Program> {
-        let mut root_scope = Ptr::new(Scope::new());
+        let root_scope = Ptr::new(Scope::new());
         let mut stmts = Vec::new();
         while self.cur.var != TokenType::EndOfFile {
             stmts.push(self.p_stmt(root_scope.clone())?)
@@ -243,10 +242,7 @@ where
     fn p_stmt(&mut self, scope: Ptr<Scope>) -> ParseResult<Stmt> {
         match &self.cur.var {
             TokenType::LCurlyBrace => self.p_block_stmt(scope),
-            TokenType::Identifier(id) => {
-                //
-                todo!("Check if identifier is a function/type")
-            }
+            TokenType::Identifier(..) => self.p_decl_or_expr(scope),
             TokenType::If => self.p_if_stmt(scope),
             TokenType::While => self.p_while_stmt(scope),
             TokenType::Const => self.p_decl_stmt(scope),
@@ -260,16 +256,105 @@ where
         }
     }
 
+    fn p_decl_or_expr(&mut self, scope: Ptr<Scope>) -> ParseResult<Stmt> {
+        match &self.cur.var {
+            TokenType::Identifier(ident) => {
+                let entry = scope.borrow().find_def(ident);
+                match entry {
+                    None => Err(parse_err(
+                        ParseErrVariant::CannotFindIdent(ident.into()),
+                        self.cur.span,
+                    )),
+                    Some(entry) => {
+                        let entry = entry.borrow();
+                        match &*entry {
+                            &SymbolDef::Typ { .. } => self.p_decl_stmt(scope.clone()),
+                            &SymbolDef::Var { .. } => self.p_expr_stmt(scope.clone()),
+                        }
+                    }
+                }
+            }
+
+            // Statements starting with bracket `[` are always declarations (of arrays)
+            TokenType::LBracket => self.p_decl_stmt(scope),
+
+            // Statements starting with `++`, `--`, `*` and `(` are always expressions
+            TokenType::Increase
+            | TokenType::Decrease
+            | TokenType::Multiply
+            | TokenType::LParenthesis => self.p_expr_stmt(scope),
+
+            _ => unreachable!(),
+        }
+    }
+
     fn p_block_stmt(&mut self, scope: Ptr<Scope>) -> ParseResult<Stmt> {
-        unimplemented!()
+        let new_scope = Ptr::new(Scope::new_with_parent(scope));
+        self.p_block_stmt_no_scope(new_scope)
     }
 
     fn p_block_stmt_no_scope(&mut self, scope: Ptr<Scope>) -> ParseResult<Stmt> {
-        unimplemented!()
+        let l_span = self.cur.span;
+        self.expect_report(&TokenType::LCurlyBrace)?;
+        let mut stmts = Vec::new();
+
+        // For each statement, parse
+        while !self.check(&TokenType::RCurlyBrace) {
+            let stmt = self.p_stmt(scope.clone())?;
+            stmts.push(stmt);
+        }
+
+        let r_span = self.cur.span;
+        self.expect_report(&TokenType::RCurlyBrace)?;
+        Ok(Stmt {
+            var: StmtVariant::Block(Block { scope, stmts }),
+            span: l_span + r_span,
+        })
+    }
+
+    fn p_type_name(&mut self, scope: Ptr<Scope>) -> ParseResult<Ptr<TypeDef>> {
+        let tok = self.bump();
+        match tok.var {
+            TokenType::BinaryAnd => Ok(Ptr::new(TypeDef::Ref(RefType {
+                target: self.p_type_name(scope)?,
+            }))),
+            TokenType::LBracket => {
+                let typ = TypeDef::Array(ArrayType {
+                    target: self.p_type_name(scope)?,
+                    length: None,
+                });
+                self.expect_report(&TokenType::RBracket)?;
+                Ok(Ptr::new(typ))
+            }
+            TokenType::Identifier(ident) => {
+                let span = tok.span;
+                match scope.borrow().find_def(&ident) {
+                    None => Err(parse_err(
+                        ParseErrVariant::CannotFindType(ident.into()),
+                        span,
+                    )),
+                    Some(def) => match &*def.borrow() {
+                        // TODO: Add generics?
+                        SymbolDef::Typ { .. } => Ok(Ptr::new(TypeDef::NamedType(ident.into()))),
+                        _ => Err(parse_err(
+                            ParseErrVariant::CannotFindType(ident.into()),
+                            span,
+                        )),
+                    },
+                }
+            }
+            _ => unreachable!(),
+        }
     }
 
     fn p_fn(&mut self, scope: Ptr<Scope>) -> ParseResult<Stmt> {
         unimplemented!()
+    }
+
+    fn p_decl_stmt(&mut self, scope: Ptr<Scope>) -> ParseResult<Stmt> {
+        // This is the identifier token
+        let typeDecl = self.p_type_name(scope)?;
+        todo!()
     }
 
     fn p_while_stmt(&mut self, scope: Ptr<Scope>) -> ParseResult<Stmt> {
@@ -281,41 +366,6 @@ where
 
         self.expect_report(&TokenType::If)?;
         todo!("We are refactoring this thing")
-
-        // let cond = Ptr::new(self.p_expr(scope.clone())?);
-        // let if_block = Ptr::new(if self.lexer.expect_peek(TokenType::LCurlyBrace).is_ok() {
-        //     self.p_block_expr(scope.clone())
-        // } else {
-        //     self.p_expr(scope.clone())
-        // }?);
-
-        // span = span + if_block.borrow().span();
-        // let else_span = self.lexer.try_consume_log_span(TokenType::Else);
-        // let else_block = if else_span.is_some() {
-        //     Some(Ptr::new(
-        //         if self.lexer.expect_peek(TokenType::LCurlyBrace).is_ok() {
-        //             self.p_block_expr(scope.clone())
-        //         } else {
-        //             self.p_expr(scope.clone())
-        //         }?,
-        //     ))
-        // } else {
-        //     None
-        // };
-
-        // else_block.as_ref().map(|e| span = span + e.borrow().span());
-
-        // Ok(Expr {
-        //     var: ExprVariant::IfConditional(IfConditional {
-        //         cond,
-        //         if_block,
-        //         else_block,
-        //     }),
-        //     span,
-        // })
-    }
-    fn p_decl_stmt(&mut self, scope: Ptr<Scope>) -> ParseResult<Stmt> {
-        todo!()
     }
 
     fn p_expr_stmt(&mut self, scope: Ptr<Scope>) -> ParseResult<Stmt> {
@@ -420,6 +470,10 @@ where
         Ok(expr)
     }
 
+    /// Parse an item in expression
+    ///
+    /// An item is either a expression wrapped in parentheses, or an identifier,
+    /// or a literal value.
     fn p_item(&mut self, scope: Ptr<Scope>) -> ParseResult<Ptr<Expr>> {
         if self.cur.var == TokenType::LParenthesis {
             // Start a new parsing cycle!
@@ -569,6 +623,7 @@ impl TokenType {
 
 trait Operator {
     fn priority(&self) -> isize;
+    fn is_unary(&self) -> bool;
     fn is_right_associative(&self) -> bool;
     fn is_left_associative(&self) -> bool {
         !self.is_right_associative()
@@ -594,6 +649,14 @@ impl Operator for OpVar {
             Add | Sub => 20,
             Mul | Div => 30,
             Neg | Inv | Bin | Ref | Der | Ina | Inb | Dea | Deb => 40,
+        }
+    }
+
+    fn is_unary(&self) -> bool {
+        use OpVar::*;
+        match self {
+            Neg | Inv | Bin | Ref | Der | Ina | Inb | Dea | Deb => true,
+            _ => false,
         }
     }
 
