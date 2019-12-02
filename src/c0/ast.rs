@@ -11,9 +11,11 @@ use once_cell::{self, sync::*};
 use regex;
 use std::cell::{Ref, RefCell, RefMut};
 use std::collections::HashMap;
+use std::fmt;
 use std::iter::Iterator;
 use std::ops::{Deref, DerefMut};
 use std::rc::{Rc, Weak};
+
 pub type TypeIdent = u64;
 
 #[derive(Debug, Eq, PartialEq)]
@@ -218,6 +220,12 @@ pub struct Expr {
     pub span: Span,
 }
 
+impl fmt::Display for Expr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.var)
+    }
+}
+
 impl AstNode for Expr {
     fn span(&self) -> Span {
         self.span
@@ -251,9 +259,31 @@ pub enum ExprVariant {
     // /// `{` Statement* Expression? `}`
     // Block(Block),
 }
+
+impl fmt::Display for ExprVariant {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ExprVariant::Ident(i) => write!(f, "{}", i),
+            ExprVariant::Literal(i) => write!(f, "{}", i),
+            ExprVariant::TypeConversion(i) => write!(f, "{}", i),
+            ExprVariant::UnaryOp(i) => write!(f, "{}", i),
+            ExprVariant::BinaryOp(i) => write!(f, "{}", i),
+            ExprVariant::FunctionCall(i) => write!(f, "{}", i),
+            ExprVariant::StructChild(i) => write!(f, "{}", i),
+            ExprVariant::ArrayChild(i) => write!(f, "{}", i),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Identifier {
     pub name: String,
+}
+
+impl fmt::Display for Identifier {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Identifier({})", self.name)
+    }
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -262,6 +292,17 @@ pub enum Literal {
     Struct { typ: TypeDef, fields: Vec<Expr> },
     Boolean { val: bool },
     String { val: String },
+}
+
+impl fmt::Display for Literal {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Literal::Number { val } => write!(f, "{}", val),
+            Literal::Struct { typ, fields } => write!(f, "{:?}{{{:?}}}", typ, fields),
+            Literal::Boolean { val } => write!(f, "{}", val),
+            Literal::String { val } => write!(f, "\"{}\"", val),
+        }
+    }
 }
 
 impl From<super::lexer::Literal> for Literal {
@@ -282,6 +323,12 @@ impl From<super::lexer::Literal> for Literal {
 pub struct TypeConversion {
     pub from: TypeIdent,
     pub expr: Ptr<Expr>,
+}
+
+impl fmt::Display for TypeConversion {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "(as {} {:?})", self.expr, self.from)
+    }
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -310,10 +357,22 @@ pub struct BinaryOp {
     pub op: OpVar,
 }
 
+impl fmt::Display for BinaryOp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "({} {} {})", self.op, self.lhs, self.rhs)
+    }
+}
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct UnaryOp {
     pub val: Ptr<Expr>,
     pub op: OpVar,
+}
+
+impl fmt::Display for UnaryOp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "({} {})", self.op, self.val)
+    }
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -323,14 +382,34 @@ pub struct FunctionCall {
     pub params: Vec<Ptr<Expr>>,
 }
 
+impl fmt::Display for FunctionCall {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "({} {:?})", self.func, self.params)
+    }
+}
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct StructChild {
+    pub val: Ptr<Expr>,
     pub idx: usize,
+}
+
+impl fmt::Display for StructChild {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "({}.{})", self.val, self.idx)
+    }
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ArrayChild {
+    pub val: Ptr<Expr>,
     pub idx: Ptr<Expr>,
+}
+
+impl fmt::Display for ArrayChild {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "({}.[]{})", self.val, self.idx)
+    }
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -423,5 +502,11 @@ impl OpVar {
             Neg | Inv | Bin | Ref | Der | Ina | Inb | Dea | Deb => true,
             _ => false,
         }
+    }
+}
+
+impl fmt::Display for OpVar {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self)
     }
 }

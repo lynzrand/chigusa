@@ -129,7 +129,7 @@ where
     T: Iterator<Item = Token>,
 {
     pub fn new(lexer: T) -> Parser<T> {
-        log::trace!("Created a new parser.");
+        log::info!("Created a new parser.");
 
         let mut parser = Parser {
             lexer,
@@ -144,7 +144,7 @@ where
         let mut next = self.lexer.next().unwrap_or_else(|| Token::eof());
         std::mem::swap(&mut self.cur, &mut next);
 
-        log::trace!("Switching to next token; is: {:#}", self.cur);
+        log::trace!("Bump token pointer. Current: {:#}", self.cur);
         next
     }
 
@@ -227,12 +227,12 @@ where
     }
 
     pub fn parse(&mut self) -> ParseResult<Program> {
-        log::trace!("Init parsing");
+        log::info!("Init parsing");
         self.p_program()
     }
 
     fn inject_std(scope: Ptr<Scope>) {
-        log::trace!("Injecting std types");
+        log::info!("Injecting std types");
         let mut scope = scope.borrow_mut();
         scope
             .insert_def(
@@ -389,8 +389,45 @@ where
         }
     }
 
-    fn p_fn(&mut self, scope: Ptr<Scope>) -> ParseResult<Stmt> {
-        unimplemented!()
+    /// Parse a function, optionally with its body.
+    fn p_fn(
+        &mut self,
+        type_decl: Ptr<TypeDef>,
+        decl_token: Token,
+        scope: Ptr<Scope>,
+    ) -> ParseResult<Stmt> {
+        self.expect_report(&TokenType::LParenthesis)?;
+        // The expressions in function call
+        let mut expr_vec = Vec::new();
+        let mut inner_scope = Scope::new_with_parent(scope.clone());
+
+        while self.expect(&TokenType::Comma) {
+            let param_type = self.p_type_name(scope.clone())?;
+            self.check_report(&TokenType::Identifier(String::new()))?;
+            let ident = self.bump();
+            let ident_str = ident.get_ident().unwrap();
+            inner_scope.insert_def(
+                ident_str,
+                SymbolDef::Var {
+                    typ: param_type.clone(),
+                    is_const: false,
+                    is_callable: false,
+                },
+            )?;
+            expr_vec.push((param_type, ident_str.to_owned()));
+        }
+
+        log::info!(
+            "Parse function \"{}\" with type {:?}, params: {:?}",
+            decl_token.get_ident().unwrap(),
+            type_decl,
+            expr_vec
+        );
+
+        let right_span = self.cur.span;
+        self.expect_report(&TokenType::RParenthesis)?;
+
+        Ok(todo!("Parse function body, add function declaration"))
     }
 
     fn p_decl_stmt(&mut self, scope: Ptr<Scope>) -> ParseResult<Stmt> {
@@ -398,33 +435,51 @@ where
 
         let init_span = self.cur.span;
         let is_const = self.expect(&TokenType::Const);
-        let typeDecl = self.p_type_name(scope.clone())?;
+        let type_decl = self.p_type_name(scope.clone())?;
         let mut has_next = true;
         let mut exprs = Vec::new();
-        log::trace!("Parsing declaration statement, type is {:?}", typeDecl);
+        log::trace!("Parsing declaration statement, type is {:?}", type_decl);
 
         while has_next {
             self.check_report(&TokenType::Identifier(String::new()))?;
             let ident = self.bump();
+
+            if self.check(&TokenType::LParenthesis) {
+                // * This checks if the ident declared is a function. If true,
+                // * immediately end this algorithm and switch to function
+                // * parsing.
+                // TODO: Any possible changes?
+                return self.p_fn(type_decl, ident, scope);
+            }
+
             let init_val = if self.expect(&TokenType::Assign) {
                 Some(self.p_base_expr(&[TokenType::Comma, TokenType::Semicolon], scope.clone())?)
             } else {
                 None
             };
+
             scope.borrow_mut().insert_def(
                 ident.get_ident().unwrap(),
                 SymbolDef::Var {
-                    typ: typeDecl.clone(),
+                    typ: type_decl.clone(),
                     is_const,
                     is_callable: false,
                 },
             )?;
 
-            log::trace!(
-                "Parsing declaration, ident is {:?}, with value {:?}",
-                ident.get_ident().unwrap(),
-                init_val
-            );
+            if init_val.is_some() {
+                let val = init_val.as_ref().unwrap();
+                log::info!(
+                    "Parsing declaration, ident is {}, with value {}",
+                    ident.get_ident().unwrap(),
+                    val
+                );
+            } else {
+                log::info!(
+                    "Parsing declaration, ident is {}",
+                    ident.get_ident().unwrap(),
+                );
+            }
 
             if let Some(val) = init_val {
                 let span = ident.span + val.borrow().span();

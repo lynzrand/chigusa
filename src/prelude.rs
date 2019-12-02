@@ -247,7 +247,15 @@ impl<T> Clone for Ptr<T> {
         Ptr(Rc::clone(&self.0))
     }
 }
-
+impl<T> fmt::Display for Ptr<T>
+where
+    T: fmt::Display,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let borrow = self.borrow();
+        write!(f, "{}", borrow)
+    }
+}
 pub trait IntoPtr<T> {
     fn into_ptr(self) -> Ptr<T>;
 }
