@@ -72,6 +72,7 @@ pub enum ParseErrVariant {
     UnsupportedToken(TokenType),
 
     DuplicateDeclaration(String),
+    BadIdentifier(String),
     ConflictingDeclaration(String),
     EarlyEof,
 
@@ -110,6 +111,19 @@ impl ParseErrVariant {
 impl Display for ParseErrVariant {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "E{:4}: {}", self.get_err_code(), self.get_err_desc())
+    }
+}
+
+pub trait WithSpan {
+    fn with_span(self, span: Span) -> Self;
+}
+
+impl<T> WithSpan for Result<T, ParseError> {
+    fn with_span(self, span: Span) -> Result<T, ParseError> {
+        self.map_err(|mut e| {
+            e.span = span;
+            e
+        })
     }
 }
 

@@ -226,8 +226,24 @@ where
         self.p_program()
     }
 
+    fn inject_std(scope: Ptr<Scope>) {
+        let mut scope = scope.borrow_mut();
+        scope
+            .insert_def(
+                "int",
+                SymbolDef::Typ {
+                    def: TypeDef::Primitive(PrimitiveType {
+                        var: PrimitiveTypeVar::SignedInt,
+                        occupy_bytes: 4,
+                    }),
+                },
+            )
+            .expect("Failed to inject primitive type `int`");
+    }
+
     fn p_program(&mut self) -> ParseResult<Program> {
         let root_scope = Ptr::new(Scope::new());
+        Self::inject_std(root_scope.clone());
         let mut stmts = Vec::new();
         while self.cur.var != TokenType::EndOfFile {
             stmts.push(self.p_stmt(root_scope.clone())?)

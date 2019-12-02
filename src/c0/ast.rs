@@ -3,7 +3,9 @@
     https://github.com/rust-lang/rust/blob/master/src/libsyntax/ast.rs
 */
 
+use super::err::*;
 use crate::prelude::*;
+use failure::Fail;
 use indexmap::IndexMap;
 use once_cell::{self, sync::*};
 use regex;
@@ -12,9 +14,9 @@ use std::collections::HashMap;
 use std::iter::Iterator;
 use std::ops::{Deref, DerefMut};
 use std::rc::{Rc, Weak};
-
 pub type TypeIdent = u64;
 
+#[derive(Debug, Eq, PartialEq)]
 pub struct Program {
     pub scope: Ptr<Scope>,
     pub vars: Vec<VarDef>,
@@ -32,13 +34,6 @@ pub enum SymbolDef {
         is_callable: bool,
     },
 }
-
-pub enum ScopeError {
-    NameConflict,
-    InvalidSymbol,
-    InvalidName,
-}
-pub type ScopeResult<T> = Result<T, ScopeError>;
 
 #[derive(Debug, Eq, PartialEq)]
 pub struct Scope {
@@ -73,15 +68,17 @@ impl Scope {
         self.defs.get(name).map(|def| def.clone())
     }
 
-    pub fn insert_def(&mut self, name: &str, def: SymbolDef) -> ScopeResult<()> {
+    pub fn insert_def(&mut self, name: &str, def: SymbolDef) -> ParseResult<()> {
         if self.defs.contains_key(name) {
-            Err(ScopeError::NameConflict)
+            Err(parse_err_z(ParseErrVariant::DuplicateDeclaration(
+                name.into(),
+            )))
         } else {
             if ident_regex.is_match(name) {
                 self.defs.insert(name.to_owned(), Ptr::new(def));
                 Ok(())
             } else {
-                Err(ScopeError::InvalidName)
+                Err(parse_err_z(ParseErrVariant::BadIdentifier(name.into())))
             }
         }
     }
