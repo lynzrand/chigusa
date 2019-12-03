@@ -99,8 +99,8 @@ impl Display for Pos {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "line {}, col {} ({} from start)",
-            self.ln, self.pos, self.index
+            "Pos(idx {}, ln {} col {})",
+            self.index, self.ln, self.pos
         )
     }
 }
@@ -140,7 +140,7 @@ impl Span {
 
 impl Display for Span {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "from {} to {}", self.start, self.end)
+        write!(f, "{}->{}", self.start, self.end)
     }
 }
 
