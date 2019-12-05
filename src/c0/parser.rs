@@ -188,7 +188,7 @@ where
     }
 
     fn check_one_of(&mut self, accept: &[TokenType]) -> bool {
-        accept.iter().any(|x| variant_eq(&self.cur.var, &x))
+        accept.iter().any(|x| variant_eq(&self.cur.var, x))
     }
 
     fn expect_one_of(&mut self, accept: &[TokenType]) -> bool {
@@ -611,7 +611,15 @@ where
 
     fn p_expr_stmt(&mut self, scope: Ptr<Scope>) -> ParseResult<Stmt> {
         // TODO: Subject to change
-        let expr = self.p_base_expr(&[TokenType::Semicolon], scope)?;
+        let expr = self.p_base_expr(
+            &[
+                TokenType::Semicolon,
+                TokenType::RParenthesis,
+                TokenType::RBracket,
+                TokenType::RCurlyBrace,
+            ],
+            scope,
+        )?;
         let span = expr.borrow().span();
         self.expect_report(&TokenType::Semicolon)?;
         Ok(Stmt {
@@ -780,8 +788,15 @@ where
         // The expressions in function call
         let mut expr_vec = Vec::new();
 
-        while self.expect(&TokenType::Comma) {
-            expr_vec.push(self.p_base_expr(&[TokenType::Comma], scope.clone())?);
+        if !self.check(&TokenType::RParenthesis) {
+            expr_vec.push(
+                self.p_base_expr(&[TokenType::Comma, TokenType::RParenthesis], scope.clone())?,
+            );
+            while self.expect(&TokenType::Comma) {
+                expr_vec.push(
+                    self.p_base_expr(&[TokenType::Comma, TokenType::RParenthesis], scope.clone())?,
+                );
+            }
         }
         let right_span = self.cur.span;
         self.expect_report(&TokenType::RParenthesis)?;
@@ -829,7 +844,6 @@ impl TokenType {
                 BinaryAnd => Some(Ref),
                 Increase => Some(Inb),
                 Decrease => Some(Deb),
-                LParenthesis => Some(_Lpr),
                 _ => None,
             }
         } else if unary_postfix {
@@ -858,8 +872,6 @@ impl TokenType {
                 GreaterOrEqualThan => Some(Gte),
                 Assign => Some(_Asn),
                 Comma => Some(_Com),
-                LParenthesis => Some(_Lpr),
-                RParenthesis => Some(_Rpr),
                 _ => None,
             }
         }

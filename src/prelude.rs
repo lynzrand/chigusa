@@ -154,7 +154,7 @@ impl std::ops::Add for Span {
     /// # Example
     ///
     /// ```
-    /// # use chigusa::c0::infra::{Pos, Span};
+    /// # use chigusa::prelude::{Pos, Span};
     /// let lhs = Span {
     ///     start: Pos {
     ///         ln: 1,
