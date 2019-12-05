@@ -168,7 +168,7 @@ where
             Err(parse_err(
                 // We used clone here, because once we meet an error we no longer
                 // need to worry about performance. Things're gonna fail anyway.
-                ParseErrVariant::ExpectToken(accept.clone()),
+                ParseErrVariant::ExpectToken(accept.clone(), self.cur.var.clone()),
                 self.cur.span,
             ))
         }
@@ -181,7 +181,7 @@ where
             Err(parse_err(
                 // We used clone here, because once we meet an error we no longer
                 // need to worry about performance. Things're gonna fail anyway.
-                ParseErrVariant::ExpectToken(accept.clone()),
+                ParseErrVariant::ExpectToken(accept.clone(), self.cur.var.clone()),
                 self.cur.span,
             ))
         }
@@ -207,7 +207,10 @@ where
             Err(parse_err(
                 // We used clone here, because once we meet an error we no longer
                 // need to worry about performance. Things're gonna fail anyway.
-                ParseErrVariant::ExpectTokenOneOf(accept.iter().map(|x| x.clone()).collect()),
+                ParseErrVariant::ExpectTokenOneOf(
+                    accept.iter().map(|x| x.clone()).collect(),
+                    self.cur.var.clone(),
+                ),
                 self.cur.span,
             ))
         }
@@ -220,7 +223,10 @@ where
             Err(parse_err(
                 // We used clone here, because once we meet an error we no longer
                 // need to worry about performance. Things're gonna fail anyway.
-                ParseErrVariant::ExpectTokenOneOf(accept.iter().map(|x| x.clone()).collect()),
+                ParseErrVariant::ExpectTokenOneOf(
+                    accept.iter().map(|x| x.clone()).collect(),
+                    self.cur.var.clone(),
+                ),
                 self.cur.span,
             ))
         }
@@ -234,6 +240,8 @@ where
     fn inject_std(scope: Ptr<Scope>) {
         log::info!("Injecting std types");
         let mut scope = scope.borrow_mut();
+
+        // Declaration of `int`: i32
         scope
             .insert_def(
                 "int",
@@ -245,6 +253,48 @@ where
                 },
             )
             .expect("Failed to inject primitive type `int`");
+
+        // Declaration of `double` - f64
+        scope
+            .insert_def(
+                "double",
+                SymbolDef::Typ {
+                    def: Ptr::new(TypeDef::Primitive(PrimitiveType {
+                        var: PrimitiveTypeVar::Float,
+                        occupy_bytes: 8,
+                    })),
+                },
+            )
+            .expect("Failed to inject primitive type `float`");
+
+        // Declaration of `char - u8
+        scope
+            .insert_def(
+                "char",
+                SymbolDef::Typ {
+                    def: Ptr::new(TypeDef::Primitive(PrimitiveType {
+                        var: PrimitiveTypeVar::UnsignedInt,
+                        occupy_bytes: 1,
+                    })),
+                },
+            )
+            .expect("Failed to inject primitive type `char`");
+
+        // Declaration of `print` - print(__VA_ARGS__)
+        scope
+            .insert_def(
+                "print",
+                SymbolDef::Var {
+                    typ: Ptr::new(TypeDef::Function(FunctionType {
+                        return_type: Ptr::new(TypeDef::Unit),
+                        params: vec![Ptr::new(TypeDef::VariableArgs(None))],
+                        body: None,
+                        is_extern: true,
+                    })),
+                    is_const: false,
+                },
+            )
+            .expect("Failed to inject primitive type `char`");
     }
 
     fn p_program(&mut self) -> ParseResult<Program> {
@@ -328,8 +378,14 @@ where
         let new_scope = Ptr::new(Scope::new_with_parent(scope));
         self.p_block_stmt_no_scope(new_scope)
     }
-
     fn p_block_stmt_no_scope(&mut self, scope: Ptr<Scope>) -> ParseResult<Stmt> {
+        let (block, span) = self.p_block_no_scope(scope)?;
+        Ok(Stmt {
+            var: StmtVariant::Block(block),
+            span,
+        })
+    }
+    fn p_block_no_scope(&mut self, scope: Ptr<Scope>) -> ParseResult<(Block, Span)> {
         log::trace!("Parsing block");
 
         let l_span = self.cur.span;
@@ -346,10 +402,7 @@ where
         self.expect_report(&TokenType::RCurlyBrace)?;
 
         log::trace!("Block ends");
-        Ok(Stmt {
-            var: StmtVariant::Block(Block { scope, stmts }),
-            span: l_span + r_span,
-        })
+        Ok((Block { scope, stmts }, l_span + r_span))
     }
 
     fn p_type_name(&mut self, scope: Ptr<Scope>) -> ParseResult<Ptr<TypeDef>> {
@@ -411,11 +464,12 @@ where
                 SymbolDef::Var {
                     typ: param_type.clone(),
                     is_const: false,
-                    is_callable: false,
                 },
             )?;
             expr_vec.push((param_type, ident_str.to_owned()));
         }
+
+        let inner_scope = Ptr::new(inner_scope);
 
         log::info!(
             "Parse function \"{}\" with type {:?}, params: {:?}",
@@ -427,7 +481,40 @@ where
         let right_span = self.cur.span;
         self.expect_report(&TokenType::RParenthesis)?;
 
-        Ok(todo!("Parse function body, add function declaration"))
+        // Insert function declaration
+        scope.borrow_mut().insert_def(
+            decl_token.get_ident().unwrap(),
+            SymbolDef::Var {
+                typ: Ptr::new(TypeDef::Function(FunctionType {
+                    return_type: type_decl.clone(),
+                    params: expr_vec.iter().map(|x| x.0.clone()).collect(),
+                    body: None,
+                    is_extern: false,
+                })),
+                is_const: false,
+            },
+        )?;
+
+        let (body, body_span) = self.p_block_no_scope(inner_scope.clone())?;
+
+        // Insert function declaration again with body
+        scope.borrow_mut().insert_def(
+            decl_token.get_ident().unwrap(),
+            SymbolDef::Var {
+                typ: Ptr::new(TypeDef::Function(FunctionType {
+                    return_type: type_decl.clone(),
+                    params: expr_vec.iter().map(|x| x.0.clone()).collect(),
+                    body: Some(body),
+                    is_extern: false,
+                })),
+                is_const: false,
+            },
+        )?;
+
+        Ok(Stmt {
+            var: StmtVariant::Empty,
+            span: Span::zero(),
+        })
     }
 
     fn p_decl_stmt(&mut self, scope: Ptr<Scope>) -> ParseResult<Stmt> {
@@ -463,7 +550,6 @@ where
                 SymbolDef::Var {
                     typ: type_decl.clone(),
                     is_const,
-                    is_callable: false,
                 },
             )?;
 
@@ -646,12 +732,15 @@ where
                 self.p_ident_or_fn_call(scope)
             } else {
                 Err(parse_err(
-                    ParseErrVariant::ExpectTokenOneOf(vec![
-                        TokenType::Literal(unsafe {
-                            std::mem::MaybeUninit::uninit().assume_init()
-                        }),
-                        TokenType::Identifier(String::new()),
-                    ]),
+                    ParseErrVariant::ExpectTokenOneOf(
+                        vec![
+                            TokenType::Literal(unsafe {
+                                std::mem::MaybeUninit::uninit().assume_init()
+                            }),
+                            TokenType::Identifier(String::new()),
+                        ],
+                        self.cur.var.clone(),
+                    ),
                     self.cur.span,
                 ))
             }

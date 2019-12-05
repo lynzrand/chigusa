@@ -27,14 +27,8 @@ pub struct Program {
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum SymbolDef {
-    Typ {
-        def: Ptr<TypeDef>,
-    },
-    Var {
-        typ: Ptr<TypeDef>,
-        is_const: bool,
-        is_callable: bool,
-    },
+    Typ { def: Ptr<TypeDef> },
+    Var { typ: Ptr<TypeDef>, is_const: bool },
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -72,9 +66,30 @@ impl Scope {
 
     pub fn insert_def(&mut self, name: &str, def: SymbolDef) -> ParseResult<()> {
         if self.defs.contains_key(name) {
-            Err(parse_err_z(ParseErrVariant::DuplicateDeclaration(
-                name.into(),
-            )))
+            let orig = self.defs.get(name).unwrap().borrow();
+
+            // * Compare function declarations. Only allow duplicate declration of function types.
+            if let SymbolDef::Var { typ, .. } = &*orig {
+                let orig = typ.borrow();
+                if let SymbolDef::Var { typ, .. } = def {
+                    let other = typ.borrow();
+                    if orig.compare_fns(&*other) {
+                        Ok(())
+                    } else {
+                        Err(parse_err_z(ParseErrVariant::ConflictingDeclaration(
+                            name.into(),
+                        )))
+                    }
+                } else {
+                    Err(parse_err_z(ParseErrVariant::ConflictingDeclaration(
+                        name.into(),
+                    )))
+                }
+            } else {
+                Err(parse_err_z(ParseErrVariant::DuplicateDeclaration(
+                    name.into(),
+                )))
+            }
         } else {
             if ident_regex.is_match(name) {
                 self.defs.insert(name.to_owned(), Ptr::new(def));
@@ -105,6 +120,9 @@ pub enum TypeDef {
     /// An array of items. Optionally contains a length parameter.
     Array(ArrayType),
 
+    /// Arguments of a variadic function. Must be the last argument.
+    VariableArgs(Option<Ptr<TypeDef>>),
+
     /// Unit type. Also called "void" if you like that name.
     Unit,
     /// This type is unknown. It should be resolved according to other information
@@ -118,6 +136,18 @@ pub enum TypeDef {
 }
 
 impl TypeDef {
+    pub fn compare_fns(&self, other: &TypeDef) -> bool {
+        match self {
+            TypeDef::Function(fn_self) => match other {
+                TypeDef::Function(fn_other) => {
+                    fn_other.params == fn_self.params && fn_other.return_type == fn_self.return_type
+                }
+                _ => false,
+            },
+            _ => false,
+        }
+    }
+
     // Nope. No implicit conversion here!
     // pub fn can_implicit_conv_to(&self, other: &TypeDef) -> bool {
     //     use TypeDef::*;
@@ -170,6 +200,8 @@ pub struct StructType {
 pub struct FunctionType {
     pub params: Vec<Ptr<TypeDef>>,
     pub return_type: Ptr<TypeDef>,
+    pub body: Option<Block>,
+    pub is_extern: bool,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]

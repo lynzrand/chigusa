@@ -54,8 +54,8 @@ pub enum ParseErrVariant {
     InvalidToken(String),
     BadEscaping { cause: Box<dyn Fail> },
 
-    ExpectToken(TokenType),
-    ExpectTokenOneOf(Vec<TokenType>),
+    ExpectToken(TokenType, TokenType),
+    ExpectTokenOneOf(Vec<TokenType>, TokenType),
     UnexpectedToken(TokenType),
     UnexpectedTokenMsg { typ: TokenType, msg: &'static str },
     NoConstFns,
@@ -90,7 +90,7 @@ impl ParseErrVariant {
     pub fn get_err_code(&self) -> usize {
         use self::ParseErrVariant::*;
         match self {
-            ExpectToken(_) => 1,
+            ExpectToken(..) => 1,
             NoConstFns => 2,
             InternalErr(_) => 1023,
             _ => 1024,
@@ -100,7 +100,7 @@ impl ParseErrVariant {
     pub fn get_err_desc(&self) -> String {
         use self::ParseErrVariant::*;
         match self {
-            ExpectToken(token) => format!("Expected {}", token),
+            ExpectToken(token, found) => format!("Expected {}, found {}", token, found),
             NoConstFns => "Functions cannot be marked as constant".to_string(),
             InternalErr(msg) => format!("The compiler encountered an internal error: {}", msg),
             _ => "Unknown Error".to_string(),
