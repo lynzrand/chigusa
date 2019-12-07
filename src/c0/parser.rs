@@ -216,11 +216,7 @@ where
             stmts.push(self.p_stmt(root_scope.clone())?)
         }
         log::trace!("Finished parsing program");
-        Ok(Program {
-            scope: root_scope,
-            vars: todo!(),
-            types: todo!(),
-        })
+        Ok(Program { scope: root_scope })
     }
 
     fn p_stmt(&mut self, scope: Ptr<Scope>) -> ParseResult<Stmt> {
@@ -509,14 +505,61 @@ where
     }
 
     fn p_while_stmt(&mut self, scope: Ptr<Scope>) -> ParseResult<Stmt> {
-        unimplemented!()
+        let mut span = self.cur.span;
+
+        self.expect_report(&TokenType::While)?;
+
+        self.expect_report(&TokenType::LParenthesis)?;
+
+        let cond = self.p_base_expr(&[TokenType::RParenthesis], scope.clone())?;
+
+        self.expect_report(&TokenType::RParenthesis)?;
+
+        let block = Ptr::new({
+            let stmt = self.p_stmt(scope.clone())?;
+            span = span + stmt.span();
+            stmt
+        });
+
+        Ok(Stmt {
+            var: StmtVariant::While(WhileConditional { cond, block }),
+            span,
+        })
     }
 
     fn p_if_stmt(&mut self, scope: Ptr<Scope>) -> ParseResult<Stmt> {
         let mut span = self.cur.span;
 
         self.expect_report(&TokenType::If)?;
-        todo!("We are refactoring this thing")
+
+        self.expect_report(&TokenType::LParenthesis)?;
+
+        let cond = self.p_base_expr(&[TokenType::RParenthesis], scope.clone())?;
+
+        self.expect_report(&TokenType::RParenthesis)?;
+
+        let if_block = Ptr::new({
+            let stmt = self.p_stmt(scope.clone())?;
+            span = span + stmt.span();
+            stmt
+        });
+
+        let else_block = if self.expect(&TokenType::Else) {
+            let stmt = self.p_stmt(scope.clone())?;
+            span = span + stmt.span();
+            Some(Ptr::new(stmt))
+        } else {
+            None
+        };
+
+        Ok(Stmt {
+            var: StmtVariant::If(IfConditional {
+                cond,
+                if_block,
+                else_block,
+            }),
+            span,
+        })
     }
 
     fn p_expr_stmt(&mut self, scope: Ptr<Scope>) -> ParseResult<Stmt> {

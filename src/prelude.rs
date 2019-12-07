@@ -221,7 +221,7 @@ impl std::ops::Add for Span {
     }
 */
 
-#[derive(Eq, PartialEq, Debug)]
+#[derive(Eq, PartialEq)]
 pub struct Ptr<T>(Rc<RefCell<T>>);
 
 impl<T> Ptr<T> {
@@ -247,6 +247,7 @@ impl<T> Clone for Ptr<T> {
         Ptr(Rc::clone(&self.0))
     }
 }
+
 impl<T> fmt::Display for Ptr<T>
 where
     T: fmt::Display,
@@ -254,6 +255,15 @@ where
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let borrow = self.borrow();
         write!(f, "{}", borrow)
+    }
+}
+
+impl<T> fmt::Debug for Ptr<T>
+where
+    T: fmt::Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("Ptr").field(&*self.0.borrow()).finish()
     }
 }
 pub trait IntoPtr<T> {

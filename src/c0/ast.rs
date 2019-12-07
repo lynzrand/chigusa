@@ -21,8 +21,8 @@ pub type TypeIdent = u64;
 #[derive(Debug, Eq, PartialEq)]
 pub struct Program {
     pub scope: Ptr<Scope>,
-    pub vars: Vec<VarDef>,
-    pub types: Vec<TypeDef>,
+    // pub vars: Vec<VarDef>,
+    // pub types: Vec<TypeDef>,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -31,7 +31,7 @@ pub enum SymbolDef {
     Var { typ: Ptr<TypeDef>, is_const: bool },
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Eq, PartialEq)]
 pub struct Scope {
     pub last: Option<Ptr<Scope>>,
     pub defs: IndexMap<String, Ptr<SymbolDef>>,
@@ -71,7 +71,7 @@ impl Scope {
             // * Compare function declarations. Only allow duplicate declration of function types.
             if let SymbolDef::Var { typ, .. } = &*orig {
                 let orig = typ.borrow();
-                if let SymbolDef::Var { typ, .. } = def {
+                if let SymbolDef::Var { typ, .. } = &def {
                     let other = typ.borrow();
                     if orig.compare_fns(&*other) {
                         Ok(())
@@ -92,14 +92,32 @@ impl Scope {
             }
         } else {
             if ident_regex.is_match(name) {
-                self.defs.insert(name.to_owned(), Ptr::new(def));
                 Ok(())
             } else {
                 Err(parse_err_z(ParseErrVariant::BadIdentifier(name.into())))
             }
-        }
+        }?;
+
+        self.defs.insert(name.into(), Ptr::new(def));
+        Ok(())
     }
 }
+
+impl fmt::Debug for Scope {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Scope")
+            .field(
+                "parent",
+                &match self.last {
+                    Some(_) => "Some",
+                    None => "None",
+                },
+            )
+            .field("defs", &self.defs)
+            .finish()
+    }
+}
+
 static ident_regex: Lazy<regex::Regex> =
     Lazy::new(|| regex::Regex::new("^[_a-zA-Z][_a-zA-Z0-9]*$").unwrap());
 
@@ -366,14 +384,14 @@ impl fmt::Display for TypeConversion {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct IfConditional {
     pub cond: Ptr<Expr>,
-    pub if_block: Ptr<Expr>,
-    pub else_block: Option<Ptr<Expr>>,
+    pub if_block: Ptr<Stmt>,
+    pub else_block: Option<Ptr<Stmt>>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct WhileConditional {
     pub cond: Ptr<Expr>,
-    pub block: Ptr<Block>,
+    pub block: Ptr<Stmt>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
