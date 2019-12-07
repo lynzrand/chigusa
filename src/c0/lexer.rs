@@ -359,16 +359,16 @@ where
             self.iter.next();
             match self.iter.peek().map_or('_', |i| i.1) {
                 'b' => (2, false),
-                'o' => (8, false),
+                '0' | 'o' => (8, false),
                 'x' => (16, false),
-                '0'..='9' => (10, true),
-                _ => return self.skip_error("Bad decimal number".into()),
+                '1'..='9' => (10, true),
+                _ => (10, true),
             }
         } else {
             (10, true)
         };
 
-        let mut number = String::new();
+        let mut number = String::from_str("0").unwrap();
 
         while self
             .iter
