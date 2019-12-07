@@ -5,6 +5,7 @@ use crossterm;
 
 const __INPUT_CODE: &'static str = r#"
 int x = 1, y = x + 1;
+double c = 12.34e-2;
 const int k = 3 * y + x * 5 - 8 * &x++;
 int main(){ print("aaa", x); }
 "#;

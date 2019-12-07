@@ -26,101 +26,11 @@ where
     }
 }
 
-// pub trait TokenIterator: Iterator<Item = Token> + itertools::PeekingNext {
-//     fn expect(&mut self, token: TokenVariant) -> ParseResult<Token> {
-//         // * separated variables because lifetime concerns.
-//         match self.next() {
-//             Some(t) => {
-//                 if variant_eq(&t.var, &token) {
-//                     Ok(t)
-//                 } else {
-//                     Err(parse_err(ParseErrVariant::ExpectToken(token), t.span))
-//                 }
-//             }
-//             None => Err(parse_err(ParseErrVariant::ExpectToken(token), Span::zero())),
-//         }
-//     }
-
-//     fn expect_peek(&mut self, token: TokenVariant) -> ParseResult<Token> {
-//         // * separated variables because lifetime concerns.
-//         match self.peeking_next(|_| false) {
-//             Some(t) => {
-//                 if variant_eq(&t.var, &token) {
-//                     Ok(t)
-//                 } else {
-//                     Err(parse_err(ParseErrVariant::ExpectToken(token), t.span))
-//                 }
-//             }
-//             None => Err(parse_err(ParseErrVariant::ExpectToken(token), Span::zero())),
-//         }
-//     }
-
-//     fn expect_map_or<T>(
-//         &mut self,
-//         token: TokenVariant,
-//         map: impl FnOnce(Token) -> T,
-//         f: impl FnOnce(Token) -> Result<T, ParseError>,
-//     ) -> ParseResult<T> {
-//         let next = self.next();
-//         match next {
-//             Some(v) => {
-//                 if variant_eq(&v.var, &token) {
-//                     Ok(map(v))
-//                 } else {
-//                     f(v)
-//                 }
-//             }
-//             None => Err(parse_err(ParseErrVariant::ExpectToken(token), Span::zero())),
-//         }
-//     }
-
-//     fn try_consume(&mut self, token: TokenVariant) -> bool {
-//         match self.peeking_next(|v| variant_eq(&v.var, &token)) {
-//             Some(_) => true,
-//             None => false,
-//         }
-//     }
-
-//     fn try_consume_log_span(&mut self, token: TokenVariant) -> Option<Span> {
-//         match self.peeking_next(|v| variant_eq(&v.var, &token)) {
-//             Some(v) => Some(v.span),
-//             None => None,
-//         }
-//     }
-// }
-
-// type LexerWrapped = Peekable<Lexer>;
-
-// impl TokenIterator for LexerWrapped {}
-
-pub struct TypeVar {
-    types: Vec<TypeDef>,
-    type_names: BiMap<usize, String>,
-    // vars: Vec<VarDef>,
-    // var_names: BiMap<usize, String>,
-}
-
-impl TypeVar {
-    pub fn new() -> TypeVar {
-        TypeVar {
-            types: Vec::new(),
-            type_names: BiMap::new(),
-            // vars: Vec::new(),
-            // var_names: BiMap::new(),
-        }
-    }
-
-    pub fn insert_type(&mut self, type_name: &str, type_def: TypeDef) -> usize {
-        unimplemented!()
-    }
-}
-
 pub struct Parser<T>
 where
     T: Iterator<Item = Token>,
 {
     lexer: T,
-    // type_var: TypeVar,
     cur: Token,
 }
 

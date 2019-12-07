@@ -67,7 +67,7 @@ pub enum TokenType {
     // Special
     EndOfFile,
     Dummy,
-    Error,
+    Error(String),
 }
 
 impl Display for TokenType {
@@ -117,7 +117,7 @@ impl Display for TokenType {
 
             EndOfFile => write!(f, "#EOF"),
             Dummy => write!(f, "<dummy>"),
-            Error => write!(f, "<Error token>"),
+            Error(reason) => write!(f, "<Error token>(Reason: {})", reason),
             // _ => write!(f, "???"),
         }
     }
@@ -138,7 +138,7 @@ impl Display for Literal {
             Char(c) => write!(f, "Char({})", c.escape_debug()),
             String(s) => write!(f, "String(\"{}\")", s.escape_debug()),
             Boolean(b) => write!(f, "Boolean({})", b),
-            Number(i) => write!(f, "Integer({})", i),
+            Number(i) => write!(f, "Number({})", i),
         }
     }
 }
@@ -318,36 +318,25 @@ where
         })
     }
 
-    fn skip_error(&mut self) -> Token {
-        todo!("This method should skip through an error token")
+    fn skip_error(&mut self, reason: String) -> Token {
+        let start_pos = self
+            .iter
+            .peek()
+            .expect("Errors should start with valid chars")
+            .0;
+        let mut end_pos = start_pos;
+        while self.iter.peek().map_or(true, |x| x.1.is_whitespace()) {
+            self.iter.next();
+            end_pos = end_pos.inc();
+        }
+        Token {
+            var: TokenType::Error(reason.into()),
+            span: Span::from(start_pos, end_pos),
+        }
     }
 
-    /// Lex a number
-    fn lex_number(&mut self) -> Token {
-        let start_pos = self.iter.peek().expect("This value should be valid").0;
+    fn lex_int(&mut self, base: u8) -> Result<ramp::Int, ramp::int::ParseIntError> {
         let mut number = String::new();
-
-        // radix check.
-        let radix = if self.iter.peek().map_or(false, |ch_ind| ch_ind.1 == '0') {
-            // this digit is '0'. consume and advance
-            self.iter.next();
-            match self.iter.peek().map_or('_', |i| i.1) {
-                'b' => 2,
-                'o' => 8,
-                'x' => 16,
-                '0'..='9' => 10,
-                _ => {
-                    // This does not match any number format, return zero
-                    return Token {
-                        var: TokenType::Error,
-                        // src: &self.src[start_pos.index..start_pos.index + 1],
-                        span: Span::from(start_pos, start_pos.bump()),
-                    };
-                }
-            }
-        } else {
-            10
-        };
 
         while self
             .iter
@@ -357,15 +346,113 @@ where
             number.push(self.iter.next().unwrap().1);
         }
 
+        return ramp::Int::from_str_radix(&number, base);
+    }
+
+    /// Lex a number
+    fn lex_number(&mut self) -> Token {
+        let start_pos = self.iter.peek().expect("This value should be valid").0;
+
+        // radix check.
+        let (radix, possibly_double) = if self.iter.peek().map_or(false, |ch_ind| ch_ind.1 == '0') {
+            // this digit is '0'. consume and advance
+            self.iter.next();
+            match self.iter.peek().map_or('_', |i| i.1) {
+                'b' => (2, false),
+                'o' => (8, false),
+                'x' => (16, false),
+                '0'..='9' => (10, true),
+                _ => return self.skip_error("Bad decimal number".into()),
+            }
+        } else {
+            (10, true)
+        };
+
+        let mut number = String::new();
+
+        while self
+            .iter
+            .peek()
+            .map_or(false, |ch_ind| (*ch_ind).1.is_digit(10))
+        {
+            number.push(self.iter.next().unwrap().1);
+        }
+
+        // original * 10 ^ exponent
+        let mut exponent = 0;
+
+        // Decimal part
+        if possibly_double && self.iter.peek().map_or(false, |x| x.1 == '.') {
+            // Consume decimal point
+            self.iter.next();
+
+            while self
+                .iter
+                .peek()
+                .map_or(false, |ch_ind| (*ch_ind).1.is_digit(10))
+            {
+                exponent -= 1;
+                number.push(self.iter.next().unwrap().1);
+            }
+        }
+
+        // Exponent part
+
+        if possibly_double && self.iter.peek().map_or(false, |x| x.1 == 'e' || x.1 == 'E') {
+            // Consume exponent `e`
+            self.iter.next();
+
+            let sign = match self.iter.peek() {
+                Some((_, '+')) => {
+                    self.iter.next();
+                    1
+                }
+                Some((_, '-')) => {
+                    self.iter.next();
+                    -1
+                }
+                _ => 1,
+            };
+
+            let mut exp = String::new();
+            while self
+                .iter
+                .peek()
+                .map_or(false, |ch_ind| (*ch_ind).1.is_digit(10))
+            {
+                exp.push(self.iter.next().unwrap().1);
+            }
+
+            let exp = match i32::from_str(&exp) {
+                Ok(i) => i,
+                Err(e) => return self.skip_error(format!("Error parsing number: {}", e)),
+            };
+
+            exponent += exp * sign;
+        }
+
+        let number = match ramp::Int::from_str_radix(&number, radix) {
+            Ok(i) => i,
+            Err(e) => return self.skip_error(format!("Error parsing number: {}", e)),
+        };
+
+        let (number, exponent) = if exponent >= 0 {
+            let exp = ramp::Int::from(10).pow(exponent as usize);
+            (number * exp, ramp::Int::one())
+        } else {
+            let exp = ramp::Int::from(10).pow((-exponent) as usize);
+            (number, exp)
+        };
+
         let end_pos = self.iter.peek().unwrap().0;
 
         let start = start_pos.index;
         let end = end_pos.index;
 
         Token {
-            var: TokenType::Literal(Literal::Number(
-                ramp::Int::from_str_radix(&number, radix).unwrap().into(),
-            )),
+            var: TokenType::Literal(Literal::Number(ramp::rational::Rational::new(
+                number, exponent,
+            ))),
             // src: &self.src[start..end],
             span: Span::from(start_pos, end_pos),
         }
