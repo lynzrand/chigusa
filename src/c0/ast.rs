@@ -21,8 +21,9 @@ pub type TypeIdent = u64;
 #[derive(Debug, Eq, PartialEq)]
 pub struct Program {
     pub scope: Ptr<Scope>,
+    pub stmts: Vec<Stmt>,
     // pub vars: Vec<VarDef>,
-    // pub types: Vec<TypeDef>,
+    // pub types: Vec<TypeDef>
 }
 
 #[derive(Debug, Eq, PartialEq)]

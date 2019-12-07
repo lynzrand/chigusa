@@ -401,20 +401,13 @@ where
         if possibly_double && self.iter.peek().map_or(false, |x| x.1 == 'e' || x.1 == 'E') {
             // Consume exponent `e`
             self.iter.next();
+            let mut exp = String::new();
 
-            let sign = match self.iter.peek() {
-                Some((_, '+')) => {
-                    self.iter.next();
-                    1
-                }
-                Some((_, '-')) => {
-                    self.iter.next();
-                    -1
-                }
-                _ => 1,
+            match self.iter.peek() {
+                Some((_, '+')) | Some((_, '-')) => exp.push(self.iter.next().unwrap().1),
+                _ => (),
             };
 
-            let mut exp = String::new();
             while self
                 .iter
                 .peek()
@@ -428,7 +421,7 @@ where
                 Err(e) => return self.skip_error(format!("Error parsing number: {}", e)),
             };
 
-            exponent += exp * sign;
+            exponent += exp;
         }
 
         let number = match ramp::Int::from_str_radix(&number, radix) {
@@ -436,7 +429,7 @@ where
             Err(e) => return self.skip_error(format!("Error parsing number: {}", e)),
         };
 
-        let (number, exponent) = if exponent >= 0 {
+        let (number, denominator) = if exponent >= 0 {
             let exp = ramp::Int::from(10).pow(exponent as usize);
             (number * exp, ramp::Int::one())
         } else {
@@ -451,7 +444,8 @@ where
 
         Token {
             var: TokenType::Literal(Literal::Number(ramp::rational::Rational::new(
-                number, exponent,
+                number,
+                denominator,
             ))),
             // src: &self.src[start..end],
             span: Span::from(start_pos, end_pos),

@@ -216,7 +216,10 @@ where
             stmts.push(self.p_stmt(root_scope.clone())?)
         }
         log::trace!("Finished parsing program");
-        Ok(Program { scope: root_scope })
+        Ok(Program {
+            scope: root_scope,
+            stmts,
+        })
     }
 
     fn p_stmt(&mut self, scope: Ptr<Scope>) -> ParseResult<Stmt> {
