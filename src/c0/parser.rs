@@ -655,7 +655,7 @@ where
     }
 
     fn p_postfix_unary_op(&mut self, scope: Ptr<Scope>) -> ParseResult<Ptr<Expr>> {
-        let mut expr = self.p_item(scope)?;
+        let mut expr = self.p_item(scope.clone())?;
         loop {
             if let Some(op) = self.cur.var.into_op(false, true) {
                 expr = Ptr::new(Expr {
@@ -665,10 +665,30 @@ where
                 self.bump();
             } else if self.cur.var == TokenType::LBracket {
                 // Parse index operator
-                todo!("Parse index operator");
-            } else if self.cur.var == TokenType::Dot {
-                // Parse child operator
-                todo!("Parse child operator");
+                self.bump();
+                let idx = self.p_base_expr(&[TokenType::RBracket], scope.clone())?;
+                self.expect_report(&TokenType::RBracket)?;
+                expr = Ptr::new(Expr {
+                    var: ExprVariant::ArrayChild(ArrayChild { val: expr, idx }),
+                    span: self.cur.span,
+                });
+            // TODO: Add parsing for struct child (later)
+            // } else if self.cur.var == TokenType::Dot {
+            //     // Parse child operator
+            //     self.bump();
+            //     match self.cur.var{
+            //         TokenType::Identifier(s)=>{
+            //             expr = Ptr::new(Expr{
+            //                 var: ExprVariant::StructChild(StructChild{
+            //                     val: (),
+            //                     idx: (),
+
+            //                 }),
+            //                 span: (),
+            //             }),
+            //             _=>todo!()
+            //         }
+            //     }
             } else {
                 // There's no postfix unary operator for us to parse
                 break;
