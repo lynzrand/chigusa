@@ -1,7 +1,9 @@
 use super::*;
 use crate::c0::ast;
-use cranelift_codegen::ir;
-use cranelift_codegen::*;
+use cranelift::codegen::ir::types::*;
+use cranelift::codegen::ir;
+use cranelift::codegen::*;
+use cranelift::*;
 pub struct Codegen<'a> {
     ctx: Context,
     prog: &'a ast::Program,

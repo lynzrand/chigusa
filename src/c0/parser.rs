@@ -208,14 +208,14 @@ where
     }
 
     fn p_program(&mut self) -> ParseResult<Program> {
-        log::trace!("Parse program");
+        log::info!("Starts parsing program");
         let root_scope = Ptr::new(Scope::new());
         Self::inject_std(root_scope.clone());
         let mut stmts = Vec::new();
         while self.cur.var != TokenType::EndOfFile {
             stmts.push(self.p_stmt(root_scope.clone())?)
         }
-        log::trace!("Finished parsing program");
+        log::info!("Finished parsing program");
         Ok(Program {
             scope: root_scope,
             stmts,
@@ -223,7 +223,7 @@ where
     }
 
     fn p_stmt(&mut self, scope: Ptr<Scope>) -> ParseResult<Stmt> {
-        log::trace!("Parse statement");
+        log::debug!("Parse statement");
 
         match &self.cur.var {
             TokenType::LCurlyBrace => self.p_block_stmt(scope),
@@ -295,7 +295,7 @@ where
         })
     }
     fn p_block_no_scope(&mut self, scope: Ptr<Scope>) -> ParseResult<(Block, Span)> {
-        log::trace!("Parsing block");
+        log::debug!("Parsing block");
 
         let l_span = self.cur.span;
         self.expect_report(&TokenType::LCurlyBrace)?;
@@ -310,7 +310,7 @@ where
         let r_span = self.cur.span;
         self.expect_report(&TokenType::RCurlyBrace)?;
 
-        log::trace!("Block ends");
+        log::debug!("Block ends");
         Ok((Block { scope, stmts }, l_span + r_span))
     }
 
@@ -434,7 +434,6 @@ where
         let type_decl = self.p_type_name(scope.clone())?;
         let mut has_next = true;
         let mut exprs = Vec::new();
-        log::trace!("Parsing declaration statement, type is {:?}", type_decl);
 
         while has_next {
             self.check_report(&TokenType::Identifier(String::new()))?;
@@ -461,20 +460,6 @@ where
                     is_const,
                 },
             )?;
-
-            if init_val.is_some() {
-                let val = init_val.as_ref().unwrap();
-                log::info!(
-                    "Parsing declaration, ident is {}, with value {}",
-                    ident.get_ident().unwrap(),
-                    val
-                );
-            } else {
-                log::info!(
-                    "Parsing declaration, ident is {}",
-                    ident.get_ident().unwrap(),
-                );
-            }
 
             if let Some(val) = init_val {
                 let span = ident.span + val.borrow().span();
