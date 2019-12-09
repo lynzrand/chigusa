@@ -1,7 +1,23 @@
-use cranelift_codegen;
+use super::*;
+use crate::c0::ast;
+use cranelift_codegen::ir;
+use cranelift_codegen::*;
+pub struct Codegen<'a> {
+    ctx: Context,
+    prog: &'a ast::Program,
+}
 
-pub struct Codegen {}
+impl<'a> Codegen<'a> {
+    pub fn new(prog: &'a ast::Program) -> Codegen<'a> {
+        Codegen {
+            ctx: Context::new(),
+            prog,
+        }
+    }
 
-impl Codegen {
-    pub fn compile() {}
+    pub fn compile(&mut self) {}
+
+    pub fn compile_fn(&mut self, func: &ast::FunctionType) -> CompileResult<()> {
+        Ok(())
+    }
 }
