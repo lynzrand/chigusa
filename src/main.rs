@@ -15,7 +15,7 @@ int main(){ if (c > 0) print("aaa", x); else {int z = 2; print(z);} }
 
 fn main() {
     let opt: ParserConfig = ParserConfig::from_args();
-    cute_log::init_with_max_level(opt.verbosity.unwrap_or(log::LevelFilter::Warn)).unwrap();
+    cute_log::init_with_max_level(opt.verbosity).unwrap();
 
     let vec = lexer::Lexer::new(Box::new(__INPUT_CODE.chars())).into_iter();
 
@@ -44,13 +44,13 @@ pub struct ParserConfig {
     #[structopt(name = "file", parse(from_os_str))]
     input_file: Option<PathBuf>,
 
-    /// Output file. Defaults to stdout.
-    #[structopt(short, long = "out", parse(from_os_str))]
-    output_file: Option<PathBuf>,
+    /// Output file. Defaults to `out`
+    #[structopt(short, long = "out", default_value = "out", parse(from_os_str))]
+    output_file: PathBuf,
 
     /// Verbossity. Allowed values are: debug, trace, info, warn, error, off.
-    #[structopt(short, long, parse(try_from_str = parse_verbosity))]
-    verbosity: Option<log::LevelFilter>,
+    #[structopt(short, long, default_value = "warn", parse(try_from_str = parse_verbosity))]
+    verbosity: log::LevelFilter,
 
     /// Write result to stdout. Overwrites `output-file`.
     #[structopt(long)]
