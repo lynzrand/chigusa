@@ -15,11 +15,13 @@ int main(){ if (c > 0) print("aaa", x); else {int z = 2; print(z);} }
 
 fn main() {
     let opt: ParserConfig = ParserConfig::from_args();
-    cute_log::init_with_max_level(opt.verbose).unwrap();
+    cute_log::init_with_max_level(opt.verbosity.unwrap_or(log::LevelFilter::Warn)).unwrap();
+
     let vec = lexer::Lexer::new(Box::new(__INPUT_CODE.chars())).into_iter();
 
     let tree = chigusa::c0::parser::Parser::new(vec).parse();
-    // println!("{:?}", tree);
+
+    println!("{:?}", tree);
 }
 
 fn parse_verbosity(input: &str) -> Result<log::LevelFilter, &'static str> {
@@ -32,6 +34,7 @@ fn parse_verbosity(input: &str) -> Result<log::LevelFilter, &'static str> {
         "off" => Ok(log::LevelFilter::Off),
         _ => Err("Bad verbosity level. Allowed values are: debug, trace, info, warn, error, off"),
     }
+    // .map(|t| Some(Some(t)))
 }
 
 #[derive(StructOpt, Debug)]
@@ -46,8 +49,8 @@ pub struct ParserConfig {
     output_file: Option<PathBuf>,
 
     /// Verbossity. Allowed values are: debug, trace, info, warn, error, off.
-    #[structopt(short, long,parse(try_from_str=parse_verbosity))]
-    verbose: log::LevelFilter,
+    #[structopt(short, long, parse(try_from_str = parse_verbosity))]
+    verbosity: Option<log::LevelFilter>,
 
     /// Write result to stdout. Overwrites `output-file`.
     #[structopt(long)]
