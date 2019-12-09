@@ -12,9 +12,10 @@ pub mod mir;
 
 /// Kurumi is a simple virtual machine for this project.
 // #[cfg(kurumi)]
-pub mod kurumi;
+// pub mod kurumi;
 
-#[cfg(llvm)]
-pub mod llvm;
+/// x86 codegen using Cranelift
+pub mod cranelift;
 
+/// Essencial stuff
 pub mod prelude;
