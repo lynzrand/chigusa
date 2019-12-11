@@ -529,10 +529,10 @@ pub enum OpVar {
     /// Constant assignment.
     ///
     /// Acts like a conventional assignment with both variables and constants,
-    /// but only generated when parsing declarations. This eliminates the problem
-    /// of re-assigning constants.
+    /// but only generated when parsing declarations. This hopefully eliminates
+    /// the problem of re-assigning constants.
     _Csn,
-    /// Dummy value
+    /// Dummy operation, or noop
     _Dum,
 }
 

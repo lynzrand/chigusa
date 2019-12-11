@@ -44,8 +44,8 @@ pub struct ParserConfig {
     #[structopt(name = "file", parse(from_os_str))]
     input_file: Option<PathBuf>,
 
-    /// Output file. Defaults to `out`
-    #[structopt(short, long = "out", default_value = "out", parse(from_os_str))]
+    /// Output file.
+    #[structopt(short, long = "out", default_value = "a.out", parse(from_os_str))]
     output_file: PathBuf,
 
     /// Verbossity. Allowed values are: debug, trace, info, warn, error, off.
@@ -59,4 +59,41 @@ pub struct ParserConfig {
     /// Use JIT compilation and run immediately.
     #[structopt(long)]
     jit: bool,
+
+    /// The type of code to emit. Allowed are: token, ast, ir, asm, obj, exe.
+    ///
+    /// Emit result explanation:
+    /// - Token: Direct result from lexer (tokenizer)
+    /// - AST: Abstract Syntax Tree, direct result from parser (analyzer)
+    /// - IR: Cranelift IR, direct result from Codegen
+    /// - ASM: Assembly file for local machine
+    /// - OBJ: Object file for local machine
+    /// - EXE: Executable file
+    #[structopt(long, default_value = "exe", parse(try_from_str = EmitOption::parse))]
+    emit: EmitOption,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub enum EmitOption {
+    Token,
+    Ast,
+    Mir,
+    CraneliftIR,
+    Asm,
+    Obj,
+    Exe,
+}
+
+impl EmitOption {
+    pub fn parse(s: &str) -> Result<Self, &'static str> {
+        match s {
+            "token" => Ok(EmitOption::Token),
+            "ast" => Ok(EmitOption::Ast),
+            "ir" => Ok(EmitOption::CraneliftIR),
+            "asm" => Ok(EmitOption::Asm),
+            "obj" => Ok(EmitOption::Obj),
+            "exe" => Ok(EmitOption::Exe),
+            _ => Err("Bad emit option. Allowed are: token, ast, ir, asm, obj, exe"),
+        }
+    }
 }
