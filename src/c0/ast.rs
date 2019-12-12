@@ -36,6 +36,7 @@ pub enum SymbolDef {
 pub struct Scope {
     pub last: Option<Ptr<Scope>>,
     pub defs: IndexMap<String, Ptr<SymbolDef>>,
+    pub depth: usize,
 }
 
 impl Scope {
@@ -43,13 +44,16 @@ impl Scope {
         Scope {
             last: None,
             defs: IndexMap::new(),
+            depth: 0,
         }
     }
 
     pub fn new_with_parent(parent: Ptr<Scope>) -> Scope {
+        let depth = parent.borrow().depth + 1;
         Scope {
             last: Some(parent),
             defs: IndexMap::new(),
+            depth,
         }
     }
 
@@ -59,6 +63,17 @@ impl Scope {
                 .as_ref()
                 .and_then(|last| last.borrow().find_def(name))
         })
+    }
+
+    pub fn find_def_depth(&self, name: &str) -> Option<(Ptr<SymbolDef>, usize)> {
+        self.defs
+            .get(name)
+            .map(|def| (def.clone(), self.depth))
+            .or_else(|| {
+                self.last
+                    .as_ref()
+                    .and_then(|last| last.borrow().find_def_depth(name))
+            })
     }
 
     pub fn find_def_self(&self, name: &str) -> Option<Ptr<SymbolDef>> {
