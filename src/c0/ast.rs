@@ -58,7 +58,7 @@ impl Scope {
     }
 
     pub fn find_def(&self, name: &str) -> Option<Ptr<SymbolDef>> {
-        self.defs.get(name).map(|def| def.clone()).or_else(|| {
+        self.defs.get(name).map(|def| def.cp()).or_else(|| {
             self.last
                 .as_ref()
                 .and_then(|last| last.borrow().find_def(name))
@@ -68,7 +68,7 @@ impl Scope {
     pub fn find_def_depth(&self, name: &str) -> Option<(Ptr<SymbolDef>, usize)> {
         self.defs
             .get(name)
-            .map(|def| (def.clone(), self.depth))
+            .map(|def| (def.cp(), self.depth))
             .or_else(|| {
                 self.last
                     .as_ref()
@@ -77,7 +77,7 @@ impl Scope {
     }
 
     pub fn find_def_self(&self, name: &str) -> Option<Ptr<SymbolDef>> {
-        self.defs.get(name).map(|def| def.clone())
+        self.defs.get(name).map(|def| def.cp())
     }
 
     pub fn insert_def(&mut self, name: &str, def: SymbolDef) -> ParseResult<()> {

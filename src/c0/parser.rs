@@ -210,10 +210,10 @@ where
     fn p_program(&mut self) -> ParseResult<Program> {
         log::info!("Starts parsing program");
         let root_scope = Ptr::new(Scope::new());
-        Self::inject_std(root_scope.clone());
+        Self::inject_std(root_scope.cp());
         let mut stmts = Vec::new();
         while self.cur.var != TokenType::EndOfFile {
-            stmts.push(self.p_stmt(root_scope.clone())?)
+            stmts.push(self.p_stmt(root_scope.cp())?)
         }
         log::info!("Finished parsing program");
         Ok(Program {
@@ -261,8 +261,8 @@ where
                     Some(entry) => {
                         let entry = entry.borrow();
                         match &*entry {
-                            &SymbolDef::Typ { .. } => self.p_decl_stmt(scope.clone()),
-                            &SymbolDef::Var { .. } => self.p_expr_stmt(scope.clone()),
+                            &SymbolDef::Typ { .. } => self.p_decl_stmt(scope.cp()),
+                            &SymbolDef::Var { .. } => self.p_expr_stmt(scope.cp()),
                         }
                     }
                 }
@@ -303,7 +303,7 @@ where
 
         // For each statement, parse
         while !self.check(&TokenType::RCurlyBrace) {
-            let stmt = self.p_stmt(scope.clone())?;
+            let stmt = self.p_stmt(scope.cp())?;
             stmts.push(stmt);
         }
 
@@ -361,17 +361,17 @@ where
         self.expect_report(&TokenType::LParenthesis)?;
         // The expressions in function call
         let mut expr_vec = Vec::new();
-        let mut inner_scope = Scope::new_with_parent(scope.clone());
+        let mut inner_scope = Scope::new_with_parent(scope.cp());
 
         while self.expect(&TokenType::Comma) {
-            let param_type = self.p_type_name(scope.clone())?;
+            let param_type = self.p_type_name(scope.cp())?;
             self.check_report(&TokenType::Identifier(String::new()))?;
             let ident = self.bump();
             let ident_str = ident.get_ident().unwrap();
             inner_scope.insert_def(
                 ident_str,
                 SymbolDef::Var {
-                    typ: param_type.clone(),
+                    typ: param_type.cp(),
                     is_const: false,
                 },
             )?;
@@ -395,7 +395,7 @@ where
             decl_token.get_ident().unwrap(),
             SymbolDef::Var {
                 typ: Ptr::new(TypeDef::Function(FunctionType {
-                    return_type: type_decl.clone(),
+                    return_type: type_decl.cp(),
                     params: expr_vec.iter().map(|x| x.0.clone()).collect(),
                     body: None,
                     is_extern: false,
@@ -404,14 +404,14 @@ where
             },
         )?;
 
-        let (body, body_span) = self.p_block_no_scope(inner_scope.clone())?;
+        let (body, body_span) = self.p_block_no_scope(inner_scope.cp())?;
 
         // Insert function declaration again with body
         scope.borrow_mut().insert_def(
             decl_token.get_ident().unwrap(),
             SymbolDef::Var {
                 typ: Ptr::new(TypeDef::Function(FunctionType {
-                    return_type: type_decl.clone(),
+                    return_type: type_decl.cp(),
                     params: expr_vec.iter().map(|x| x.0.clone()).collect(),
                     body: Some(body),
                     is_extern: false,
@@ -431,7 +431,7 @@ where
 
         let init_span = self.cur.span;
         let is_const = self.expect(&TokenType::Const);
-        let type_decl = self.p_type_name(scope.clone())?;
+        let type_decl = self.p_type_name(scope.cp())?;
         let mut has_next = true;
         let mut exprs = Vec::new();
 
@@ -448,7 +448,7 @@ where
             }
 
             let init_val = if self.expect(&TokenType::Assign) {
-                Some(self.p_base_expr(&[TokenType::Comma, TokenType::Semicolon], scope.clone())?)
+                Some(self.p_base_expr(&[TokenType::Comma, TokenType::Semicolon], scope.cp())?)
             } else {
                 None
             };
@@ -456,7 +456,7 @@ where
             scope.borrow_mut().insert_def(
                 ident.get_ident().unwrap(),
                 SymbolDef::Var {
-                    typ: type_decl.clone(),
+                    typ: type_decl.cp(),
                     is_const,
                 },
             )?;
@@ -499,12 +499,12 @@ where
 
         self.expect_report(&TokenType::LParenthesis)?;
 
-        let cond = self.p_base_expr(&[TokenType::RParenthesis], scope.clone())?;
+        let cond = self.p_base_expr(&[TokenType::RParenthesis], scope.cp())?;
 
         self.expect_report(&TokenType::RParenthesis)?;
 
         let block = Ptr::new({
-            let stmt = self.p_stmt(scope.clone())?;
+            let stmt = self.p_stmt(scope.cp())?;
             span = span + stmt.span();
             stmt
         });
@@ -522,18 +522,18 @@ where
 
         self.expect_report(&TokenType::LParenthesis)?;
 
-        let cond = self.p_base_expr(&[TokenType::RParenthesis], scope.clone())?;
+        let cond = self.p_base_expr(&[TokenType::RParenthesis], scope.cp())?;
 
         self.expect_report(&TokenType::RParenthesis)?;
 
         let if_block = Ptr::new({
-            let stmt = self.p_stmt(scope.clone())?;
+            let stmt = self.p_stmt(scope.cp())?;
             span = span + stmt.span();
             stmt
         });
 
         let else_block = if self.expect(&TokenType::Else) {
-            let stmt = self.p_stmt(scope.clone())?;
+            let stmt = self.p_stmt(scope.cp())?;
             span = span + stmt.span();
             Some(Ptr::new(stmt))
         } else {
@@ -576,7 +576,7 @@ where
     ) -> ParseResult<Ptr<Expr>> {
         let mut expr = None;
         while !self.check_one_of(close_delim) {
-            expr = Some(self.p_binary_op(expr, 0, close_delim, scope.clone())?);
+            expr = Some(self.p_binary_op(expr, 0, close_delim, scope.cp())?);
         }
         expr.ok_or_else(|| {
             parse_err_z(ParseErrVariant::InternalErr(
@@ -598,7 +598,7 @@ where
         let lhs = if lhs.is_some() {
             lhs.unwrap()
         } else {
-            self.p_prefix_unary_op(scope.clone())?
+            self.p_prefix_unary_op(scope.cp())?
         };
 
         // Op should be self.cur
@@ -608,7 +608,7 @@ where
                     || (op.is_right_associative() && op.priority() >= expect_prec))
             {
                 self.bump();
-                let rhs = self.p_binary_op(None, op.priority(), close_delim, scope.clone())?;
+                let rhs = self.p_binary_op(None, op.priority(), close_delim, scope.cp())?;
                 let span = { lhs.borrow().span() + rhs.borrow().span() };
                 Ok(Ptr::new(Expr {
                     var: ExprVariant::BinaryOp(BinaryOp { lhs, rhs, op }),
@@ -640,7 +640,7 @@ where
     }
 
     fn p_postfix_unary_op(&mut self, scope: Ptr<Scope>) -> ParseResult<Ptr<Expr>> {
-        let mut expr = self.p_item(scope.clone())?;
+        let mut expr = self.p_item(scope.cp())?;
         loop {
             if let Some(op) = self.cur.var.into_op(false, true) {
                 expr = Ptr::new(Expr {
@@ -651,7 +651,7 @@ where
             } else if self.cur.var == TokenType::LBracket {
                 // Parse index operator
                 self.bump();
-                let idx = self.p_base_expr(&[TokenType::RBracket], scope.clone())?;
+                let idx = self.p_base_expr(&[TokenType::RBracket], scope.cp())?;
                 self.expect_report(&TokenType::RBracket)?;
                 expr = Ptr::new(Expr {
                     var: ExprVariant::ArrayChild(ArrayChild { val: expr, idx }),
@@ -750,12 +750,11 @@ where
         let mut expr_vec = Vec::new();
 
         if !self.check(&TokenType::RParenthesis) {
-            expr_vec.push(
-                self.p_base_expr(&[TokenType::Comma, TokenType::RParenthesis], scope.clone())?,
-            );
+            expr_vec
+                .push(self.p_base_expr(&[TokenType::Comma, TokenType::RParenthesis], scope.cp())?);
             while self.expect(&TokenType::Comma) {
                 expr_vec.push(
-                    self.p_base_expr(&[TokenType::Comma, TokenType::RParenthesis], scope.clone())?,
+                    self.p_base_expr(&[TokenType::Comma, TokenType::RParenthesis], scope.cp())?,
                 );
             }
         }

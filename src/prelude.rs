@@ -240,11 +240,17 @@ impl<T> Ptr<T> {
     pub fn downgrade(self) -> Weak<RefCell<T>> {
         std::rc::Rc::downgrade(&self.0)
     }
+
+    /// Copy pointer
+    pub fn cp(&self) -> Self {
+        Ptr(Rc::clone(&self.0))
+    }
 }
 
 impl<T> Clone for Ptr<T> {
+    /// Deep clone
     fn clone(&self) -> Self {
-        Ptr(Rc::clone(&self.0))
+        Ptr((&self.0).clone())
     }
 }
 

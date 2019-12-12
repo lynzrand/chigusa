@@ -63,12 +63,10 @@ where
 
     let args_type: Vec<_> = f_args
         .iter()
-        .map(|arg: &Ptr<ast::TypeDef>| {
-            AbiParam::new(extract_ty(arg, f_parent_scope.clone(), module))
-        })
+        .map(|arg: &Ptr<ast::TypeDef>| AbiParam::new(extract_ty(arg, f_parent_scope.cp(), module)))
         .collect();
 
-    let ret_type = AbiParam::new(extract_ty(f_ret, f_parent_scope.clone(), module));
+    let ret_type = AbiParam::new(extract_ty(f_ret, f_parent_scope.cp(), module));
     let ret_type = vec![ret_type];
 
     (args_type, ret_type)
@@ -86,7 +84,7 @@ where
 
     match &*ty {
         ast::TypeDef::NamedType(n) => {
-            let scope_c = scope.clone();
+            let scope_c = scope.cp();
             let scope_b = scope_c.borrow();
             let sty = scope_b.find_def(n).expect("Unknown type inside AST");
             let sty = sty.borrow();
@@ -115,7 +113,7 @@ where
         },
 
         ast::TypeDef::Ref(r) => {
-            let ty = r.target.clone();
+            let ty = r.target.cp();
 
             // Type information is lost here.
             // TODO: Check pointer compatibility beforehand
@@ -200,11 +198,11 @@ where
     fn gen_stmt(&mut self, stmt: &ast::Stmt) {
         match &stmt.var {
             ast::StmtVariant::Expr(e) => {
-                self.gen_expr(e.clone());
+                self.gen_expr(e.cp());
             }
             ast::StmtVariant::ManyExpr(e) => {
                 for e in e {
-                    self.gen_expr(e.clone());
+                    self.gen_expr(e.cp());
                 }
             }
             ast::StmtVariant::Return(e) => todo!("Generate code for return"),
@@ -221,8 +219,8 @@ where
         let expr = &*expr;
         match &expr.var {
             ast::ExprVariant::BinaryOp(b) => {
-                let lhs = self.gen_expr(b.lhs.clone());
-                let rhs = self.gen_expr(b.rhs.clone());
+                let lhs = self.gen_expr(b.lhs.cp());
+                let rhs = self.gen_expr(b.rhs.cp());
                 b.op.build_inst_bin(self.builder.ins(), lhs, rhs)
             }
             _ => todo!("Implement other expression variants"),
