@@ -32,6 +32,24 @@ pub enum SymbolDef {
     Var { typ: Ptr<TypeDef>, is_const: bool },
 }
 
+impl SymbolDef {
+    /// Return the type variant of self
+    pub fn get_typ(&self) -> Option<Ptr<TypeDef>> {
+        match self {
+            SymbolDef::Typ { def } => Some(def.cp()),
+            _ => None,
+        }
+    }
+
+    /// Return the symbol variant of self
+    pub fn get_sym(&self) -> Option<(Ptr<TypeDef>, bool)> {
+        match self {
+            SymbolDef::Var { typ, is_const } => Some((typ.cp(), *is_const)),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Eq, PartialEq)]
 pub struct Scope {
     pub last: Option<Ptr<Scope>>,

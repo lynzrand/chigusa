@@ -1,5 +1,5 @@
 use super::*;
-use crate::c0::ast;
+use crate::c0::ast::{self, *};
 use crate::prelude::*;
 use cranelift::codegen::ir;
 use cranelift::codegen::ir::types::*;
@@ -10,6 +10,8 @@ use cranelift_module::{self, Backend, DataContext, Module};
 use frontend::FunctionBuilderContext;
 use frontend::*;
 use indexmap::IndexMap;
+use InstBuilder;
+
 pub struct Codegen<'a, T>
 where
     T: cranelift_module::Backend,
@@ -44,6 +46,45 @@ where
         let fnc = FnCodegen::new(func, self);
 
         Ok(())
+    }
+}
+
+/// Resolve all named types into their definitions, and strip function types' bodies
+fn resolve_ty(ty: &ast::TypeDef, scope: Ptr<ast::Scope>) -> ast::TypeDef {
+    match ty {
+        ast::TypeDef::NamedType(n) => {
+            let scope_c = scope.cp();
+            let scope_b = scope_c.borrow();
+            let sty = scope_b.find_def(n).expect("Unknown type inside AST");
+            let sty = sty.borrow().get_typ().unwrap();
+            let sty = sty.borrow();
+
+            resolve_ty(&*sty, scope.cp())
+        }
+        prim @ ast::TypeDef::Primitive(..) => prim.clone(),
+        ast::TypeDef::Ref(r) => {
+            let src = r.target.borrow();
+            let res = Ptr::new(resolve_ty(&*src, scope.cp()));
+            ast::TypeDef::Ref(ast::RefType { target: res })
+        }
+        ast::TypeDef::Function(f) => {
+            let params = f
+                .params
+                .iter()
+                .map(|a| {
+                    let a = a.borrow();
+                    Ptr::new(resolve_ty(&*a, scope.cp()))
+                })
+                .collect();
+            let ret = Ptr::new(resolve_ty(&*f.return_type.borrow(), scope.cp()));
+            ast::TypeDef::Function(ast::FunctionType {
+                params,
+                return_type: ret,
+                body: None,
+                is_extern: f.is_extern,
+            })
+        }
+        _ => todo!("Type resolve not implemented"),
     }
 }
 
@@ -222,6 +263,10 @@ where
                 let lhs = self.gen_expr(b.lhs.cp());
                 let rhs = self.gen_expr(b.rhs.cp());
                 b.op.build_inst_bin(self.builder.ins(), lhs, rhs)
+            }
+            ast::ExprVariant::Literal(lit) => {
+                //
+                todo!()
             }
             _ => todo!("Implement other expression variants"),
         }
