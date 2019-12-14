@@ -39,10 +39,11 @@ where
 
     pub fn compile(&mut self) {}
 
-    pub fn compile_fn<'t>(&mut self, func: &ast::FunctionType) -> CompileResult<()> {
+    pub fn compile_fn<'t>(&mut self, func: &ast::FunctionType, name: &str) -> CompileResult<()> {
         // TODO: Add signature extractor
+
         // let sig = FnCodegen::extract_sig(func, self);
-        let fnc = FnCodegen::new(func, self);
+        let fnc = FnCodegen::new(func, name, self);
 
         Ok(())
     }
@@ -164,6 +165,23 @@ where
     }
 }
 
+/// Calculate the bits needed for a type to contain a value
+fn type_bits(len: u32) -> Option<u16> {
+    if len > 128 {
+        None
+    } else if len > 64 {
+        Some(128)
+    } else if len > 32 {
+        Some(64)
+    } else if len > 16 {
+        Some(32)
+    } else if len > 8 {
+        Some(16)
+    } else {
+        Some(8)
+    }
+}
+
 struct TypeVal(Value, ast::TypeDef);
 
 struct FnCodegen<'b, T>
@@ -171,9 +189,11 @@ where
     T: cranelift_module::Backend,
 {
     f: &'b ast::FunctionType,
+    name: &'b str,
     // ctx: &'b mut Codegen<'a, T>,
     ebb_cnt: u32,
     loc_cnt: u32,
+    dat_cnt: u32,
     loc: IndexMap<String, Variable>,
     builder: frontend::FunctionBuilder<'b>,
     module: &'b mut cranelift_module::Module<T>,
@@ -183,13 +203,19 @@ impl<'b, T> FnCodegen<'b, T>
 where
     T: cranelift_module::Backend,
 {
-    pub fn new<'a>(f: &'b ast::FunctionType, ctx: &'b mut Codegen<'a, T>) -> FnCodegen<'b, T> {
+    pub fn new<'a>(
+        f: &'b ast::FunctionType,
+        name: &'b str,
+        ctx: &'b mut Codegen<'a, T>,
+    ) -> FnCodegen<'b, T> {
         FnCodegen {
             builder: frontend::FunctionBuilder::new(&mut ctx.ctx.func, &mut ctx.fn_builder_ctx),
             f,
+            name,
             // ctx,
             ebb_cnt: 0,
             loc_cnt: 0,
+            dat_cnt: 0,
             loc: IndexMap::new(),
             module: &mut ctx.module,
         }
@@ -256,31 +282,120 @@ where
         }
     }
 
-    fn flatten_typ(&mut self, a: TypeVal,b:TypeVal)->(TypeVal,TypeVal){
+    /// Generate implicit conversion for `a` and `b` to match their types.
+    fn flatten_typ(&mut self, a: TypeVal, b: TypeVal) -> (TypeVal, TypeVal) {
         todo!()
     }
 
-    fn gen_expr(&mut self, expr: Ptr<ast::Expr>) -> TypeVal {
+    /// Generate implicit conversion for `val` to match `tgt` type
+    fn implicit_conv(&mut self, val: TypeVal, tgt: Ptr<ast::TypeDef>) -> CompileResult<TypeVal> {
+        match &val.1 {
+            ast::TypeDef::Unit => Err(CompileError::AssignVoid),
+            ast::TypeDef::Primitive(p) => {
+                todo!()
+                //
+            }
+            ast::TypeDef::Ref(r) => {
+                todo!()
+                //
+            }
+            ast::TypeDef::NamedType(..) => Err(CompileError::InternalError(
+                "Named types shouldn't appear in type calculation".into(),
+            )),
+            _ => Err(CompileError::UnsupportedType),
+        }
+    }
+
+    fn gen_expr(&mut self, expr: Ptr<ast::Expr>) -> CompileResult<TypeVal> {
         let expr = expr.borrow();
         let expr = &*expr;
         match &expr.var {
             ast::ExprVariant::BinaryOp(b) => {
-                let lhs = self.gen_expr(b.lhs.cp());
-                let rhs = self.gen_expr(b.rhs.cp());
-                b.op.build_inst_bin(self.builder.ins(), lhs, rhs)
+                let lhs = self.gen_expr(b.lhs.cp())?;
+                let rhs = self.gen_expr(b.rhs.cp())?;
+                Ok(b.op.build_inst_bin(self.builder.ins(), lhs, rhs)?)
             }
-            ast::ExprVariant::Literal(lit) => {
-                let l = match lit {
-                    ast::Literal::Boolean { val } => self.builder.ins().bconst(types::B8, *val),
-                    ast::Literal::Integer { val } => {
-                        let l = val.bit_length();
-                        self.builder
-                            .ins()
-                            .iconst(Type::int(l as u16).unwrap(), Imm64::new(val.into()))
-                    }
-                };
-                todo!()
+
+            ast::ExprVariant::UnaryOp(u) => {
+                // TODO
+                todo!("Implement unary operators")
             }
+
+            ast::ExprVariant::Ident(i) => {
+                // TODO
+                todo!("Implement identifier")
+            }
+
+            ast::ExprVariant::FunctionCall(f) => {
+                // TODO
+                todo!("Implement function calls")
+            }
+
+            ast::ExprVariant::Literal(lit) => match lit {
+                ast::Literal::Boolean { val } => {
+                    let val = self.builder.ins().bconst(types::B8, *val);
+                    let typ = ast::TypeDef::Primitive(ast::PrimitiveType {
+                        var: ast::PrimitiveTypeVar::UnsignedInt,
+                        occupy_bytes: 1,
+                    });
+                    Ok(TypeVal(val, typ))
+                }
+
+                ast::Literal::Integer { val } => {
+                    let l = type_bits(val.bit_length()).unwrap();
+                    let val = self
+                        .builder
+                        .ins()
+                        .iconst(Type::int(l).unwrap(), Imm64::new(val.into()));
+                    let typ = ast::TypeDef::Primitive(ast::PrimitiveType {
+                        var: ast::PrimitiveTypeVar::UnsignedInt,
+                        occupy_bytes: (l / 8) as usize,
+                    });
+                    Ok(TypeVal(val, typ))
+                }
+
+                ast::Literal::Float { val } => {
+                    let val = self.builder.ins().f64const(val.to_f64());
+                    let typ = ast::TypeDef::Primitive(ast::PrimitiveType {
+                        var: ast::PrimitiveTypeVar::Float,
+                        occupy_bytes: 8,
+                    });
+                    Ok(TypeVal(val, typ))
+                }
+
+                ast::Literal::String { val } => {
+                    let data_name = format!("data`{}`{}", self.name, self.dat_cnt);
+                    let data = self.module.declare_data(
+                        &data_name,
+                        cranelift_module::Linkage::Local,
+                        false,
+                        None,
+                    )?;
+                    self.dat_cnt += 1;
+                    let mut data_ctx = DataContext::new();
+                    let str_val: Vec<_> = val.as_bytes().iter().map(|x| *x).collect();
+                    let str_val = std::ffi::CString::new(str_val).unwrap();
+                    let str_val = str_val.into_bytes_with_nul();
+                    let str_val = str_val.into_boxed_slice();
+                    data_ctx.define(str_val);
+                    self.module.define_data(data, &data_ctx)?;
+                    let global = self.module.declare_data_in_func(data, self.builder.func);
+                    let ptr_typ = self.module.isa().pointer_type();
+
+                    let val = self.builder.ins().global_value(ptr_typ, global);
+                    let typ = ast::TypeDef::Ref(ast::RefType {
+                        target: Ptr::new(ast::TypeDef::Primitive(ast::PrimitiveType {
+                            var: ast::PrimitiveTypeVar::UnsignedInt,
+                            occupy_bytes: 1,
+                        })),
+                    });
+                    Ok(TypeVal(val, typ))
+                }
+
+                ast::Literal::Struct { .. } => Err(CompileError::InternalError(
+                    "Structs are not yet supported!".into(),
+                )),
+            },
             _ => todo!("Implement other expression variants"),
         }
     }
@@ -292,10 +407,13 @@ impl ast::OpVar {
         inst_builder: impl InstBuilder<'a>,
         lhs: TypeVal,
         rhs: TypeVal,
-    ) -> TypeVal {
+    ) -> CompileResult<TypeVal> {
         if lhs.1 != rhs.1 {}
         match self {
-            ast::OpVar::Add => inst_builder.iadd(lhs, rhs),
+            ast::OpVar::Add => {
+                todo!()
+                // inst_builder.iadd(lhs, rhs);
+            }
             _ => todo!(),
         }
     }
