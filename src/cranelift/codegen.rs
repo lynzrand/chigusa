@@ -182,7 +182,7 @@ fn type_bits(len: u32) -> Option<u16> {
     }
 }
 
-struct TypeVal(Value, ast::TypeDef);
+struct TypeVal(Value, Ptr<ast::TypeDef>);
 
 struct FnCodegen<'b, T>
 where
@@ -194,7 +194,7 @@ where
     ebb_cnt: u32,
     loc_cnt: u32,
     dat_cnt: u32,
-    loc: IndexMap<String, Variable>,
+    loc: IndexMap<String, (Variable, Ptr<ast::TypeDef>)>,
     builder: frontend::FunctionBuilder<'b>,
     module: &'b mut cranelift_module::Module<T>,
 }
@@ -289,7 +289,7 @@ where
 
     /// Generate implicit conversion for `val` to match `tgt` type
     fn implicit_conv(&mut self, val: TypeVal, tgt: Ptr<ast::TypeDef>) -> CompileResult<TypeVal> {
-        match &val.1 {
+        match &*val.1.borrow() {
             ast::TypeDef::Unit => Err(CompileError::AssignVoid),
             ast::TypeDef::Primitive(p) => {
                 todo!()
@@ -322,8 +322,10 @@ where
             }
 
             ast::ExprVariant::Ident(i) => {
-                // TODO
-                todo!("Implement identifier")
+                let typeval = self.loc.get(&i.name).unwrap();
+                let val = self.builder.use_var(typeval.0);
+                let typ = typeval.1.cp();
+                Ok(TypeVal(val, typ))
             }
 
             ast::ExprVariant::FunctionCall(f) => {
@@ -334,10 +336,10 @@ where
             ast::ExprVariant::Literal(lit) => match lit {
                 ast::Literal::Boolean { val } => {
                     let val = self.builder.ins().bconst(types::B8, *val);
-                    let typ = ast::TypeDef::Primitive(ast::PrimitiveType {
+                    let typ = Ptr::new(ast::TypeDef::Primitive(ast::PrimitiveType {
                         var: ast::PrimitiveTypeVar::UnsignedInt,
                         occupy_bytes: 1,
-                    });
+                    }));
                     Ok(TypeVal(val, typ))
                 }
 
@@ -347,19 +349,19 @@ where
                         .builder
                         .ins()
                         .iconst(Type::int(l).unwrap(), Imm64::new(val.into()));
-                    let typ = ast::TypeDef::Primitive(ast::PrimitiveType {
+                    let typ = Ptr::new(ast::TypeDef::Primitive(ast::PrimitiveType {
                         var: ast::PrimitiveTypeVar::UnsignedInt,
                         occupy_bytes: (l / 8) as usize,
-                    });
+                    }));
                     Ok(TypeVal(val, typ))
                 }
 
                 ast::Literal::Float { val } => {
                     let val = self.builder.ins().f64const(val.to_f64());
-                    let typ = ast::TypeDef::Primitive(ast::PrimitiveType {
+                    let typ = Ptr::new(ast::TypeDef::Primitive(ast::PrimitiveType {
                         var: ast::PrimitiveTypeVar::Float,
                         occupy_bytes: 8,
-                    });
+                    }));
                     Ok(TypeVal(val, typ))
                 }
 
@@ -383,12 +385,12 @@ where
                     let ptr_typ = self.module.isa().pointer_type();
 
                     let val = self.builder.ins().global_value(ptr_typ, global);
-                    let typ = ast::TypeDef::Ref(ast::RefType {
+                    let typ = Ptr::new(ast::TypeDef::Ref(ast::RefType {
                         target: Ptr::new(ast::TypeDef::Primitive(ast::PrimitiveType {
                             var: ast::PrimitiveTypeVar::UnsignedInt,
                             occupy_bytes: 1,
                         })),
-                    });
+                    }));
                     Ok(TypeVal(val, typ))
                 }
 
