@@ -10,7 +10,6 @@ use cranelift_module::{self, Backend, DataContext, Module};
 use frontend::FunctionBuilderContext;
 use frontend::*;
 use indexmap::IndexMap;
-use InstBuilder;
 
 pub struct Codegen<'a, T>
 where
@@ -165,6 +164,8 @@ where
     }
 }
 
+struct TypeVal(Value, ast::TypeDef);
+
 struct FnCodegen<'b, T>
 where
     T: cranelift_module::Backend,
@@ -255,7 +256,11 @@ where
         }
     }
 
-    fn gen_expr(&mut self, expr: Ptr<ast::Expr>) -> Value {
+    fn flatten_typ(&mut self, a: TypeVal,b:TypeVal)->(TypeVal,TypeVal){
+        todo!()
+    }
+
+    fn gen_expr(&mut self, expr: Ptr<ast::Expr>) -> TypeVal {
         let expr = expr.borrow();
         let expr = &*expr;
         match &expr.var {
@@ -265,7 +270,15 @@ where
                 b.op.build_inst_bin(self.builder.ins(), lhs, rhs)
             }
             ast::ExprVariant::Literal(lit) => {
-                //
+                let l = match lit {
+                    ast::Literal::Boolean { val } => self.builder.ins().bconst(types::B8, *val),
+                    ast::Literal::Integer { val } => {
+                        let l = val.bit_length();
+                        self.builder
+                            .ins()
+                            .iconst(Type::int(l as u16).unwrap(), Imm64::new(val.into()))
+                    }
+                };
                 todo!()
             }
             _ => todo!("Implement other expression variants"),
@@ -277,10 +290,10 @@ impl ast::OpVar {
     fn build_inst_bin<'a>(
         &self,
         inst_builder: impl InstBuilder<'a>,
-        lhs: Value,
-        rhs: Value,
-    ) -> Value
-where {
+        lhs: TypeVal,
+        rhs: TypeVal,
+    ) -> TypeVal {
+        if lhs.1 != rhs.1 {}
         match self {
             ast::OpVar::Add => inst_builder.iadd(lhs, rhs),
             _ => todo!(),

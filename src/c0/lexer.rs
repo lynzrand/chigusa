@@ -128,7 +128,8 @@ pub enum Literal {
     Char(char),
     String(String),
     Boolean(bool),
-    Number(ramp::rational::Rational),
+    Integer(ramp::Int),
+    Float(ramp::rational::Rational),
 }
 
 impl Display for Literal {
@@ -138,7 +139,8 @@ impl Display for Literal {
             Char(c) => write!(f, "Char({})", c.escape_debug()),
             String(s) => write!(f, "String(\"{}\")", s.escape_debug()),
             Boolean(b) => write!(f, "Boolean({})", b),
-            Number(i) => write!(f, "Number({})", i),
+            Integer(i) => write!(f, "Integer({})", i),
+            Float(i) => write!(f, "Float({})", i),
         }
     }
 }
@@ -369,6 +371,7 @@ where
         };
 
         let mut number = String::from_str("0").unwrap();
+        let mut is_float = false;
 
         while self
             .iter
@@ -385,6 +388,7 @@ where
         if possibly_double && self.iter.peek().map_or(false, |x| x.1 == '.') {
             // Consume decimal point
             self.iter.next();
+            is_float = true;
 
             while self
                 .iter
@@ -402,6 +406,7 @@ where
             // Consume exponent `e`
             self.iter.next();
             let mut exp = String::new();
+            is_float = true;
 
             match self.iter.peek() {
                 Some((_, '+')) | Some((_, '-')) => exp.push(self.iter.next().unwrap().1),
@@ -429,26 +434,39 @@ where
             Err(e) => return self.skip_error(format!("Error parsing number: {}", e)),
         };
 
-        let (number, denominator) = if exponent >= 0 {
-            let exp = ramp::Int::from(10).pow(exponent as usize);
-            (number * exp, ramp::Int::one())
+        if is_float {
+            let (number, denominator) = if exponent >= 0 {
+                let exp = ramp::Int::from(10).pow(exponent as usize);
+                (number * exp, ramp::Int::one())
+            } else {
+                let exp = ramp::Int::from(10).pow((-exponent) as usize);
+                (number, exp)
+            };
+
+            let end_pos = self.iter.peek().unwrap().0;
+
+            let start = start_pos.index;
+            let end = end_pos.index;
+
+            Token {
+                var: TokenType::Literal(Literal::Float(ramp::rational::Rational::new(
+                    number,
+                    denominator,
+                ))),
+                // src: &self.src[start..end],
+                span: Span::from(start_pos, end_pos),
+            }
         } else {
-            let exp = ramp::Int::from(10).pow((-exponent) as usize);
-            (number, exp)
-        };
+            let end_pos = self.iter.peek().unwrap().0;
 
-        let end_pos = self.iter.peek().unwrap().0;
+            let start = start_pos.index;
+            let end = end_pos.index;
 
-        let start = start_pos.index;
-        let end = end_pos.index;
-
-        Token {
-            var: TokenType::Literal(Literal::Number(ramp::rational::Rational::new(
-                number,
-                denominator,
-            ))),
-            // src: &self.src[start..end],
-            span: Span::from(start_pos, end_pos),
+            Token {
+                var: TokenType::Literal(Literal::Integer(number)),
+                // src: &self.src[start..end],
+                span: Span::from(start_pos, end_pos),
+            }
         }
     }
 

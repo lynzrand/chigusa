@@ -372,7 +372,8 @@ impl fmt::Display for Identifier {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum Literal {
-    Number { val: ramp::rational::Rational },
+    Integer { val: ramp::Int },
+    Float { val: ramp::rational::Rational },
     Struct { typ: TypeDef, fields: Vec<Expr> },
     Boolean { val: bool },
     String { val: String },
@@ -381,7 +382,8 @@ pub enum Literal {
 impl fmt::Display for Literal {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Literal::Number { val } => write!(f, "{}", val),
+            Literal::Integer { val } => write!(f, "{}", val),
+            Literal::Float { val } => write!(f, "{}", val),
             Literal::Struct { typ, fields } => write!(f, "{:?}{{{:?}}}", typ, fields),
             Literal::Boolean { val } => write!(f, "{}", val),
             Literal::String { val } => write!(f, "\"{}\"", val),
@@ -393,10 +395,11 @@ impl From<super::lexer::Literal> for Literal {
     fn from(lit: super::lexer::Literal) -> Self {
         use super::lexer::Literal::*;
         match lit {
-            Number(i) => Literal::Number { val: i },
+            Integer(i) => Literal::Integer { val: i },
+            Float(i) => Literal::Float { val: i },
             String(s) => Literal::String { val: s },
             Boolean(b) => Literal::Boolean { val: b },
-            Char(c) => Literal::Number {
+            Char(c) => Literal::Integer {
                 val: (c as u32).into(),
             },
         }
