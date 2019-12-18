@@ -1,5 +1,7 @@
 use chigusa::c0::lexer;
 use clap;
+use std::fs::*;
+use std::io::{Read, Write};
 use std::path::PathBuf;
 use structopt;
 use structopt::StructOpt;
@@ -17,11 +19,33 @@ fn main() {
     let opt: ParserConfig = ParserConfig::from_args();
     cute_log::init_with_max_level(opt.verbosity).unwrap();
 
-    let vec = lexer::Lexer::new(Box::new(__INPUT_CODE.chars())).into_iter();
+    let mut input = String::new();
+    if let Some(f) = &opt.input_file {
+        std::fs::File::open(f)
+            .expect("File does not exist!")
+            .read_to_string(&mut input)
+            .expect("Failed to read");
+    } else {
+        std::io::stdin()
+            .read_to_string(&mut input)
+            .expect("Failed to read");
+    };
+
+    let vec = lexer::Lexer::new(Box::new(input.chars())).into_iter();
 
     let tree = chigusa::c0::parser::Parser::new(vec).parse();
 
-    println!("{:?}", tree);
+    if let Ok(tree) = tree {
+        if opt.stdout {
+            print!("{:?}", tree);
+        } else {
+            let mut f = File::create(opt.output_file).expect("Failed to create output file");
+            write!(f, "{:#?}", tree).expect("Failed to write file");
+        }
+    } else {
+        let e = tree.err().unwrap();
+        log::error!("{:#?}", e);
+    }
 }
 
 fn parse_verbosity(input: &str) -> Result<log::LevelFilter, &'static str> {

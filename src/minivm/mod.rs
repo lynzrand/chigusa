@@ -72,6 +72,6 @@ pub enum Constant {
 pub struct O0 {
     magic: u32,
     version: u32,
-    constants: Vec<_>,
-    Functions: Vec<_>,
+    constants: Vec<Constant>,
+    Functions: Vec<FnInfo>,
 }

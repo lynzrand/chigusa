@@ -130,6 +130,7 @@ pub enum Literal {
     Boolean(bool),
     Integer(ramp::Int),
     Float(ramp::rational::Rational),
+    _Dummy,
 }
 
 impl Display for Literal {
@@ -141,6 +142,7 @@ impl Display for Literal {
             Boolean(b) => write!(f, "Boolean({})", b),
             Integer(i) => write!(f, "Integer({})", i),
             Float(i) => write!(f, "Float({})", i),
+            _Dummy => Ok(()),
         }
     }
 }
@@ -360,9 +362,18 @@ where
             // this digit is '0'. consume and advance
             self.iter.next();
             match self.iter.peek().map_or('_', |i| i.1) {
-                'b' => (2, false),
-                '0' | 'o' => (8, false),
-                'x' => (16, false),
+                'b' => {
+                    self.iter.next();
+                    (2, false)
+                }
+                '0' | 'o' => {
+                    self.iter.next();
+                    (8, false)
+                }
+                'x' => {
+                    self.iter.next();
+                    (16, false)
+                }
                 '1'..='9' => (10, true),
                 _ => (10, true),
             }

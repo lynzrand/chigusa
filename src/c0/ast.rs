@@ -11,14 +11,14 @@ use once_cell::{self, sync::*};
 use regex;
 use std::cell::{Ref, RefCell, RefMut};
 use std::collections::HashMap;
-use std::fmt;
+use std::fmt::{self, Display, Formatter};
 use std::iter::Iterator;
 use std::ops::{Deref, DerefMut};
 use std::rc::{Rc, Weak};
 
 pub type TypeIdent = u64;
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Eq, PartialEq)]
 pub struct Program {
     pub scope: Ptr<Scope>,
     pub stmts: Vec<Stmt>,
@@ -26,10 +26,32 @@ pub struct Program {
     // pub types: Vec<TypeDef>
 }
 
-#[derive(Debug, Eq, PartialEq)]
+impl fmt::Debug for Program {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Program")
+            .field("scope", &*self.scope.borrow())
+            .field("stmts", &self.stmts)
+            .finish()
+    }
+}
+
+#[derive(Eq, PartialEq)]
 pub enum SymbolDef {
     Typ { def: Ptr<TypeDef> },
     Var { typ: Ptr<TypeDef>, is_const: bool },
+}
+
+impl fmt::Debug for SymbolDef {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            SymbolDef::Typ { def } => f.debug_tuple("Type").field(&*def.borrow()).finish(),
+            SymbolDef::Var { typ, is_const } => f
+                .debug_tuple("Var")
+                .field(&*typ.borrow())
+                .field(is_const)
+                .finish(),
+        }
+    }
 }
 
 impl SymbolDef {
@@ -155,7 +177,7 @@ impl fmt::Debug for Scope {
 static ident_regex: Lazy<regex::Regex> =
     Lazy::new(|| regex::Regex::new("^[_a-zA-Z][_a-zA-Z0-9]*$").unwrap());
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub enum TypeDef {
     /// A primitive type. Either an integer or a IEEE-754 floating point
     ///
@@ -227,6 +249,53 @@ impl TypeDef {
     // }
 }
 
+impl fmt::Debug for TypeDef {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            TypeDef::Primitive(p) => {
+                if f.alternate() {
+                    write!(f, "{:#?}", p)
+                } else {
+                    write!(f, "{:?}", p)
+                }
+            }
+            TypeDef::Array(a) => {
+                if f.alternate() {
+                    write!(f, "{:#?}", a)
+                } else {
+                    write!(f, "{:?}", a)
+                }
+            }
+            TypeDef::Function(p) => {
+                if f.alternate() {
+                    write!(f, "{:#?}", p)
+                } else {
+                    write!(f, "{:?}", p)
+                }
+            }
+            TypeDef::NamedType(p) => write!(f, "Type({})", p),
+            TypeDef::Ref(p) => {
+                if f.alternate() {
+                    write!(f, "{:#?}", p)
+                } else {
+                    write!(f, "{:?}", p)
+                }
+            }
+            TypeDef::Struct(p) => {
+                if f.alternate() {
+                    write!(f, "{:#?}", p)
+                } else {
+                    write!(f, "{:?}", p)
+                }
+            }
+            TypeDef::TypeErr => write!(f, "Error type"),
+            TypeDef::Unit => write!(f, "Void"),
+            TypeDef::Unknown => write!(f, "Unknown"),
+            TypeDef::VariableArgs(_p) => write!(f, "VA_ARGS"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum PrimitiveTypeVar {
     SignedInt,
@@ -272,7 +341,7 @@ pub struct VarDef {
     pub typ: Ptr<TypeDef>,
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct Stmt {
     pub var: StmtVariant,
     pub span: Span,
@@ -284,7 +353,17 @@ impl AstNode for Stmt {
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+impl fmt::Debug for Stmt {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        if f.alternate() {
+            write!(f, "{:#?}", self.var)
+        } else {
+            write!(f, "{:?}", self.var)
+        }
+    }
+}
+
+#[derive(Eq, PartialEq, Clone)]
 pub enum StmtVariant {
     If(IfConditional),
     While(WhileConditional),
@@ -298,10 +377,48 @@ pub enum StmtVariant {
     Empty,
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+impl fmt::Debug for StmtVariant {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        if f.alternate() {
+            match self {
+                StmtVariant::If(x) => write!(f, "{:#?}", x),
+                StmtVariant::While(x) => write!(f, "{:#?}", x),
+                StmtVariant::Block(x) => write!(f, "{:#?}", x),
+                StmtVariant::Expr(x) => write!(f, "{:#?}", &*x.borrow()),
+                StmtVariant::ManyExpr(x) => write!(f, "{:#?}", x),
+                StmtVariant::Return(x) => write!(f, "{:#?}", x),
+                StmtVariant::Break => write!(f, "Break"),
+                StmtVariant::Empty => write!(f, "Empty"),
+            }
+        } else {
+            match self {
+                StmtVariant::If(x) => write!(f, "{:?}", x),
+                StmtVariant::While(x) => write!(f, "{:?}", x),
+                StmtVariant::Block(x) => write!(f, "{:?}", x),
+                StmtVariant::Expr(x) => write!(f, "{:?}", &*x.borrow()),
+                StmtVariant::ManyExpr(x) => write!(f, "{:?}", x),
+                StmtVariant::Return(x) => write!(f, "{:?}", x),
+                StmtVariant::Break => write!(f, "Break"),
+                StmtVariant::Empty => write!(f, "Empty"),
+            }
+        }
+    }
+}
+
+#[derive(Clone, Eq, PartialEq)]
 pub struct Expr {
     pub var: ExprVariant,
     pub span: Span,
+}
+
+impl fmt::Debug for Expr {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        if f.alternate() {
+            write!(f, "{:#?}", self.var)
+        } else {
+            write!(f, "{:?}", self.var)
+        }
+    }
 }
 
 impl fmt::Display for Expr {
@@ -316,7 +433,7 @@ impl AstNode for Expr {
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub enum ExprVariant {
     Ident(Identifier),
     Literal(Literal),
@@ -345,6 +462,21 @@ pub enum ExprVariant {
 }
 
 impl fmt::Display for ExprVariant {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ExprVariant::Ident(i) => write!(f, "{}", i),
+            ExprVariant::Literal(i) => write!(f, "{}", i),
+            ExprVariant::TypeConversion(i) => write!(f, "{}", i),
+            ExprVariant::UnaryOp(i) => write!(f, "{}", i),
+            ExprVariant::BinaryOp(i) => write!(f, "{}", i),
+            ExprVariant::FunctionCall(i) => write!(f, "{}", i),
+            ExprVariant::StructChild(i) => write!(f, "{}", i),
+            ExprVariant::ArrayChild(i) => write!(f, "{}", i),
+        }
+    }
+}
+
+impl fmt::Debug for ExprVariant {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             ExprVariant::Ident(i) => write!(f, "{}", i),
@@ -402,6 +534,7 @@ impl From<super::lexer::Literal> for Literal {
             Char(c) => Literal::Integer {
                 val: (c as u32).into(),
             },
+            _Dummy => panic!("Dummy literal cannot be used!"),
         }
     }
 }
@@ -536,6 +669,8 @@ pub enum OpVar {
     // Unary
     /// `-`, Negate
     Neg,
+    /// `+`, Positive (no operation)
+    Pos,
     /// `!`, Boolean Inverse
     Inv,
     /// `~`, Bit Inverse

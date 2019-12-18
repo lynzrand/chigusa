@@ -154,6 +154,16 @@ where
         // Declaration of `int`: i32
         scope
             .insert_def(
+                "void",
+                SymbolDef::Typ {
+                    def: Ptr::new(TypeDef::Unit),
+                },
+            )
+            .expect("Failed to inject primitive type `int`");
+
+        // Declaration of `int`: i32
+        scope
+            .insert_def(
                 "int",
                 SymbolDef::Typ {
                     def: Ptr::new(TypeDef::Primitive(PrimitiveType {
@@ -205,6 +215,22 @@ where
                 },
             )
             .expect("Failed to inject primitive type `char`");
+
+        // Declaration of `print` - print(__VA_ARGS__)
+        scope
+            .insert_def(
+                "scan",
+                SymbolDef::Var {
+                    typ: Ptr::new(TypeDef::Function(FunctionType {
+                        return_type: Ptr::new(TypeDef::Unit),
+                        params: vec![Ptr::new(TypeDef::VariableArgs(None))],
+                        body: None,
+                        is_extern: true,
+                    })),
+                    is_const: false,
+                },
+            )
+            .expect("Failed to inject primitive type `char`");
     }
 
     fn p_program(&mut self) -> ParseResult<Program> {
@@ -230,6 +256,24 @@ where
             TokenType::Identifier(..) => self.p_decl_or_expr(scope),
             TokenType::If => self.p_if_stmt(scope),
             TokenType::While => self.p_while_stmt(scope),
+            TokenType::Return => {
+                let ret = self.bump();
+                if self.expect(&TokenType::Semicolon) {
+                    Ok(Stmt {
+                        var: StmtVariant::Return(None),
+                        span: ret.span,
+                    })
+                } else {
+                    let expr =
+                        self.p_base_expr(&[TokenType::Semicolon, TokenType::RCurlyBrace], scope)?;
+                    let span = expr.borrow().span();
+                    self.expect_report(&TokenType::Semicolon);
+                    Ok(Stmt {
+                        var: StmtVariant::Return(Some(expr)),
+                        span,
+                    })
+                }
+            }
             // TokenType::Do => todo!("Parse do-while loop"),
             // TokenType::For => todo!("Parse for loop"),
             TokenType::Const => self.p_decl_stmt(scope),
@@ -363,7 +407,7 @@ where
         let mut expr_vec = Vec::new();
         let mut inner_scope = Scope::new_with_parent(scope.cp());
 
-        while self.expect(&TokenType::Comma) {
+        if !self.check(&TokenType::RParenthesis) {
             let param_type = self.p_type_name(scope.cp())?;
             self.check_report(&TokenType::Identifier(String::new()))?;
             let ident = self.bump();
@@ -376,8 +420,21 @@ where
                 },
             )?;
             expr_vec.push((param_type, ident_str.to_owned()));
+            while self.expect(&TokenType::Comma) {
+                let param_type = self.p_type_name(scope.cp())?;
+                self.check_report(&TokenType::Identifier(String::new()))?;
+                let ident = self.bump();
+                let ident_str = ident.get_ident().unwrap();
+                inner_scope.insert_def(
+                    ident_str,
+                    SymbolDef::Var {
+                        typ: param_type.cp(),
+                        is_const: false,
+                    },
+                )?;
+                expr_vec.push((param_type, ident_str.to_owned()));
+            }
         }
-
         let inner_scope = Ptr::new(inner_scope);
 
         log::info!(
@@ -603,20 +660,27 @@ where
 
         // Op should be self.cur
         if let Some(op) = self.cur.var.into_op(false, false) {
-            if !close_delim.contains(&self.cur.var)
+            let mut lhs = lhs;
+            let mut op = op;
+            while !close_delim.contains(&self.cur.var)
                 && ((op.is_left_associative() && op.priority() > expect_prec)
                     || (op.is_right_associative() && op.priority() >= expect_prec))
             {
                 self.bump();
                 let rhs = self.p_binary_op(None, op.priority(), close_delim, scope.cp())?;
                 let span = { lhs.borrow().span() + rhs.borrow().span() };
-                Ok(Ptr::new(Expr {
+                lhs = Ptr::new(Expr {
                     var: ExprVariant::BinaryOp(BinaryOp { lhs, rhs, op }),
                     span,
-                }))
-            } else {
-                Ok(lhs)
+                });
+
+                if let Some(op_) = self.cur.var.into_op(false, false) {
+                    op = op_;
+                } else {
+                    break;
+                }
             }
+            Ok(lhs)
         } else {
             Ok(lhs)
         }
@@ -687,15 +751,13 @@ where
     /// An item is either a expression wrapped in parentheses, or an identifier,
     /// or a literal value.
     fn p_item(&mut self, scope: Ptr<Scope>) -> ParseResult<Ptr<Expr>> {
-        if self.cur.var == TokenType::LParenthesis {
+        if self.expect(&TokenType::LParenthesis) {
             // Start a new parsing cycle!
             let expr = self.p_base_expr(&[TokenType::RParenthesis], scope);
             self.expect_report(&TokenType::RParenthesis)?;
             expr
         } else {
-            if self.check(&TokenType::Literal(unsafe {
-                std::mem::MaybeUninit::uninit().assume_init()
-            })) {
+            if self.check(&TokenType::Literal(super::lexer::Literal::_Dummy)) {
                 self.p_literal()
             } else if self.check(&TokenType::Identifier(String::new())) {
                 self.p_ident_or_fn_call(scope)
@@ -703,9 +765,7 @@ where
                 Err(parse_err(
                     ParseErrVariant::ExpectTokenOneOf(
                         vec![
-                            TokenType::Literal(unsafe {
-                                std::mem::MaybeUninit::uninit().assume_init()
-                            }),
+                            TokenType::Literal(super::lexer::Literal::_Dummy),
                             TokenType::Identifier(String::new()),
                         ],
                         self.cur.var.clone(),
@@ -800,6 +860,7 @@ impl TokenType {
         if unary_prefix {
             match self {
                 Minus => Some(Neg),
+                Plus => Some(Pos),
                 Multiply => Some(Der),
                 BinaryAnd => Some(Ref),
                 Increase => Some(Inb),
@@ -855,7 +916,7 @@ impl Operator for OpVar {
             _Dum => 0,
             _Lpr | _Rpr => 2,
             _Com => 8,
-            _Asn | _Csn => 10,
+            _Asn | _Csn => 0,
             Eq | Neq => 13,
             Gt | Lt | Gte | Lte => 14,
             Or => 15,
@@ -865,14 +926,14 @@ impl Operator for OpVar {
             Ban => 19,
             Add | Sub => 20,
             Mul | Div => 30,
-            Neg | Inv | Bin | Ref | Der | Ina | Inb | Dea | Deb => 40,
+            Neg | Pos | Inv | Bin | Ref | Der | Ina | Inb | Dea | Deb => 40,
         }
     }
 
     fn is_unary(&self) -> bool {
         use OpVar::*;
         match self {
-            Neg | Inv | Bin | Ref | Der | Ina | Inb | Dea | Deb => true,
+            Neg | Pos | Inv | Bin | Ref | Der | Ina | Inb | Dea | Deb => true,
             _ => false,
         }
     }
@@ -880,7 +941,7 @@ impl Operator for OpVar {
     fn is_right_associative(&self) -> bool {
         use OpVar::*;
         match self {
-            Neg | Inv | Bin | Ref | Der | _Asn | _Lpr | _Rpr => true,
+            Neg | Pos | Inv | Bin | Ref | Der | _Asn | _Lpr | _Rpr => true,
             _ => false,
         }
     }
