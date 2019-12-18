@@ -5,11 +5,7 @@
 /// compile C0.
 pub mod c0;
 
-/// Middle intermediate representation.
-///
-/// This is where type checking happens. This module compiles AST into MIR and
-/// checks types and other constraints.
-pub mod mir;
+pub mod minivm;
 
 /// Kurumi is a simple virtual machine for this project.
 // #[cfg(kurumi)]
