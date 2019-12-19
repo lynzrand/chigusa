@@ -369,6 +369,8 @@ pub enum StmtVariant {
     While(WhileConditional),
     Block(Block),
     Expr(Ptr<Expr>),
+    Print(Vec<Ptr<Expr>>),
+    Scan(Identifier),
     // TODO: Workaround for declaration and similar statements that results
     // in multiple expressions
     ManyExpr(Vec<Ptr<Expr>>),
@@ -384,6 +386,12 @@ impl fmt::Debug for StmtVariant {
                 StmtVariant::If(x) => write!(f, "{:#?}", x),
                 StmtVariant::While(x) => write!(f, "{:#?}", x),
                 StmtVariant::Block(x) => write!(f, "{:#?}", x),
+                StmtVariant::Print(x) => {
+                    write!(f, "Print(")?;
+                    f.debug_list().entries(x).finish()?;
+                    write!(f, ")")
+                }
+                StmtVariant::Scan(x) => write!(f, "Scan({})", x),
                 StmtVariant::Expr(x) => write!(f, "{:#?}", &*x.borrow()),
                 StmtVariant::ManyExpr(x) => write!(f, "{:#?}", x),
                 StmtVariant::Return(x) => write!(f, "{:#?}", x),
@@ -395,6 +403,12 @@ impl fmt::Debug for StmtVariant {
                 StmtVariant::If(x) => write!(f, "{:?}", x),
                 StmtVariant::While(x) => write!(f, "{:?}", x),
                 StmtVariant::Block(x) => write!(f, "{:?}", x),
+                StmtVariant::Print(x) => {
+                    write!(f, "Print(")?;
+                    f.debug_list().entries(x).finish()?;
+                    write!(f, ")")
+                }
+                StmtVariant::Scan(x) => write!(f, "Scan({})", x),
                 StmtVariant::Expr(x) => write!(f, "{:?}", &*x.borrow()),
                 StmtVariant::ManyExpr(x) => write!(f, "{:?}", x),
                 StmtVariant::Return(x) => write!(f, "{:?}", x),

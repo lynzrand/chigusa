@@ -11,6 +11,7 @@ pub mod minivm;
 // #[cfg(kurumi)]
 // pub mod kurumi;
 
+#[cfg(cranelift_codegen)]
 /// x86 codegen using Cranelift
 pub mod cranelift;
 

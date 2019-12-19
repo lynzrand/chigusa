@@ -26,6 +26,8 @@ pub enum TokenType {
     Else,
     While,
     Return,
+    Print,
+    Scan,
 
     // Operators
     Semicolon,
@@ -80,6 +82,8 @@ impl Display for TokenType {
             Else => write!(f, "Else"),
             While => write!(f, "While"),
             Return => write!(f, "Return"),
+            Print => write!(f, "Print"),
+            Scan => write!(f, "Scan"),
 
             Semicolon => write!(f, "';'"),
             Minus => write!(f, "'-'"),
@@ -569,6 +573,8 @@ where
             "while" => TokenType::While,
             "return" => TokenType::Return,
             "const" => TokenType::Const,
+            "print" => TokenType::Print,
+            "scan" => TokenType::Scan,
             "as" => TokenType::As,
             "true" => TokenType::Literal(Literal::Boolean(true)),
             "false" => TokenType::Literal(Literal::Boolean(false)),
