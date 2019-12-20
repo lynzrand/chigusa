@@ -256,6 +256,8 @@ where
             TokenType::Identifier(..) => self.p_decl_or_expr(scope),
             TokenType::If => self.p_if_stmt(scope),
             TokenType::While => self.p_while_stmt(scope),
+            TokenType::Scan => self.p_scan_stmt(scope),
+            TokenType::Print => self.p_print_stmt(scope),
             TokenType::Return => {
                 let ret = self.bump();
                 if self.expect(&TokenType::Semicolon) {
@@ -607,6 +609,53 @@ where
         })
     }
 
+    fn p_print_stmt(&mut self, scope: Ptr<Scope>) -> ParseResult<Stmt> {
+        let mut span = self.cur.span;
+        self.expect_report(&TokenType::Print)?;
+        self.expect_report(&TokenType::LParenthesis)?;
+
+        let mut exprs = Vec::new();
+
+        {
+            // Cannot have an empty print statement
+            let first_expr =
+                self.p_base_expr(&[TokenType::RParenthesis, TokenType::Comma], scope.cp())?;
+            span = span + first_expr.borrow().span();
+            exprs.push(first_expr);
+        }
+
+        while !self.expect(&TokenType::RParenthesis) {
+            self.expect_report(&TokenType::Comma)?;
+            let expr =
+                self.p_base_expr(&[TokenType::RParenthesis, TokenType::Comma], scope.cp())?;
+            span = span + expr.borrow().span();
+            exprs.push(expr);
+        }
+        self.expect_report(&TokenType::Semicolon)?;
+
+        Ok(Stmt {
+            var: StmtVariant::Print(exprs),
+            span,
+        })
+    }
+
+    fn p_scan_stmt(&mut self, scope: Ptr<Scope>) -> ParseResult<Stmt> {
+        let span = self.cur.span;
+        self.expect_report(&TokenType::Scan)?;
+        self.expect_report(&TokenType::LParenthesis)?;
+        self.check_report(&TokenType::Identifier(String::new()))?;
+        let ident = self.bump();
+        let ident = ident.get_ident().unwrap().to_owned();
+        let ident = Identifier { name: ident };
+        self.expect_report(&TokenType::RParenthesis)?;
+        let span = span + self.cur.span;
+        self.expect_report(&TokenType::Semicolon)?;
+        Ok(Stmt {
+            var: StmtVariant::Scan(ident),
+            span,
+        })
+    }
+
     fn p_expr_stmt(&mut self, scope: Ptr<Scope>) -> ParseResult<Stmt> {
         // TODO: Subject to change
         let expr = self.p_base_expr(
@@ -682,7 +731,17 @@ where
             }
             Ok(lhs)
         } else {
-            Ok(lhs)
+            if close_delim.contains(&self.cur.var) {
+                Ok(lhs)
+            } else {
+                Err(parse_err(
+                    ParseErrVariant::UnexpectedTokenMsg {
+                        typ: self.cur.var.clone(),
+                        msg: "Token cannot be here in an expression",
+                    },
+                    self.cur.span,
+                ))
+            }
         }
     }
 
