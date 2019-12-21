@@ -2,37 +2,61 @@ use super::err::*;
 use super::*;
 use crate::c0::ast::{self, *};
 use crate::prelude::*;
-use indexmap::IndexMap;
+use indexmap::{map::Entry, IndexMap};
 
 struct Data {
     typ: Ptr<ast::TypeDef>,
-    init_val: Option<Vec<u8>>,
-    offset: u16,
+    init_val: Option<Constant>,
+    is_const: bool,
 }
 
 /// A sink of global data
 struct DataSink {
-    map: IndexMap<String, Vec<u8>>,
+    map: IndexMap<String, Data>,
 }
 
 impl DataSink {
     pub fn new() -> DataSink {
         DataSink {
             map: IndexMap::new(),
+            // max_offset:0
         }
+    }
+
+    pub fn put_data(&mut self, name: &str, val: Data) -> Option<u16> {
+        if self.map.len() < u16::max_value() as usize {
+            if self.map.contains_key(name) {
+                None
+            } else {
+                let idx = self.map.insert_full(name.into(), val).0 as u16;
+                Some(idx)
+            }
+        } else {
+            None
+        }
+    }
+
+    pub fn get_offset(&self, name: &str) -> Option<u16> {
+        self.map.get_full(name).map(|x| x.0 as u16)
+    }
+
+    pub fn get_data(&self, name: &str) -> Option<&Data> {
+        self.map.get(name)
     }
 }
 
 struct GlobalData {
-    glob_var: DataSink,
-    glob_const: DataSink,
+    vars: DataSink,
+    consts: DataSink,
+    fns: IndexMap<String, ast::FunctionType>,
 }
 
 impl GlobalData {
     pub fn new() -> GlobalData {
         GlobalData {
-            glob_var: DataSink::new(),
-            glob_const: DataSink::new(),
+            vars: DataSink::new(),
+            consts: DataSink::new(),
+            fns: IndexMap::new(),
         }
     }
 }
@@ -40,20 +64,24 @@ impl GlobalData {
 pub type Type = Ptr<ast::TypeDef>;
 
 /// An opaque sink of instructions
-struct InstSink(Vec<Ins>);
+struct InstSink(Vec<Inst>);
 
 impl InstSink {
     pub fn new() -> InstSink {
         InstSink(Vec::new())
     }
 
-    pub fn inner(&self) -> &Vec<Ins> {
+    pub fn inner(&self) -> &Vec<Inst> {
         &self.0
     }
 
     /// Append all instruction from the other InstSink
     pub fn append_all(&mut self, other: &mut InstSink) {
         self.0.append(&mut other.0);
+    }
+
+    pub fn push(&mut self, inst: Inst) {
+        self.0.push(inst)
     }
 }
 
@@ -72,7 +100,9 @@ impl<'a> Codegen<'a> {
 
     pub fn compile(&mut self) {}
 
-    pub fn compile_fn(&mut self, func: &ast::FunctionType, name: &str) -> CompileResult<()> {
+    fn add_glob(&mut self) {}
+
+    fn compile_fn(&mut self, func: &ast::FunctionType, name: &str) -> CompileResult<()> {
         // TODO: Add signature extractor
 
         // let sig = FnCodegen::extract_sig(func, self);
@@ -138,7 +168,7 @@ fn type_bits(len: u32) -> Option<u16> {
     }
 }
 
-struct FnCodegen<'b> {
+pub(super) struct FnCodegen<'b> {
     f: &'b ast::FunctionType,
     name: &'b str,
     // ctx: &'b mut Codegen<'a, T>,
@@ -146,8 +176,12 @@ struct FnCodegen<'b> {
     loc_cnt: u16,
     data: &'b mut GlobalData,
     loc: IndexMap<String, Data>,
+
+    /// Instruction sinks; The one at the top of the stack is the one currently used
+    inst: Vec<InstSink>,
 }
 
+/// Implementation for larger function, statement and expression structures
 impl<'b> FnCodegen<'b> {
     pub fn new<'a>(
         f: &'b ast::FunctionType,
@@ -161,8 +195,15 @@ impl<'b> FnCodegen<'b> {
             loc_cnt: 0,
             data: &mut ctx.glob,
             loc: IndexMap::new(),
-            // module: &mut ctx.module,
+            // module: &mut ctx.module,,
+            inst: vec![InstSink::new()],
         }
+    }
+
+    pub(super) fn inst_sink(&mut self) -> &mut InstSink {
+        self.inst
+            .last_mut()
+            .expect("A function generator must have at least one instruction sink")
     }
 
     pub fn gen(&mut self) {
@@ -181,7 +222,7 @@ impl<'b> FnCodegen<'b> {
         }
     }
 
-    fn add_local(
+    pub(super) fn add_local(
         &mut self,
         name: &str,
         var: &ast::SymbolDef,
@@ -208,15 +249,14 @@ impl<'b> FnCodegen<'b> {
         }
     }
 
-    fn gen_stmt(&mut self, stmt: &ast::Stmt) {
+    fn gen_stmt(&mut self, stmt: &ast::Stmt) -> CompileResult<()> {
         match &stmt.var {
-            ast::StmtVariant::Expr(e) => {
-                self.gen_expr(e.cp());
-            }
+            ast::StmtVariant::Expr(e) => self.gen_expr(e.cp()).map(|_| ()),
             ast::StmtVariant::ManyExpr(e) => {
                 for e in e {
-                    self.gen_expr(e.cp());
+                    self.gen_expr(e.cp())?;
                 }
+                Ok(())
             }
             ast::StmtVariant::Return(e) => todo!("Generate code for return"),
             ast::StmtVariant::Block(e) => todo!("Generate code for block"),
@@ -225,31 +265,7 @@ impl<'b> FnCodegen<'b> {
             ast::StmtVariant::Break => todo!("Generate code for return"),
             ast::StmtVariant::If(e) => todo!("Generate code for return`"),
             ast::StmtVariant::While(e) => todo!("Generate code for ret`urn"),
-            ast::StmtVariant::Empty => (),
-        }
-    }
-
-    /// Generate implicit conversion for `a` and `b` to match their types.
-    fn flatten_typ(&mut self, a: Type, b: Type) -> (Type, Type) {
-        todo!()
-    }
-
-    /// Generate implicit conversion for `val` to match `tgt` type
-    fn implicit_conv(&mut self, val: Type, tgt: Ptr<ast::TypeDef>) -> CompileResult<Type> {
-        match &*val.borrow() {
-            ast::TypeDef::Unit => Err(CompileError::AssignVoid),
-            ast::TypeDef::Primitive(p) => {
-                todo!()
-                //
-            }
-            ast::TypeDef::Ref(r) => {
-                todo!()
-                //
-            }
-            ast::TypeDef::NamedType(..) => Err(CompileError::InternalError(
-                "Named types shouldn't appear in type calculation".into(),
-            )),
-            _ => Err(CompileError::UnsupportedType),
+            ast::StmtVariant::Empty => Ok(()),
         }
     }
 
@@ -362,6 +378,28 @@ impl ast::OpVar {
                 // inst_builder.iadd(lhs, rhs);
             }
             _ => todo!(),
+        }
+    }
+}
+
+impl ast::TypeDef {
+    /// Calculate the bytes one type occupy
+    ///
+    /// We don't have Sized trait, but we can still calculate the bytes types occupy
+    pub fn occupy_slots(&self) -> Option<u16> {
+        match self {
+            ast::TypeDef::Unit => Some(0),
+            ast::TypeDef::Ref(..) => Some(1),
+            ast::TypeDef::Array(a) => a.length.and_then(|l| {
+                (a.target
+                    .borrow()
+                    .occupy_slots()
+                    .map(|s| (s * l as u16) as u16))
+            }),
+            ast::TypeDef::Function(..) => None,
+            ast::TypeDef::NamedType(..) => None,
+            ast::TypeDef::Primitive(p) => Some(((p.occupy_bytes + 3) / 4) as u16),
+            _ => None,
         }
     }
 }

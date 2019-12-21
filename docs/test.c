@@ -47,6 +47,8 @@ void testExpression() {
   int a, b = 5;
   a = (1 + 2 - 3);
   a = b;
+
+  // a b;
   a = 12345;
   // a = testVariableA();
   a = -(1 + 2 - 3);

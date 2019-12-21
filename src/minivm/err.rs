@@ -1,3 +1,5 @@
+use crate::c0::ast;
+use crate::prelude::*;
 use failure::*;
 use std::fmt;
 
@@ -6,6 +8,7 @@ pub enum CompileError {
     Unknown,
     AssignVoid,
     UnsupportedType,
+    RequireSized(String),
     Error(String),
     InternalError(String),
 }

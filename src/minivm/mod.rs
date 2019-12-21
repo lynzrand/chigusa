@@ -1,6 +1,9 @@
 pub mod codegen;
 pub mod err;
+mod instgen;
 
+pub use codegen::*;
+pub use err::*;
 use std::io::{Read, Write};
 
 trait Readable {
@@ -11,7 +14,7 @@ trait Writable {
     fn write_to(&self, w: &mut impl Write) -> std::io::Result<()>;
 }
 
-pub enum Ins {
+pub enum Inst {
     /// No-op
     Nop,
 
@@ -150,9 +153,9 @@ pub enum Ins {
     CScan,
 }
 
-impl Ins {
+impl Inst {
     pub fn opcode(&self) -> u8 {
-        use Ins::*;
+        use Inst::*;
         match self {
             Nop => 0x00,
             CPush(..) => 0x01,
@@ -217,10 +220,10 @@ impl Ins {
     }
 }
 
-impl Writable for Ins {
+impl Writable for Inst {
     fn write_to(&self, w: &mut impl Write) -> std::io::Result<()> {
         w.write_all(&self.opcode().to_be_bytes())?;
-        use Ins::*;
+        use Inst::*;
         match self {
             CPush(c) => c.write_to(w),
             IPush(i) => i.write_to(w),
@@ -252,7 +255,7 @@ pub struct FnInfo {
     name_idx: u16,
     param_siz: u16,
     lvl: u16,
-    ins: Vec<Ins>,
+    ins: Vec<Inst>,
 }
 
 impl Writable for FnInfo {
@@ -265,7 +268,7 @@ impl Writable for FnInfo {
 }
 
 pub struct StartCodeInfo {
-    ins: Vec<Ins>,
+    ins: Vec<Inst>,
 }
 
 impl Writable for StartCodeInfo {
