@@ -8,7 +8,6 @@ use std::{
     fmt::Display,
     fmt::Formatter,
     hash::Hash,
-    ops::Try,
     rc::{Rc, Weak},
     string::String,
 };

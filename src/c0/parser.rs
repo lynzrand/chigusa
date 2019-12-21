@@ -8,7 +8,6 @@ use std::iter::Iterator;
 use std::iter::Peekable;
 
 use either::Either;
-use LoopCtrl::*;
 
 pub trait IntoParser<T>
 where
