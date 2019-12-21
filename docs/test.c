@@ -25,15 +25,15 @@ void testStatement(int p1, int p2) {
   
   while (p1 >= 1) {
     int a2 = 3;
-    p1 = p1 - a2;
+    p1 = (double)p1 - a2;
   }
-
+  const int c;
   return;
 
   print(p1);
   print(p1, p1 + p2);
   print(1, p2 + 2 * 3, "hello");
-  print("hello2");
+  print("hello\x20World!\n");
 
   scan(p1);
 

@@ -58,6 +58,7 @@ pub enum ParseErrVariant {
     UnexpectedToken(TokenType),
     UnexpectedTokenMsg { typ: TokenType, msg: &'static str },
     NoConstFns,
+    ConstTypeNeedExplicitInitialization,
 
     CannotFindIdent(String),
     CannotFindType(String),

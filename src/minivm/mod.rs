@@ -14,6 +14,7 @@ trait Writable {
     fn write_to(&self, w: &mut impl Write) -> std::io::Result<()>;
 }
 
+#[derive(Copy, Clone, Eq, PartialEq)]
 pub enum Inst {
     /// No-op
     Nop,
@@ -151,6 +152,14 @@ pub enum Inst {
     DScan,
     /// () -> Scan u8
     CScan,
+    //
+    //==== Compiler-use instructions
+    _Gt,
+    _Lt,
+    _Eq,
+    _Gte,
+    _Lte,
+    _Neq,
 }
 
 impl Inst {
@@ -216,6 +225,7 @@ impl Inst {
             IScan => 0xb0,
             DScan => 0xb1,
             CScan => 0xb2,
+            _ => panic!("Compiler-used instructions should not appear in binary files"),
         }
     }
 }

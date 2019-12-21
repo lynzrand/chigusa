@@ -64,7 +64,7 @@ impl GlobalData {
 pub type Type = Ptr<ast::TypeDef>;
 
 /// An opaque sink of instructions
-struct InstSink(Vec<Inst>);
+pub(super) struct InstSink(Vec<Inst>);
 
 impl InstSink {
     pub fn new() -> InstSink {
@@ -82,6 +82,21 @@ impl InstSink {
 
     pub fn push(&mut self, inst: Inst) {
         self.0.push(inst)
+    }
+
+    pub fn push_many(&mut self, inst: &[Inst]) {
+        for i in inst {
+            self.0.push(*i)
+        }
+    }
+
+    pub fn reset(&mut self) {
+        self.0.clear()
+    }
+
+    pub fn reset_self(mut self) -> Self {
+        self.reset();
+        self
     }
 }
 
@@ -168,7 +183,48 @@ fn type_bits(len: u32) -> Option<u16> {
     }
 }
 
-pub(super) struct FnCodegen<'b> {
+pub struct DeqPool<'a, T> {
+    pool: std::collections::VecDeque<T>,
+    new_item: &'a dyn Fn() -> T,
+    reset_item: Option<&'a dyn Fn(&mut T)>,
+}
+
+impl<'a, T> DeqPool<'a, T> {
+    pub fn new(new_item: &'a dyn Fn() -> T) -> DeqPool<'a, T> {
+        Self {
+            pool: std::collections::VecDeque::new(),
+            new_item,
+            reset_item: None,
+        }
+    }
+
+    pub fn new_with_reset(
+        new_item: &'a dyn Fn() -> T,
+        reset_item: &'a dyn Fn(&mut T),
+    ) -> DeqPool<'a, T> {
+        Self {
+            pool: std::collections::VecDeque::new(),
+            new_item,
+            reset_item: Some(reset_item),
+        }
+    }
+
+    pub fn get(&mut self) -> T {
+        match self.pool.pop_front() {
+            Some(t) => t,
+            None => (self.new_item)(),
+        }
+    }
+
+    pub fn put(&mut self, mut t: T) {
+        if let Some(f) = self.reset_item {
+            f(&mut t);
+        }
+        self.pool.push_back(t)
+    }
+}
+
+pub(super) struct FnCodegen<'a, 'b> {
     f: &'b ast::FunctionType,
     name: &'b str,
     // ctx: &'b mut Codegen<'a, T>,
@@ -179,15 +235,16 @@ pub(super) struct FnCodegen<'b> {
 
     /// Instruction sinks; The one at the top of the stack is the one currently used
     inst: Vec<InstSink>,
+    sink_pool: DeqPool<'a, InstSink>,
 }
 
 /// Implementation for larger function, statement and expression structures
-impl<'b> FnCodegen<'b> {
-    pub fn new<'a>(
+impl<'a, 'b> FnCodegen<'a, 'b> {
+    pub fn new<'c>(
         f: &'b ast::FunctionType,
         name: &'b str,
-        ctx: &'b mut Codegen<'a>,
-    ) -> FnCodegen<'b> {
+        ctx: &'b mut Codegen<'c>,
+    ) -> FnCodegen<'a, 'b> {
         FnCodegen {
             f,
             name,
@@ -197,6 +254,7 @@ impl<'b> FnCodegen<'b> {
             loc: IndexMap::new(),
             // module: &mut ctx.module,,
             inst: vec![InstSink::new()],
+            sink_pool: DeqPool::new_with_reset(&InstSink::new, &InstSink::reset),
         }
     }
 
@@ -274,9 +332,31 @@ impl<'b> FnCodegen<'b> {
         let expr = &*expr;
         match &expr.var {
             ast::ExprVariant::BinaryOp(b) => {
+                self.inst.push(self.sink_pool.get());
                 let lhs = self.gen_expr(b.lhs.cp())?;
+                let mut lhs_op = self.inst.pop().unwrap();
+
+                self.inst.push(self.sink_pool.get());
                 let rhs = self.gen_expr(b.rhs.cp())?;
-                todo!()
+                let mut rhs_op = self.inst.pop().unwrap();
+
+                let typ = self.flatten_ty(lhs, &mut lhs_op, rhs, &mut rhs_op)?;
+
+                self.inst_sink().append_all(&mut lhs_op);
+                self.inst_sink().append_all(&mut rhs_op);
+
+                match &*typ.borrow() {
+                    ast::TypeDef::Primitive(p) => {}
+                    _ => todo!(),
+                }
+
+                // TODO: Use proper OpVar
+                self.inst_sink().push(Inst::IAdd);
+
+                self.sink_pool.put(lhs_op);
+                self.sink_pool.put(rhs_op);
+
+                Ok(typ)
                 // Ok(b.op.build_inst_bin(self.builder.ins(), lhs, rhs)?)
             }
 
@@ -370,15 +450,79 @@ impl<'b> FnCodegen<'b> {
 }
 
 impl ast::OpVar {
-    fn build_inst_bin<'a>(&self, sink: &InstSink, lhs: Type, rhs: Type) -> CompileResult<Type> {
-        if lhs != rhs {}
-        match self {
-            ast::OpVar::Add => {
-                todo!()
-                // inst_builder.iadd(lhs, rhs);
+    pub(super) fn inst(&self, sink: &mut InstSink, emit_double_inst: bool) -> CompileResult<()> {
+        use ast::OpVar::*;
+        use Inst::*;
+        if !emit_double_inst {
+            // Integer instructions
+            match self {
+                // Binary
+                Add => sink.push(IAdd),
+                Sub => sink.push(ISub),
+                Mul => sink.push(IMul),
+                Div => sink.push(IDiv),
+
+                /*
+                 * Workaround instructions for comparison ops:
+                 *
+                 * Eq: Cmp, Imm 2, ISub
+                 * NEq: Cmp
+                 * Gt: Cmp, Imm 1, ISub, Imm 0, Cmp, Imm 2, ISub
+                 * NGt: Cmp, Imm 1, ISub
+                 * Lt: Cmp, Imm 1, IAdd, Imm 0, Cmp, Imm 2, ISub
+                 * NLt: Cmp, Imm 1, IAdd
+                 *
+                 * Should be recognized and replaced in conditionals
+                 */
+                Eq => sink.push_many(&[ICmp, IPush(2), ISub]),
+                Neq => sink.push_many(&[ICmp]),
+                Gt => sink.push_many(&[ICmp, IPush(1), ISub, IPush(0), ICmp, IPush(2), ISub]),
+                Lt => sink.push_many(&[ICmp, IPush(1), IAdd, IPush(0), ICmp, IPush(2), ISub]),
+                Gte => sink.push_many(&[ICmp, IPush(1), IAdd]),
+                Lte => sink.push_many(&[ICmp, IPush(1), ISub]),
+
+                Neg => sink.push(INeg),
+                Pos => (),
+
+                Inv | Bin | Ref | Der | And | Or | Xor | Ban | Bor => {
+                    Err(CompileError::UnsupportedOp)?
+                }
+                _Asn | _Csn => Err(CompileError::InternalError(
+                    "Assign operators should be spotted early".into(),
+                ))?,
+
+                Ina | Inb | Dea | Deb | _ => Err(CompileError::UnsupportedOp)?,
             }
-            _ => todo!(),
+        } else {
+            // Double instructions
+            match self {
+                // Binary
+                Add => sink.push(DAdd),
+                Sub => sink.push(DSub),
+                Mul => sink.push(DMul),
+                Div => sink.push(DDiv),
+
+                Eq => sink.push_many(&[DCmp, IPush(2), ISub]),
+                Neq => sink.push_many(&[DCmp]),
+                Gt => sink.push_many(&[DCmp, IPush(1), ISub, IPush(0), ICmp, IPush(2), ISub]),
+                Lt => sink.push_many(&[DCmp, IPush(1), IAdd, IPush(0), ICmp, IPush(2), ISub]),
+                Gte => sink.push_many(&[DCmp, IPush(1), IAdd]),
+                Lte => sink.push_many(&[DCmp, IPush(1), ISub]),
+
+                Neg => sink.push(DNeg),
+                Pos => (),
+
+                Inv | Bin | Ref | Der | And | Or | Xor | Ban | Bor => {
+                    Err(CompileError::UnsupportedOp)?
+                }
+                _Asn | _Csn => Err(CompileError::InternalError(
+                    "Assign operators should be spotted early".into(),
+                ))?,
+
+                Ina | Inb | Dea | Deb | _ => Err(CompileError::UnsupportedOp)?,
+            }
         }
+        Ok(())
     }
 }
 

@@ -198,38 +198,6 @@ where
                 },
             )
             .expect("Failed to inject primitive type `char`");
-
-        // Declaration of `print` - print(__VA_ARGS__)
-        scope
-            .insert_def(
-                "print",
-                SymbolDef::Var {
-                    typ: Ptr::new(TypeDef::Function(FunctionType {
-                        return_type: Ptr::new(TypeDef::Unit),
-                        params: vec![Ptr::new(TypeDef::VariableArgs(None))],
-                        body: None,
-                        is_extern: true,
-                    })),
-                    is_const: false,
-                },
-            )
-            .expect("Failed to inject primitive type `char`");
-
-        // Declaration of `print` - print(__VA_ARGS__)
-        scope
-            .insert_def(
-                "scan",
-                SymbolDef::Var {
-                    typ: Ptr::new(TypeDef::Function(FunctionType {
-                        return_type: Ptr::new(TypeDef::Unit),
-                        params: vec![Ptr::new(TypeDef::VariableArgs(None))],
-                        body: None,
-                        is_extern: true,
-                    })),
-                    is_const: false,
-                },
-            )
-            .expect("Failed to inject primitive type `char`");
     }
 
     fn p_program(&mut self) -> ParseResult<Program> {
@@ -510,6 +478,13 @@ where
             } else {
                 None
             };
+
+            if is_const && init_val.is_none() {
+                Err(parse_err(
+                    ParseErrVariant::ConstTypeNeedExplicitInitialization,
+                    ident.span,
+                ))?;
+            }
 
             scope.borrow_mut().insert_def(
                 ident.get_ident().unwrap(),
@@ -810,10 +785,41 @@ where
     /// or a literal value.
     fn p_item(&mut self, scope: Ptr<Scope>) -> ParseResult<Ptr<Expr>> {
         if self.expect(&TokenType::LParenthesis) {
-            // Start a new parsing cycle!
-            let expr = self.p_base_expr(&[TokenType::RParenthesis], scope);
-            self.expect_report(&TokenType::RParenthesis)?;
-            expr
+            // * F_CK, there's a nasty explicit cast operation here.
+            // * This should be a preceding operator, but it is placed here to avoid backtracking.
+            let is_implicit_conv = if let TokenType::Identifier(i) = &self.cur.var {
+                let def = scope.borrow().find_def(i);
+                if let Some(def) = def {
+                    if let SymbolDef::Typ { .. } = &*def.borrow() {
+                        true
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            } else {
+                false
+            };
+
+            if is_implicit_conv {
+                // You like that implicit conversion? It nearly ruined this non-backtracking parser!
+                let span = self.cur.span;
+                let typ = self.p_type_name(scope.cp())?;
+                self.expect_report(&TokenType::RParenthesis)?;
+                let expr = self.p_item(scope.cp())?;
+                let span = span + expr.borrow().span();
+                Ok(Ptr::new(Expr {
+                    var: ExprVariant::TypeConversion(TypeConversion { from: typ, expr }),
+                    span,
+                }))
+            } else {
+                // It's a new expression tree.
+                // Start a new parsing cycle!
+                let expr = self.p_base_expr(&[TokenType::RParenthesis], scope);
+                self.expect_report(&TokenType::RParenthesis)?;
+                expr
+            }
         } else {
             if self.check(&TokenType::Literal(super::lexer::Literal::_Dummy)) {
                 self.p_literal()

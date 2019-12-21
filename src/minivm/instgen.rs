@@ -6,54 +6,102 @@ use crate::prelude::*;
 use indexmap::{map::Entry, IndexMap};
 
 /// Implementation for smaller, instruction-wise structures
-impl<'b> FnCodegen<'b> {
+impl<'a, 'b> FnCodegen<'a, 'b> {
     /// Generate implicit conversion for `a` and `b` to match their types.
-    fn flatten_ty(&mut self, a: Type, b: Type) -> CompileResult<Type> {
-        todo!()
+    ///
+    /// If both a and b are primitive types, they are implicitly converted
+    /// according to rules. Otherwise, the right hand side (b) is converted to
+    /// left hand side (a)
+    ///
+    /// # Returns
+    ///
+    /// 0 - Operations for lhs
+    /// 1 - Operations for rhs
+    /// 2 - Resulting type
+    pub(super) fn flatten_ty(
+        &mut self,
+        a: Type,
+        a_sink: &mut InstSink,
+        b: Type,
+        b_sink: &mut InstSink,
+    ) -> CompileResult<Type> {
+        use TypeDef::*;
+
+        if let Primitive(p) = &*a.borrow() {
+            if let Primitive(q) = &*b.borrow() {
+                use ast::PrimitiveTypeVar::*;
+                if p.var == Float {
+                    if q.var != Float {
+                        self.implicit_conv(b.cp(), a.cp(), b_sink)
+                    } else {
+                        Ok(a.cp())
+                    }
+                } else {
+                    if q.var != Float {
+                        self.implicit_conv(b.cp(), a.cp(), b_sink)
+                    } else {
+                        if p.occupy_bytes > q.occupy_bytes {
+                            self.implicit_conv(b.cp(), a.cp(), a_sink)
+                        } else {
+                            self.implicit_conv(a.cp(), b.cp(), a_sink)
+                        }
+                    }
+                }
+            } else {
+                self.implicit_conv(b.cp(), a.cp(), b_sink)
+            }
+        } else {
+            self.implicit_conv(b.cp(), a.cp(), b_sink)
+        }
     }
 
     /// Generate implicit conversion for `val` to match `tgt` type
-    fn implicit_conv(&mut self, val: Type, tgt: Ptr<ast::TypeDef>) -> CompileResult<Type> {
+    pub(super) fn implicit_conv(
+        &mut self,
+        from: Type,
+        to: Type,
+        sink: &mut InstSink,
+    ) -> CompileResult<Type> {
         use TypeDef::*;
-        match &*tgt.borrow() {
-            Unit | Unknown | TypeErr => {
-                // self.inst_sink().push(Ins::Pop1)
-                Ok(tgt.cp())
+        match &*to.borrow() {
+            Unit => {
+                self.pop(from)?;
+                Ok(to.cp())
             }
-            _ => match &*a.borrow() {
-                Primitive(p) => {
-                    if let Primitive(o) = a {
-                        if o.occupy_bytes >= p.occupy_bytes && o.var == p.var {
-                            true
-                        } else {
-                            false
-                        }
+            Unknown | TypeErr => Err(CompileError::ErrorType),
+            Primitive(t) => match &*from.borrow() {
+                Primitive(f) => {
+                    use ast::PrimitiveTypeVar::*;
+                    match (f.var, t.var) {
+                        (Float, UnsignedInt) | (Float, SignedInt) => sink.push(Inst::D2I),
+
+                        (UnsignedInt, Float) | (SignedInt, Float) => sink.push(Inst::I2D),
+
+                        (SignedInt, UnsignedInt) if t.occupy_bytes == 1 => sink.push(Inst::I2C),
+                        _ => (),
+                    };
+
+                    Ok(to.cp())
+                }
+                Ref(..) => Err(CompileError::MakePrimitiveFromRef),
+                _ => Err(CompileError::UnsupportedType),
+            },
+            Ref(r) => match &*from.borrow() {
+                Ref(r1) => {
+                    if r == r1 {
+                        Ok(to.cp())
                     } else {
-                        false
+                        log::warn!("Implicit ref type change: {:?} -> {:?}", from, to);
+                        Ok(to.cp())
                     }
                 }
-                Ref(r) => {
-                    // TODO: r.target == Unit
-                    false
-                }
-                _ => false,
+                _ => Err(CompileError::MakeRefFromPrimitive),
             },
+            ast::TypeDef::NamedType(..) => Err(CompileError::InternalError(
+                "Named types shouldn't appear in type calculation".into(),
+            )),
+            _ => Err(CompileError::UnsupportedType),
         }
-        // match &*val.borrow() {
-        //     ast::TypeDef::Unit => Err(CompileError::AssignVoid),
-        //     ast::TypeDef::Primitive(p) => {
-        //         todo!()
-        //         //
-        //     }
-        //     ast::TypeDef::Ref(r) => {
-        //         todo!()
-        //         //
-        //     }
-        //     ast::TypeDef::NamedType(..) => Err(CompileError::InternalError(
-        //         "Named types shouldn't appear in type calculation".into(),
-        //     )),
-        //     _ => Err(CompileError::UnsupportedType),
-        // }
     }
 
     fn add(&mut self, lhs: Type, rhs: Type) -> CompileResult<Type> {

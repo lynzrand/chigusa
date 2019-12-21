@@ -25,6 +25,8 @@ pub enum TokenType {
     If,
     Else,
     While,
+    Break,
+    Continue,
     Return,
     Print,
     Scan,
@@ -81,6 +83,8 @@ impl Display for TokenType {
             If => write!(f, "If"),
             Else => write!(f, "Else"),
             While => write!(f, "While"),
+            Break => write!(f, "Break"),
+            Continue => write!(f, "Continue"),
             Return => write!(f, "Return"),
             Print => write!(f, "Print"),
             Scan => write!(f, "Scan"),
@@ -571,6 +575,8 @@ where
             "if" => TokenType::If,
             "else" => TokenType::Else,
             "while" => TokenType::While,
+            "break" => TokenType::Break,
+            "continue" => TokenType::Continue,
             "return" => TokenType::Return,
             "const" => TokenType::Const,
             "print" => TokenType::Print,
@@ -578,6 +584,11 @@ where
             "as" => TokenType::As,
             "true" => TokenType::Literal(Literal::Boolean(true)),
             "false" => TokenType::Literal(Literal::Boolean(false)),
+
+            "struct" | "switch" | "case" | "default" | "for" | "do" => {
+                TokenType::Error(format!("Reserved word: {}", ident))
+            }
+
             _ => TokenType::Identifier(ident),
         };
 

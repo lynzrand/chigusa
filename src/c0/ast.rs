@@ -296,7 +296,7 @@ impl fmt::Debug for TypeDef {
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq, Copy)]
 pub enum PrimitiveTypeVar {
     SignedInt,
     UnsignedInt,
@@ -555,13 +555,13 @@ impl From<super::lexer::Literal> for Literal {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct TypeConversion {
-    pub from: TypeIdent,
+    pub from: Ptr<TypeDef>,
     pub expr: Ptr<Expr>,
 }
 
 impl fmt::Display for TypeConversion {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "(as {} {:?})", self.expr, self.from)
+        write!(f, "({} as {:?})", self.expr, self.from)
     }
 }
 

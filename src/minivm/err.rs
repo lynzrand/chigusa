@@ -8,6 +8,11 @@ pub enum CompileError {
     Unknown,
     AssignVoid,
     UnsupportedType,
+    UnsupportedOp,
+
+    ErrorType,
+    MakeRefFromPrimitive,
+    MakePrimitiveFromRef,
     RequireSized(String),
     Error(String),
     InternalError(String),
