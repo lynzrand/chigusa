@@ -1,4 +1,5 @@
 pub mod codegen;
+pub mod err;
 
 use std::io::{Read, Write};
 
@@ -11,69 +12,146 @@ trait Writable {
 }
 
 pub enum Ins {
+    /// No-op
     Nop,
+
+    /// () -> char
     CPush(u8),
+    /// () -> u32
     IPush(u32),
+
+    /// u32 -> ()
     Pop1,
+    /// u64 -> ()
     Pop2,
+    /// u32[(n)] -> ()
     PopN(u32),
+
+    /// u32 -> u32, u32
     Dup,
+    /// u64 -> u64, u64
     Dup2,
+
+    /// (idx) -> val
+    ///
+    /// val:
+    /// - const[(idx)]: u32 => u32
+    /// - const[(idx)]: f64 => f64
+    /// - const[(idx)]: str | T[] => usize
     LoadC(u16),
-    LoadA(u16, u32),
+    /// (lvl, off) -> u32
+    LoadA(u16, i32),
+
+    /// u32 -> usize
     New,
-    SNew,
+    /// (n) -> u32[n]
+    SNew(u32),
+
+    /// Load(address) -> u32
     ILoad,
+    /// Load(address) -> u64
     DLoad,
+    /// Load(address) -> usize
     ALoad,
+
+    /// Load(address + offset) -> u32
     IALoad,
+    /// Load(address + offset) -> u64
     DALoad,
+    /// Load(address + offset) -> usize
     AALoad,
+
+    /// Store(address, u32) -> ()
     IStore,
+    /// Store(address, u64) -> ()
     DStore,
+    /// Store(address, address) -> ()
     AStore,
+
+    /// Load(address + offset, u32) -> ()
     IAStore,
+    /// Load(address + offset, u32) -> ()
     DAStore,
+    /// Load(address + offset, u32) -> ()
     AAStore,
+
+    /// i32 + i32 -> i32
     IAdd,
+    /// f64 + f64 -> f64
     DAdd,
+    /// i32 - i32 -> i32
     ISub,
+    /// f64 - f64 -> f64
     DSub,
+    /// i32 * i32 -> i32
     IMul,
+    /// f64 * f64 -> f64
     DMul,
+    /// i32 / i32 -> i32
     IDiv,
+    /// f64 / f64 -> f64
     DDiv,
+    /// -i32 -> i32
     INeg,
+    /// -f64 -> f64
     DNeg,
+    /// i32 - i32 -> i32 [+1, 0, -1]
     ICmp,
+    /// f64 - f64 -> i32 [+1, 0, -1]
     DCmp,
+    /// i32 -> f64
     I2D,
+    /// f64 -> f64
     D2I,
+    /// 0xff & u32 -> u32 (u8)
     I2C,
+
+    /// () -> jmp (offset)
     Jmp(u16),
+    /// u32 -> if == 0 then jmp (offset)
     JE(u16),
+    /// u32 -> if != 0 then jmp (offset)
     JNe(u16),
+    /// u32 -> if < 0 then jmp (offset)
     JL(u16),
+    /// u32 -> if >= 0 then jmp (offset)
     JGe(u16),
+    /// u32 -> if > 0 then jmp (offset)
     JG(u16),
+    /// u32 -> if <= 0 then jmp (offset)
     JLe(u16),
+
+    /// params -> call(function[(idx)])
     Call(u16),
+    /// () -> ret
     Ret,
+    /// u32 -> ret u32
     IRet,
+    /// u64 -> ret u64
     DRet,
+    /// usize -> ret usize
     ARet,
+
+    /// i32 -> Print()
     IPrint,
+    /// f64 -> Print()
     DPrint,
+    /// u8 -> Print()
     CPrint,
+    /// usize -> Print(str)
     SPrint,
+    /// () -> Print(\n)
     PrintLn,
+    /// () -> Scan u32
     IScan,
+    /// () -> Scan f64
     DScan,
+    /// () -> Scan u8
     CScan,
 }
 
 impl Ins {
-    fn opcode(&self) -> u8 {
+    pub fn opcode(&self) -> u8 {
         use Ins::*;
         match self {
             Nop => 0x00,
@@ -87,7 +165,7 @@ impl Ins {
             LoadC(..) => 0x09,
             LoadA(..) => 0x0a,
             New => 0x0b,
-            SNew => 0x0c,
+            SNew(..) => 0x0c,
             ILoad => 0x10,
             DLoad => 0x11,
             ALoad => 0x12,
@@ -148,6 +226,7 @@ impl Writable for Ins {
             IPush(i) => i.write_to(w),
             PopN(n) => n.write_to(w),
 
+            SNew(s) => s.write_to(w),
             LoadC(c) => c.write_to(w),
             LoadA(a, i) => {
                 a.write_to(w)?;
@@ -252,7 +331,15 @@ impl Writable for u16 {
         w.write_all(&self.to_be_bytes())
     }
 }
+
 impl Writable for u32 {
+    #[inline(always)]
+    fn write_to(&self, w: &mut impl Write) -> std::result::Result<(), std::io::Error> {
+        w.write_all(&self.to_be_bytes())
+    }
+}
+
+impl Writable for i32 {
     #[inline(always)]
     fn write_to(&self, w: &mut impl Write) -> std::result::Result<(), std::io::Error> {
         w.write_all(&self.to_be_bytes())
