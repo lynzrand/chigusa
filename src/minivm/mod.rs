@@ -334,6 +334,12 @@ impl Writable for O0 {
     }
 }
 
+impl O0 {
+    pub fn write_binary(&self, w: &mut impl Write) -> std::io::Result<()> {
+        self.write_to(w)
+    }
+}
+
 impl Writable for u8 {
     #[inline(always)]
     fn write_to(&self, w: &mut impl Write) -> std::result::Result<(), std::io::Error> {

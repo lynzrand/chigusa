@@ -31,20 +31,58 @@ fn main() {
             .expect("Failed to read");
     };
 
-    let vec = lexer::Lexer::new(Box::new(input.chars())).into_iter();
+    let token = lexer::Lexer::new(Box::new(input.chars())).into_iter();
 
-    let tree = chigusa::c0::parser::Parser::new(vec).parse();
+    if opt.emit == EmitOption::Token {
+        let tokens: Vec<_> = token.collect();
+        write_output(&opt, tokens);
+        return;
+    }
 
-    if let Ok(tree) = tree {
-        if opt.stdout {
-            print!("{:?}", tree);
-        } else {
-            let mut f = File::create(opt.output_file).expect("Failed to create output file");
-            write!(f, "{:#?}", tree).expect("Failed to write file");
+    let tree = chigusa::c0::parser::Parser::new(token).parse();
+
+    let tree = match tree {
+        Ok(v) => v,
+        Err(e) => {
+            log::error!("{:#?}", e);
+            return;
         }
+    };
+
+    if opt.emit == EmitOption::Ast {
+        write_output(&opt, tree);
+        return;
+    }
+
+    let s0 = chigusa::minivm::Codegen::new(&tree).compile();
+
+    let s0 = match s0 {
+        Ok(v) => v,
+        Err(e) => {
+            log::error!("{:#?}", e);
+            return;
+        }
+    };
+
+    if opt.emit == EmitOption::S0 {
+        write_output(&opt, s0);
+        return;
     } else {
-        let e = tree.err().unwrap();
-        log::error!("{:#?}", e);
+        // Emit O0
+        let mut f = File::create(&opt.output_file).expect("Failed to create output file");
+        s0.write_binary(&mut f).expect("Failed to write");
+    }
+}
+
+fn write_output<T>(opt: &ParserConfig, val: T)
+where
+    T: std::fmt::Debug,
+{
+    if opt.stdout {
+        print!("{:?}", val);
+    } else {
+        let mut f = File::create(&opt.output_file).expect("Failed to create output file");
+        write!(f, "{:#?}", val).expect("Failed to write file");
     }
 }
 
@@ -84,16 +122,12 @@ pub struct ParserConfig {
     #[structopt(long)]
     jit: bool,
 
-    /// The type of code to emit. Allowed are: token, ast, ir, asm, obj, exe.
+    /// The type of code to emit. Allowed are: token, ast, s0, o0
     ///
     /// Emit result explanation:
     /// - Token: Direct result from lexer (tokenizer)
     /// - AST: Abstract Syntax Tree, direct result from parser (analyzer)
-    /// - IR: Cranelift IR, direct result from Codegen
-    /// - ASM: Assembly file for local machine
-    /// - OBJ: Object file for local machine
-    /// - EXE: Executable file
-    #[structopt(long, default_value = "exe", parse(try_from_str = EmitOption::parse))]
+    #[structopt(long, default_value = "o0", parse(try_from_str = EmitOption::parse))]
     emit: EmitOption,
 }
 
@@ -101,11 +135,8 @@ pub struct ParserConfig {
 pub enum EmitOption {
     Token,
     Ast,
-    Mir,
-    CraneliftIR,
-    Asm,
-    Obj,
-    Exe,
+    S0,
+    O0,
 }
 
 impl EmitOption {
@@ -113,11 +144,9 @@ impl EmitOption {
         match s {
             "token" => Ok(EmitOption::Token),
             "ast" => Ok(EmitOption::Ast),
-            "ir" => Ok(EmitOption::CraneliftIR),
-            "asm" => Ok(EmitOption::Asm),
-            "obj" => Ok(EmitOption::Obj),
-            "exe" => Ok(EmitOption::Exe),
-            _ => Err("Bad emit option. Allowed are: token, ast, ir, asm, obj, exe"),
+            "s0" => Ok(EmitOption::S0),
+            "o0" => Ok(EmitOption::O0),
+            _ => Err("Bad emit option. Allowed are: token, ast, s0, o0"),
         }
     }
 }

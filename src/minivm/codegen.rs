@@ -4,6 +4,7 @@ use crate::c0::ast::{self, *};
 use crate::prelude::*;
 use either::Either;
 use indexmap::{map::Entry, IndexMap};
+use std::iter::Iterator;
 
 const bytes_per_slot: u16 = 4;
 
@@ -44,12 +45,37 @@ impl DataSink {
         }
     }
 
+    fn put_str(&mut self, name: &str, val: String, is_const: bool) -> Option<u16> {
+        let str_val: Vec<_> = val.as_bytes().iter().map(|x| *x).collect();
+        // let str_val = std::ffi::CString::new(str_val).unwrap();
+        // let str_val = str_val.into_bytes_with_nul();
+
+        let typ = Ptr::new(ast::TypeDef::Ref(ast::RefType {
+            target: Ptr::new(ast::TypeDef::Primitive(ast::PrimitiveType {
+                var: ast::PrimitiveTypeVar::UnsignedInt,
+                occupy_bytes: 1,
+            })),
+        }));
+
+        let val = Data {
+            typ,
+            init_val: Either::Left(Constant::String(str_val)),
+            is_const: true,
+        };
+
+        self.put_data(name, val)
+    }
+
     pub fn get_offset(&self, name: &str) -> Option<u16> {
         self.map.get_full(name).map(|x| x.0 as u16)
     }
 
     pub fn get_data(&self, name: &str) -> Option<&Data> {
         self.map.get(name)
+    }
+
+    pub fn unwrap(mut self) -> Vec<Data> {
+        self.map.into_iter().map(|(s, d)| d).collect()
     }
 }
 
@@ -59,6 +85,7 @@ pub(super) struct FunctionType {
     pub return_type: Ptr<TypeDef>,
     pub body: Option<InstSink>,
     pub is_extern: bool,
+    pub name_idx: u16,
 }
 
 impl From<ast::FunctionType> for FunctionType {
@@ -68,6 +95,7 @@ impl From<ast::FunctionType> for FunctionType {
             return_type: t.return_type,
             body: None,
             is_extern: t.is_extern,
+            name_idx: 0,
         }
     }
 }
@@ -104,6 +132,10 @@ impl InstSink {
         &self.0
     }
 
+    pub fn unwrap(self) -> Vec<Inst> {
+        self.0
+    }
+
     /// Append all instruction from the other InstSink
     pub fn append_all(&mut self, other: &mut InstSink) {
         self.0.append(&mut other.0);
@@ -129,9 +161,11 @@ impl InstSink {
     }
 }
 
+#[derive(Debug)]
 pub struct Codegen<'a> {
     prog: &'a ast::Program,
     glob: GlobalData,
+    fn_types: Vec<FnInfo>,
 }
 
 impl<'a> Codegen<'a> {
@@ -139,20 +173,78 @@ impl<'a> Codegen<'a> {
         Codegen {
             prog,
             glob: GlobalData::new(),
+            fn_types: vec![],
         }
     }
 
-    pub fn compile(&mut self) {}
+    pub fn compile(mut self) -> CompileResult<O0> {
+        let start_stmts = &self.prog.stmts;
+        // TODO: Make _start function
 
-    fn add_glob(&mut self) {}
+        let start_code = InstSink::new();
 
-    fn compile_fn(&mut self, func: &ast::FunctionType, name: &str) -> CompileResult<()> {
+        let decls = &self.prog.scope;
+        let decls = &*decls.borrow();
+
+        for item in decls.defs.iter() {
+            // TODO: add global variables
+        }
+
+        for item in decls.defs.iter() {
+            let name = item.0;
+            let def = item.1.borrow();
+            if let ast::SymbolDef::Var { typ, .. } = &*def {
+                let typ = typ.borrow();
+                if let ast::TypeDef::Function(f) = &*typ {
+                    let result = self.compile_fn(f, name)?;
+                    log::info!("{:#?}", result);
+                    self.fn_types.push(result);
+                }
+            }
+        }
+
+        Ok(O0 {
+            version: 1,
+            constants: self
+                .glob
+                .consts
+                .unwrap()
+                .into_iter()
+                .map(|data: Data| {
+                    data.init_val
+                        .either(|c| c, |len| Constant::String(vec![0; len as usize]))
+                })
+                .collect(),
+            start_code: StartCodeInfo {
+                ins: start_code.unwrap(),
+            },
+            functions: self.fn_types,
+        })
+    }
+
+    fn compile_fn(&mut self, func: &ast::FunctionType, name: &str) -> CompileResult<FnInfo> {
         // TODO: Add signature extractor
-
+        let name_idx = self
+            .glob
+            .consts
+            .put_str(&format!("`function_name`{}", name), name.into(), true)
+            .unwrap();
         // let sig = FnCodegen::extract_sig(func, self);
-        let fnc = FnCodegen::new(func, name, self);
 
-        Ok(())
+        let ret = resolve_ty(&*func.return_type.borrow(), self.prog.scope.cp());
+        let mut fnc = FnCodegen::new(func, name, self, Ptr::new(ret));
+
+        fnc.gen();
+        let inst = fnc.finish();
+        let func = FnInfo {
+            name_idx,
+            ins: inst.unwrap(),
+            lvl: 1,
+            // TODO
+            param_siz: 0,
+        };
+
+        Ok(func)
     }
 }
 
@@ -191,6 +283,7 @@ fn resolve_ty(ty: &ast::TypeDef, scope: Ptr<ast::Scope>) -> ast::TypeDef {
                 is_extern: f.is_extern,
             })
         }
+        ast::TypeDef::Unit => ast::TypeDef::Unit,
         _ => todo!("Type resolve not implemented"),
     }
 }
@@ -253,12 +346,26 @@ impl<'a, T> DeqPool<'a, T> {
     }
 }
 
+impl<'a, T> std::fmt::Debug for DeqPool<'a, T>
+where
+    T: std::fmt::Debug,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DeqPool").field("pool", &self.pool).finish()
+    }
+}
+
+#[derive(Debug)]
 pub(super) struct FnCodegen<'a, 'b> {
     f: &'b ast::FunctionType,
+    ret_type: Type,
+
     name: &'b str,
     // ctx: &'b mut Codegen<'a, T>,
     ebb_cnt: u32,
     loc_cnt: u16,
+    /// Data count, only for naming usage
+    data_cnt: u32,
     data: &'b mut GlobalData,
     loc: DataSink,
 
@@ -273,11 +380,14 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
         f: &'b ast::FunctionType,
         name: &'b str,
         ctx: &'b mut Codegen<'c>,
+        ret_type: Type,
     ) -> FnCodegen<'a, 'b> {
         FnCodegen {
             f,
             name,
+            ret_type,
             ebb_cnt: 0,
+            data_cnt: 0,
             loc_cnt: 0,
             data: &mut ctx.glob,
             loc: DataSink::new(),
@@ -293,20 +403,38 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
             .expect("A function generator must have at least one instruction sink")
     }
 
-    pub fn gen(&mut self) {
+    pub fn gen(&mut self) -> CompileResult<()> {
+        println!("{:#?}", self);
         if let Some(b) = &self.f.body {
             let scope = b.scope.cp();
             let stmts = &b.stmts;
             for stmt in stmts {
-                self.gen_stmt(stmt, scope.cp());
+                self.gen_stmt(stmt, scope.cp())?;
             }
+
+            // Check return type
+            {
+                let is_void = {
+                    let ret = self.ret_type.borrow();
+                    ast::TypeDef::Unit == *ret
+                };
+                if is_void {
+                    self.inst_sink().push(Inst::Ret);
+                }
+            }
+            Ok(())
         } else {
             if self.f.is_extern {
-                return;
+                Ok(())
             } else {
                 panic!("No body in function")
             }
         }
+    }
+
+    pub fn finish(mut self) -> InstSink {
+        assert!(self.inst.len() == 1);
+        self.inst.pop().expect("The one and only instruction sink")
     }
 
     pub(super) fn add_local(
@@ -364,7 +492,7 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
             }
             ast::StmtVariant::Return(e) => todo!("Generate code for return"),
             ast::StmtVariant::Block(e) => todo!("Generate code for block"),
-            ast::StmtVariant::Print(e) => todo!("Generate code for print"),
+            ast::StmtVariant::Print(e) => self.gen_print(e, scope),
             ast::StmtVariant::Scan(e) => todo!("Generate code for scan"),
             ast::StmtVariant::Break => todo!("Generate code for return"),
             ast::StmtVariant::If(e) => todo!("Generate code for return`"),
@@ -494,25 +622,17 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
                 }
 
                 ast::Literal::String { val } => {
-                    // let data_name = format!("data`{}`{}", self.name, self.dat_cnt);
-                    // let data = self.module.declare_data(
-                    //     &data_name,
-                    //     cranelift_module::Linkage::Local,
-                    //     false,
-                    //     None,
-                    // )?;
-                    // self.dat_cnt += 1;
-                    // let mut data_ctx = DataContext::new();
-                    // let str_val: Vec<_> = val.as_bytes().iter().map(|x| *x).collect();
-                    // let str_val = std::ffi::CString::new(str_val).unwrap();
-                    // let str_val = str_val.into_bytes_with_nul();
-                    // let str_val = str_val.into_boxed_slice();
-                    // data_ctx.define(str_val);
-                    // self.module.define_data(data, &data_ctx)?;
-                    // let global = self.module.declare_data_in_func(data, self.builder.func);
-                    // let ptr_typ = self.module.isa().pointer_type();
-
-                    // let val = self.builder.ins().global_value(ptr_typ, global);
+                    let offset = self
+                        .data
+                        .consts
+                        .put_str(
+                            &format!("`{}``str{}", self.name, self.data_cnt),
+                            val.into(),
+                            true,
+                        )
+                        .unwrap();
+                    self.data_cnt += 1;
+                    self.inst_sink().push(Inst::LoadC(offset));
                     let typ = Ptr::new(ast::TypeDef::Ref(ast::RefType {
                         target: Ptr::new(ast::TypeDef::Primitive(ast::PrimitiveType {
                             var: ast::PrimitiveTypeVar::UnsignedInt,
@@ -528,6 +648,26 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
             },
             _ => todo!("Implement other expression variants"),
         }
+    }
+
+    fn gen_print(&mut self, print: &Vec<Ptr<Expr>>, scope: Ptr<ast::Scope>) -> CompileResult<()> {
+        for val in print {
+            let typ = self.gen_expr(val.cp(), scope.cp())?;
+            let typ_borrow = typ.borrow();
+            match &*typ_borrow {
+                ast::TypeDef::Primitive(p) => match p.var {
+                    ast::PrimitiveTypeVar::Float => self.inst_sink().push(Inst::DPrint),
+                    _ => self.inst_sink().push(Inst::IPrint),
+                },
+                ast::TypeDef::Ref(..) => {
+                    // ! For now we assume all ref types are strings
+                    self.inst_sink().push(Inst::SPrint)
+                }
+                _ => Err(CompileError::RequirePrintable(format!("{:?}", typ)))?,
+            }
+        }
+        self.inst_sink().push(Inst::PrintLn);
+        Ok(())
     }
 }
 
