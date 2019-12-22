@@ -2,15 +2,23 @@ use super::err::*;
 use super::*;
 use crate::c0::ast::{self, *};
 use crate::prelude::*;
+use either::Either;
 use indexmap::{map::Entry, IndexMap};
 
+const bytes_per_slot: u16 = 4;
+
+#[derive(Debug, Clone)]
 struct Data {
     typ: Ptr<ast::TypeDef>,
-    init_val: Option<Constant>,
+
+    /// Either its value or the bytes it occupy
+    init_val: Either<Constant, u16>,
+
     is_const: bool,
 }
 
 /// A sink of global data
+#[derive(Debug, Clone)]
 struct DataSink {
     map: IndexMap<String, Data>,
 }
@@ -45,10 +53,30 @@ impl DataSink {
     }
 }
 
+#[derive(Debug, Clone)]
+pub(super) struct FunctionType {
+    pub params: Vec<Ptr<TypeDef>>,
+    pub return_type: Ptr<TypeDef>,
+    pub body: Option<InstSink>,
+    pub is_extern: bool,
+}
+
+impl From<ast::FunctionType> for FunctionType {
+    fn from(t: ast::FunctionType) -> Self {
+        FunctionType {
+            params: t.params,
+            return_type: t.return_type,
+            body: None,
+            is_extern: t.is_extern,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 struct GlobalData {
     vars: DataSink,
     consts: DataSink,
-    fns: IndexMap<String, ast::FunctionType>,
+    fns: IndexMap<String, FunctionType>,
 }
 
 impl GlobalData {
@@ -64,6 +92,7 @@ impl GlobalData {
 pub type Type = Ptr<ast::TypeDef>;
 
 /// An opaque sink of instructions
+#[derive(Debug, Clone)]
 pub(super) struct InstSink(Vec<Inst>);
 
 impl InstSink {
@@ -231,7 +260,7 @@ pub(super) struct FnCodegen<'a, 'b> {
     ebb_cnt: u32,
     loc_cnt: u16,
     data: &'b mut GlobalData,
-    loc: IndexMap<String, Data>,
+    loc: DataSink,
 
     /// Instruction sinks; The one at the top of the stack is the one currently used
     inst: Vec<InstSink>,
@@ -251,7 +280,7 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
             ebb_cnt: 0,
             loc_cnt: 0,
             data: &mut ctx.glob,
-            loc: IndexMap::new(),
+            loc: DataSink::new(),
             // module: &mut ctx.module,,
             inst: vec![InstSink::new()],
             sink_pool: DeqPool::new_with_reset(&InstSink::new, &InstSink::reset),
@@ -266,10 +295,10 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
 
     pub fn gen(&mut self) {
         if let Some(b) = &self.f.body {
-            let scope = b.scope.borrow();
+            let scope = b.scope.cp();
             let stmts = &b.stmts;
             for stmt in stmts {
-                self.gen_stmt(stmt);
+                self.gen_stmt(stmt, scope.cp());
             }
         } else {
             if self.f.is_extern {
@@ -284,35 +313,52 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
         &mut self,
         name: &str,
         var: &ast::SymbolDef,
-        depth: usize,
+        // if id == 0 then it's global variable
+        id: usize,
         scope: Ptr<ast::Scope>,
-    ) {
+    ) -> CompileResult<()> {
         match var {
+            // We don't care about type decls
             ast::SymbolDef::Typ { .. } => (),
+
+            // Variable decl
             ast::SymbolDef::Var { typ, is_const } => {
-                if depth != 0 {
+                if id != 0 {
                     // Who cares about constants?
-                    let var_name = format!("{}`{}", name, depth);
+                    let var_name = format!("{}`{}", name, id);
                     let var_loc = self.loc_cnt;
                     self.loc_cnt = self.loc_cnt + 1;
-                    // let var = Variable::with_u32(var_loc);
-                    // let typ = extract_ty(typ, scope, self.module);
-                    // self.builder.declare_var(var, typ);
-                    todo!()
+
+                    let occupy_slots = typ
+                        .borrow()
+                        .occupy_slots()
+                        .ok_or(CompileError::RequireSized(format!("{:?}", typ)))?;
+
+                    let data = Data {
+                        typ: typ.cp(),
+                        init_val: Either::Right(occupy_slots),
+                        is_const: *is_const,
+                    };
+                    self.loc
+                        .put_data(&var_name, data)
+                        .ok_or(CompileError::InternalError(
+                            "Conflicting name inside AST".into(),
+                        ))?;
                 } else {
                     todo!("Add global values");
                     // self.builder.create_global_value();
                 }
             }
         }
+        Ok(())
     }
 
-    fn gen_stmt(&mut self, stmt: &ast::Stmt) -> CompileResult<()> {
+    fn gen_stmt(&mut self, stmt: &ast::Stmt, scope: Ptr<ast::Scope>) -> CompileResult<()> {
         match &stmt.var {
-            ast::StmtVariant::Expr(e) => self.gen_expr(e.cp()).map(|_| ()),
+            ast::StmtVariant::Expr(e) => self.gen_expr(e.cp(), scope.cp()).map(|_| ()),
             ast::StmtVariant::ManyExpr(e) => {
                 for e in e {
-                    self.gen_expr(e.cp())?;
+                    self.gen_expr(e.cp(), scope.cp())?;
                 }
                 Ok(())
             }
@@ -327,37 +373,73 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
         }
     }
 
-    fn gen_expr(&mut self, expr: Ptr<ast::Expr>) -> CompileResult<Type> {
+    fn gen_l_value_store(
+        &mut self,
+        expr: Ptr<ast::Expr>,
+        is_const_storage: bool,
+        scope: Ptr<ast::Scope>,
+    ) -> CompileResult<Type> {
+        let expr = expr.borrow();
+        let expr = &*expr;
+
+        match &expr.var {
+            ast::ExprVariant::Ident(i) => {}
+            _ => Err(CompileError::NotLValue(format!("{}", expr)))?,
+        }
+
+        todo!()
+    }
+
+    fn gen_expr(&mut self, expr: Ptr<ast::Expr>, scope: Ptr<ast::Scope>) -> CompileResult<Type> {
         let expr = expr.borrow();
         let expr = &*expr;
         match &expr.var {
             ast::ExprVariant::BinaryOp(b) => {
-                self.inst.push(self.sink_pool.get());
-                let lhs = self.gen_expr(b.lhs.cp())?;
-                let mut lhs_op = self.inst.pop().unwrap();
+                if b.op == ast::OpVar::_Asn || b.op == ast::OpVar::_Csn {
+                    // It's an assignment
+                    // * This generates storage procedure for lhs.
+                    self.inst.push(self.sink_pool.get());
+                    let lhs =
+                        self.gen_l_value_store(b.lhs.cp(), b.op == ast::OpVar::_Csn, scope.cp())?;
+                    let mut lhs_store = self.inst.pop().unwrap();
 
-                self.inst.push(self.sink_pool.get());
-                let rhs = self.gen_expr(b.rhs.cp())?;
-                let mut rhs_op = self.inst.pop().unwrap();
+                    self.inst.push(self.sink_pool.get());
+                    let rhs = self.gen_expr(b.rhs.cp(), scope.cp())?;
+                    let mut rhs_op = self.inst.pop().unwrap();
 
-                let typ = self.flatten_ty(lhs, &mut lhs_op, rhs, &mut rhs_op)?;
+                    let _ = self.conv(rhs, lhs, &mut rhs_op)?;
 
-                self.inst_sink().append_all(&mut lhs_op);
-                self.inst_sink().append_all(&mut rhs_op);
+                    self.inst_sink().append_all(&mut rhs_op);
+                    self.inst_sink().append_all(&mut lhs_store);
 
-                match &*typ.borrow() {
-                    ast::TypeDef::Primitive(p) => {}
-                    _ => todo!(),
+                    // Put sinks back to pool
+                    self.sink_pool.put(lhs_store);
+                    self.sink_pool.put(rhs_op);
+
+                    // * Assignment evaluates as unit type!
+                    Ok(Ptr::new(ast::TypeDef::Unit))
+                } else {
+                    // Normal expressions
+                    self.inst.push(self.sink_pool.get());
+                    let lhs = self.gen_expr(b.lhs.cp(), scope.cp())?;
+                    let mut lhs_op = self.inst.pop().unwrap();
+
+                    self.inst.push(self.sink_pool.get());
+                    let rhs = self.gen_expr(b.rhs.cp(), scope.cp())?;
+                    let mut rhs_op = self.inst.pop().unwrap();
+
+                    let typ = self.flatten_ty(lhs, &mut lhs_op, rhs, &mut rhs_op)?;
+
+                    self.inst_sink().append_all(&mut lhs_op);
+                    self.inst_sink().append_all(&mut rhs_op);
+
+                    b.op.inst(self.inst_sink(), typ.cp())?;
+
+                    self.sink_pool.put(lhs_op);
+                    self.sink_pool.put(rhs_op);
+
+                    Ok(typ)
                 }
-
-                // TODO: Use proper OpVar
-                self.inst_sink().push(Inst::IAdd);
-
-                self.sink_pool.put(lhs_op);
-                self.sink_pool.put(rhs_op);
-
-                Ok(typ)
-                // Ok(b.op.build_inst_bin(self.builder.ins(), lhs, rhs)?)
             }
 
             ast::ExprVariant::UnaryOp(u) => {
@@ -450,9 +532,18 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
 }
 
 impl ast::OpVar {
-    pub(super) fn inst(&self, sink: &mut InstSink, emit_double_inst: bool) -> CompileResult<()> {
+    pub(super) fn inst(&self, sink: &mut InstSink, typ: Type) -> CompileResult<()> {
         use ast::OpVar::*;
         use Inst::*;
+
+        let emit_double_inst = match &*typ.borrow() {
+            ast::TypeDef::Primitive(p) => match p.var {
+                ast::PrimitiveTypeVar::Float => true,
+                _ => false,
+            },
+            _ => false,
+        };
+
         if !emit_double_inst {
             // Integer instructions
             match self {

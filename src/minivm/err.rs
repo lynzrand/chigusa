@@ -14,6 +14,9 @@ pub enum CompileError {
     MakeRefFromPrimitive,
     MakePrimitiveFromRef,
     RequireSized(String),
+
+    NotLValue(String),
+
     Error(String),
     InternalError(String),
 }

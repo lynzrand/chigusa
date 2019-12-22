@@ -76,24 +76,32 @@ impl SymbolDef {
 pub struct Scope {
     pub last: Option<Ptr<Scope>>,
     pub defs: IndexMap<String, Ptr<SymbolDef>>,
-    pub depth: usize,
+    pub id: usize,
 }
 
+static mut scope_id: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0usize);
+
 impl Scope {
+    pub fn reset_id() {
+        unsafe {
+            scope_id.store(0, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+
     pub fn new() -> Scope {
         Scope {
             last: None,
             defs: IndexMap::new(),
-            depth: 0,
+            id: 0,
         }
     }
 
     pub fn new_with_parent(parent: Ptr<Scope>) -> Scope {
-        let depth = parent.borrow().depth + 1;
+        let id = unsafe { scope_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst) };
         Scope {
             last: Some(parent),
             defs: IndexMap::new(),
-            depth,
+            id,
         }
     }
 
@@ -108,7 +116,7 @@ impl Scope {
     pub fn find_def_depth(&self, name: &str) -> Option<(Ptr<SymbolDef>, usize)> {
         self.defs
             .get(name)
-            .map(|def| (def.cp(), self.depth))
+            .map(|def| (def.cp(), self.id))
             .or_else(|| {
                 self.last
                     .as_ref()

@@ -7,11 +7,11 @@ use indexmap::{map::Entry, IndexMap};
 
 /// Implementation for smaller, instruction-wise structures
 impl<'a, 'b> FnCodegen<'a, 'b> {
-    /// Generate implicit conversion for `a` and `b` to match their types.
+    /// Generate type conversion for `a` and `b` to match their types.
     ///
     /// If both a and b are primitive types, they are implicitly converted
-    /// according to rules. Otherwise, the right hand side (b) is converted to
-    /// left hand side (a)
+    /// according to rules. If either side is void, the code will return an error.
+    /// Otherwise, the right hand side (b) is converted to left hand side (a).
     ///
     /// # Returns
     ///
@@ -27,36 +27,40 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
     ) -> CompileResult<Type> {
         use TypeDef::*;
 
+        if *a.borrow() == Unit || *b.borrow() == Unit {
+            return Err(CompileError::AssignVoid);
+        }
+
         if let Primitive(p) = &*a.borrow() {
             if let Primitive(q) = &*b.borrow() {
                 use ast::PrimitiveTypeVar::*;
                 if p.var == Float {
                     if q.var != Float {
-                        self.implicit_conv(b.cp(), a.cp(), b_sink)
+                        self.conv(b.cp(), a.cp(), b_sink)
                     } else {
                         Ok(a.cp())
                     }
                 } else {
                     if q.var != Float {
-                        self.implicit_conv(b.cp(), a.cp(), b_sink)
+                        self.conv(b.cp(), a.cp(), b_sink)
                     } else {
                         if p.occupy_bytes > q.occupy_bytes {
-                            self.implicit_conv(b.cp(), a.cp(), a_sink)
+                            self.conv(b.cp(), a.cp(), a_sink)
                         } else {
-                            self.implicit_conv(a.cp(), b.cp(), a_sink)
+                            self.conv(a.cp(), b.cp(), a_sink)
                         }
                     }
                 }
             } else {
-                self.implicit_conv(b.cp(), a.cp(), b_sink)
+                self.conv(b.cp(), a.cp(), b_sink)
             }
         } else {
-            self.implicit_conv(b.cp(), a.cp(), b_sink)
+            self.conv(b.cp(), a.cp(), b_sink)
         }
     }
 
     /// Generate implicit conversion for `val` to match `tgt` type
-    pub(super) fn implicit_conv(
+    pub(super) fn conv(
         &mut self,
         from: Type,
         to: Type,

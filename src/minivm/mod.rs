@@ -14,7 +14,7 @@ trait Writable {
     fn write_to(&self, w: &mut impl Write) -> std::io::Result<()>;
 }
 
-#[derive(Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum Inst {
     /// No-op
     Nop,
@@ -261,6 +261,7 @@ impl Writable for Inst {
 
 const MAGIC: u32 = 0x43303A29;
 
+#[derive(Debug, Clone)]
 pub struct FnInfo {
     name_idx: u16,
     param_siz: u16,
@@ -277,6 +278,7 @@ impl Writable for FnInfo {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct StartCodeInfo {
     ins: Vec<Inst>,
 }
@@ -286,7 +288,7 @@ impl Writable for StartCodeInfo {
         self.ins.write_to(w)
     }
 }
-
+#[derive(Debug, Clone)]
 pub enum Constant {
     Number(u32),
     Float(f64),
@@ -314,6 +316,7 @@ impl Writable for Constant {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct O0 {
     version: u32,
     constants: Vec<Constant>,
