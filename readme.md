@@ -27,13 +27,16 @@ $ chigusa <file> --jit
 
 ## Chigusa's implementation
 
-Chigusa uses a handwritten recursive-descending parser to parse C0 programs. It utilizes [cranelift][] to generate machine code.
-
+Chigusa uses a handwritten recursive-descending parser to parse C0 programs.
 ## License
 
 Chigusa is licensed under MIT license.
 
 (c) 2018 Rynco Maekawa
+
+## Documentation
+
+For more documentation and Chinese readme, see [docs](./docs).
 
 ## Dependencies
 
@@ -44,4 +47,3 @@ Chigusa is licensed under MIT license.
 Chigusa (Fukazawa Chigusa) and Kurumi (Kawai Kurumi) are characters from the anime _Iroduku: The World In Colors_. ~~Finally an anime boy gets on the list!~~
 
 [c0_grammar_info]: docs/c0_grammar_1.txt
-[cranelift]: https://github.com/bytecodealliance/cranelift
