@@ -108,11 +108,7 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
         }
     }
 
-    fn add(&mut self, lhs: Type, rhs: Type) -> CompileResult<Type> {
-        todo!()
-    }
-
-    fn pop(&mut self, ty: Type) -> CompileResult<()> {
+    pub(super) fn pop(&mut self, ty: Type) -> CompileResult<()> {
         let slots = ty
             .borrow()
             .occupy_slots()

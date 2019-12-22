@@ -483,10 +483,19 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
 
     fn gen_stmt(&mut self, stmt: &ast::Stmt, scope: Ptr<ast::Scope>) -> CompileResult<()> {
         match &stmt.var {
-            ast::StmtVariant::Expr(e) => self.gen_expr(e.cp(), scope.cp()).map(|_| ()),
+            ast::StmtVariant::Expr(e) => {
+                let typ = self.gen_expr(e.cp(), scope.cp())?;
+                if !typ.borrow().is_unit() {
+                    self.pop(typ.cp())?;
+                }
+                Ok(())
+            }
             ast::StmtVariant::ManyExpr(e) => {
                 for e in e {
-                    self.gen_expr(e.cp(), scope.cp())?;
+                    let typ = self.gen_expr(e.cp(), scope.cp())?;
+                    if !typ.borrow().is_unit() {
+                        self.pop(typ.cp())?;
+                    }
                 }
                 Ok(())
             }

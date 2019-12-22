@@ -230,31 +230,12 @@ impl TypeDef {
         }
     }
 
-    // Nope. No implicit conversion here!
-    // pub fn can_implicit_conv_to(&self, other: &TypeDef) -> bool {
-    //     use TypeDef::*;
-    //     match other {
-    //         Unit | Unknown | TypeErr => true,
-    //         _ => match self {
-    //             Primitive(p) => {
-    //                 if let Primitive(o) = other {
-    //                     if o.occupy_bytes >= p.occupy_bytes && o.var == p.var {
-    //                         true
-    //                     } else {
-    //                         false
-    //                     }
-    //                 } else {
-    //                     false
-    //                 }
-    //             }
-    //             Ref(r) => {
-    //                 // TODO: r.target == Unit
-    //                 false
-    //             }
-    //             _ => false,
-    //         },
-    //     }
-    // }
+    pub fn is_unit(&self) -> bool {
+        match self {
+            TypeDef::Unit => true,
+            _ => false,
+        }
+    }
 }
 
 impl fmt::Debug for TypeDef {
