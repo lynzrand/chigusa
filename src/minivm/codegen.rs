@@ -4,8 +4,8 @@ use crate::c0::ast::{self, *};
 use crate::prelude::*;
 use either::Either;
 use indexmap::{map::Entry, IndexMap};
+use std::convert::TryInto;
 use std::iter::Iterator;
-
 const bytes_per_slot: u16 = 4;
 
 #[derive(Debug, Clone)]
@@ -590,7 +590,7 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
 
             ast::ExprVariant::Literal(lit) => match lit {
                 ast::Literal::Boolean { val } => {
-                    // let val = self.builder.ins().bconst(types::B8, *val);
+                    self.inst_sink().push(Inst::IPush(*val as i32));
                     let typ = Ptr::new(ast::TypeDef::Primitive(ast::PrimitiveType {
                         var: ast::PrimitiveTypeVar::UnsignedInt,
                         occupy_bytes: 1,
@@ -599,25 +599,39 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
                 }
 
                 ast::Literal::Integer { val } => {
-                    let l = type_bits(val.bit_length()).unwrap();
-                    // let val = self
-                    //     .builder
-                    //     .ins()
-                    //     .iconst(Type::int(l).unwrap(), Imm64::new(val.into()));
+                    let val: i32 = val.try_into().map_err(|_| CompileError::IntOverflow)?;
+                    self.inst_sink().push(Inst::IPush(val));
+
                     let typ = Ptr::new(ast::TypeDef::Primitive(ast::PrimitiveType {
                         var: ast::PrimitiveTypeVar::UnsignedInt,
-                        occupy_bytes: (l / 8) as usize,
+                        occupy_bytes: 4,
                     }));
                     Ok(typ)
                 }
 
                 ast::Literal::Float { val } => {
-                    todo!();
-                    // let val = self.builder.ins().f64const(val.to_f64());
                     let typ = Ptr::new(ast::TypeDef::Primitive(ast::PrimitiveType {
                         var: ast::PrimitiveTypeVar::Float,
                         occupy_bytes: 8,
                     }));
+
+                    let val: f64 = val.to_f64();
+                    let idx = self
+                        .data
+                        .consts
+                        .put_data(
+                            &format!("`{}``str{}", self.name, self.data_cnt),
+                            Data {
+                                typ: typ.cp(),
+                                init_val: Either::Left(Constant::Float(val)),
+                                is_const: true,
+                            },
+                        )
+                        .expect("Unable to add double data");
+                    self.inst_sink().push(Inst::LoadC(idx));
+                    self.data_cnt += 1;
+
+                    // let val = self.builder.ins().f64const(val.to_f64());
                     Ok(typ)
                 }
 

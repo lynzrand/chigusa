@@ -22,7 +22,7 @@ pub enum Inst {
     /// () -> char
     CPush(u8),
     /// () -> u32
-    IPush(u32),
+    IPush(i32),
 
     /// u32 -> ()
     Pop1,

@@ -15,7 +15,7 @@ const int k = 3 * y + x * 5 - 8 * &x++;
 int main(){ if (c > 0) print("aaa", x); else {int z = 2; print(z);} }
 "#;
 
-fn main() {
+fn main() -> Result<(), MainError> {
     let opt: ParserConfig = ParserConfig::from_args();
     cute_log::init_with_max_level(opt.verbosity).unwrap();
 
@@ -36,42 +36,26 @@ fn main() {
     if opt.emit == EmitOption::Token {
         let tokens: Vec<_> = token.collect();
         write_output(&opt, tokens);
-        return;
+        return Ok(());
     }
 
-    let tree = chigusa::c0::parser::Parser::new(token).parse();
-
-    let tree = match tree {
-        Ok(v) => v,
-        Err(e) => {
-            log::error!("{:#?}", e);
-            return;
-        }
-    };
+    let tree = chigusa::c0::parser::Parser::new(token).parse()?;
 
     if opt.emit == EmitOption::Ast {
         write_output(&opt, tree);
-        return;
+        return Ok(());
     }
 
-    let s0 = chigusa::minivm::Codegen::new(&tree).compile();
-
-    let s0 = match s0 {
-        Ok(v) => v,
-        Err(e) => {
-            log::error!("{:#?}", e);
-            return;
-        }
-    };
+    let s0 = chigusa::minivm::Codegen::new(&tree).compile()?;
 
     if opt.emit == EmitOption::S0 {
         write_output(&opt, s0);
-        return;
     } else {
         // Emit O0
         let mut f = File::create(&opt.output_file).expect("Failed to create output file");
         s0.write_binary(&mut f).expect("Failed to write");
     }
+    Ok(())
 }
 
 fn write_output<T>(opt: &ParserConfig, val: T)
@@ -147,6 +131,33 @@ impl EmitOption {
             "s0" => Ok(EmitOption::S0),
             "o0" => Ok(EmitOption::O0),
             _ => Err("Bad emit option. Allowed are: token, ast, s0, o0"),
+        }
+    }
+}
+
+#[derive(Debug)]
+enum MainError {
+    Parsing(chigusa::c0::err::ParseError),
+    Compiling(chigusa::minivm::err::CompileError),
+}
+
+impl From<chigusa::c0::err::ParseError> for MainError {
+    fn from(p: chigusa::c0::err::ParseError) -> Self {
+        MainError::Parsing(p)
+    }
+}
+
+impl From<chigusa::minivm::err::CompileError> for MainError {
+    fn from(p: chigusa::minivm::err::CompileError) -> Self {
+        MainError::Compiling(p)
+    }
+}
+
+impl std::fmt::Display for MainError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
+        match self {
+            MainError::Parsing(p) => write!(f, "Parse error: {:#?}", p),
+            MainError::Compiling(p) => write!(f, "Compile error: {:#?}", p),
         }
     }
 }

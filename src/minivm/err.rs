@@ -15,6 +15,7 @@ pub enum CompileError {
     MakePrimitiveFromRef,
     RequireSized(String),
     RequirePrintable(String),
+    IntOverflow,
 
     NotLValue(String),
 
