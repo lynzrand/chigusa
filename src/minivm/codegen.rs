@@ -664,7 +664,7 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
             ast::StmtVariant::Return(e) => self.gen_return(e, scope),
             ast::StmtVariant::Block(e) => todo!("Generate code for block"),
             ast::StmtVariant::Print(e) => self.gen_print(e, scope),
-            ast::StmtVariant::Scan(e) => todo!("Generate code for scan"),
+            ast::StmtVariant::Scan(e) => self.gen_scan(e, scope),
             ast::StmtVariant::Break => todo!("Generate code for return"),
             ast::StmtVariant::If(e) => todo!("Generate code for return`"),
             ast::StmtVariant::While(e) => todo!("Generate code for ret`urn"),
@@ -705,6 +705,31 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
         Ok(())
     }
 
+    fn gen_ident_address(
+        &mut self,
+        i: &ast::Identifier,
+        scope: Ptr<ast::Scope>,
+    ) -> CompileResult<Type> {
+        let def = scope.borrow().find_def_depth(&i.name).unwrap();
+        if def.1 != 0 {
+            // Local variable
+            let loc =
+                self.loc
+                    .get_var(&format!("{}`{}", i.name, def.1))
+                    .ok_or(CompileError::Error(format!(
+                        "Unable to find  identifier {}",
+                        i.name
+                    )))?;
+            let typ = loc.typ.cp();
+            let offset = loc.offset as i32;
+            self.inst_sink().push(Inst::LoadA(0, offset));
+            Ok(typ)
+        } else {
+            // Global variable
+            todo!("Global variable")
+        }
+    }
+
     fn gen_l_value_address(
         &mut self,
         expr: Ptr<ast::Expr>,
@@ -715,22 +740,7 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
         let expr = &*expr;
 
         match &expr.var {
-            ast::ExprVariant::Ident(i) => {
-                let def = scope.borrow().find_def_depth(&i.name).unwrap();
-                if def.1 != 0 {
-                    // Local variable
-                    let loc = self.loc.get_var(&format!("{}`{}", i.name, def.1)).ok_or(
-                        CompileError::Error(format!("Unable to find  identifier {}", i.name)),
-                    )?;
-                    let typ = loc.typ.cp();
-                    let offset = loc.offset as i32;
-                    self.inst_sink().push(Inst::LoadA(0, offset));
-                    Ok(typ)
-                } else {
-                    // Global variable
-                    todo!("Global variable")
-                }
-            }
+            ast::ExprVariant::Ident(i) => self.gen_ident_address(i, scope),
             _ => Err(CompileError::NotLValue(format!("{}", expr))),
         }
     }
@@ -742,7 +752,7 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
 
             let rhs = self.gen_expr(b.rhs.cp(), scope.cp())?;
 
-            let _ = conv(rhs, lhs.cp(), self.inst_sink())?;
+            conv(rhs, lhs.cp(), self.inst_sink())?;
 
             // store lhs
             store(lhs, self.inst_sink())?;
@@ -915,6 +925,55 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
             ast::Literal::Struct { .. } => Err(CompileError::InternalError(
                 "Structs are not yet supported!".into(),
             )),
+        }
+    }
+
+    fn gen_if(&mut self, i: &ast::IfConditional, scope: Ptr<ast::Scope>) -> CompileResult<()> {
+        todo!()
+    }
+
+    fn gen_while(
+        &mut self,
+        i: &ast::WhileConditional,
+        scope: Ptr<ast::Scope>,
+    ) -> CompileResult<()> {
+        todo!()
+    }
+
+    fn gen_break(&mut self, scope: Ptr<ast::Scope>) -> CompileResult<()> {
+        todo!()
+    }
+
+    fn gen_block(&mut self, i: &ast::Block, scope: Ptr<ast::Scope>) -> CompileResult<()> {
+        todo!()
+    }
+
+    fn gen_scan(&mut self, scan: &ast::Identifier, scope: Ptr<ast::Scope>) -> CompileResult<()> {
+        let typ = self.gen_ident_address(scan, scope.cp())?;
+        let typ_borrow = typ.borrow();
+        match &*typ_borrow {
+            ast::TypeDef::Primitive(p) => {
+                match p.var {
+                    ast::PrimitiveTypeVar::Float => {
+                        self.inst_sink().push_many(&[Inst::DScan, Inst::DStore])
+                    }
+                    ast::PrimitiveTypeVar::UnsignedInt => {
+                        if p.occupy_bytes == 1 {
+                            self.inst_sink().push_many(&[Inst::CScan, Inst::IStore])
+                        } else {
+                            self.inst_sink().push_many(&[Inst::IScan, Inst::IStore])
+                        }
+                    }
+                    ast::PrimitiveTypeVar::SignedInt => {
+                        self.inst_sink().push_many(&[Inst::IScan, Inst::IStore])
+                    }
+                }
+                Ok(())
+            }
+            _ => Err(CompileError::RequireScannable(format!(
+                "{:?}",
+                &*typ.borrow()
+            ))),
         }
     }
 
