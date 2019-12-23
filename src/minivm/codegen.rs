@@ -646,42 +646,48 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
         let mut bb_length: IndexMap<usize, usize> = IndexMap::new();
         let mut finished_bb: IndexSet<usize> = IndexSet::new();
         let mut inst = InstSink::new();
-        let mut pending_bb = Vec::new();
-        pending_bb.push(0);
+        let mut pending_bb = std::collections::VecDeque::new();
+        pending_bb.push_back(0);
 
         while pending_bb.len() != 0 {
-            let bb_id = pending_bb.pop().unwrap();
+            let bb_id = pending_bb.pop_back().unwrap();
             let bb = self.bbs.get(bb_id).unwrap();
             let mut bb_mut = bb.borrow_mut();
 
+            log::info!("Parsing BB {}", bb_id);
             if !bb_start.contains_key(&bb_id) {
+                log::debug!("BB is not seen before");
                 // * Brand new basic block
                 bb_start.insert(bb_mut.id, inst.len());
                 bb_length.insert(bb_mut.id, bb_mut.len());
                 inst.append_all(&mut bb_mut.inst);
                 match bb_mut.end {
                     BlockEndJump::Conditional { z, nz } => {
+                        log::debug!("BB: Conditional z {} nz {}", z, nz);
                         // * To be replaced with `JNz(nz)`
                         inst.push(Inst::Nop);
                         // * To be replaced with `Jmp(z)`
                         inst.push(Inst::Nop);
 
-                        pending_bb.push(bb_id);
-                        pending_bb.push(z);
-                        pending_bb.push(nz);
+                        pending_bb.push_back(bb_id);
+                        pending_bb.push_back(z);
+                        pending_bb.push_back(nz);
                     }
                     BlockEndJump::Unconditional(z) => {
                         // * To be replaced with `Jmp(z)`
+                        log::info!("BB: Unconditional z {}", z);
                         inst.push(Inst::Nop);
 
-                        pending_bb.push(bb_id);
-                        pending_bb.push(z);
+                        pending_bb.push_back(bb_id);
+                        pending_bb.push_back(z);
                     }
                     BlockEndJump::Return => {
                         // * Already finished because BB does not link to another
+                        log::info!("BB: Return",);
                         finished_bb.insert(bb_id);
                     }
                     BlockEndJump::Unknown => {
+                        log::info!("BB: Unknown",);
                         if self.ret_type.borrow().is_unit() {
                             // * Unit return type. Manually add `ret` here. Same as above.
                             inst.push(Inst::Ret);
@@ -694,31 +700,57 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
                 }
             } else if !finished_bb.contains(&bb_id) {
                 // * Basic block that has its decendants resolved
+                log::debug!("BB has seen before");
                 match bb_mut.end {
                     BlockEndJump::Conditional { z, nz } => {
                         let nz_place =
                             *bb_start.get(&bb_id).unwrap() + *bb_length.get(&bb_id).unwrap();
 
+                        let mut not_finished = false;
                         // Replace nop with `JNz(nz)`
-                        let replace_nz = inst.0.get_mut(nz_place).unwrap();
-                        *replace_nz = Inst::JNe(*bb_start.get(&nz).unwrap() as u16);
+                        if bb_start.contains_key(&nz) {
+                            let replace_nz = inst.0.get_mut(nz_place).unwrap();
+                            *replace_nz = Inst::JNe(*bb_start.get(&nz).unwrap() as u16);
+                        } else {
+                            // No luck. Try again later!
+                            not_finished = not_finished || true;
+                            pending_bb.push_front(bb_id);
+                            pending_bb.push_back(nz);
+                            log::debug!("BB has no nz. Waiting.");
+                        }
 
                         // Replace nop with `Jmp(z)`
-                        let replace_nz = inst.0.get_mut(nz_place + 1).unwrap();
-                        *replace_nz = Inst::Jmp(*bb_start.get(&z).unwrap() as u16);
+                        if bb_start.contains_key(&z) {
+                            let replace_z = inst.0.get_mut(nz_place + 1).unwrap();
+                            *replace_z = Inst::Jmp(*bb_start.get(&z).unwrap() as u16);
+                        } else {
+                            not_finished = not_finished || true;
+                            pending_bb.push_front(bb_id);
+                            pending_bb.push_back(z);
+                            log::debug!("BB has no z. Waiting.");
+                        }
+
+                        if !not_finished {
+                            finished_bb.insert(bb_id);
+                        }
                     }
                     BlockEndJump::Unconditional(z) => {
                         let z_place =
                             *bb_start.get(&bb_id).unwrap() + *bb_length.get(&bb_id).unwrap();
 
-                        // Replace nop with `Jmp(nz)`
-                        let replace_nz = inst.0.get_mut(z_place).unwrap();
-                        *replace_nz = Inst::Jmp(*bb_start.get(&z).unwrap() as u16);
+                        if bb_start.contains_key(&z) {
+                            // Replace nop with `Jmp(nz)`
+                            let replace_nz = inst.0.get_mut(z_place).unwrap();
+                            *replace_nz = Inst::Jmp(*bb_start.get(&z).unwrap() as u16);
+                            finished_bb.insert(bb_id);
+                        } else {
+                            pending_bb.push_front(bb_id);
+                        }
                     }
-                    _ => {
-                        // Already finished!
-                    }
+                    _ => {} // Already finished!
                 }
+            } else {
+                log::debug!("BB is finished");
             }
         }
 
@@ -1127,6 +1159,7 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
         scope: Ptr<ast::Scope>,
     ) -> CompileResult<BB> {
         {
+            // Condition
             let cond = i.cond.cp();
             let inst = &mut bb.borrow_mut().inst;
             let cond_ty = self.gen_expr(cond, inst, scope.cp())?;
@@ -1169,11 +1202,43 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
         bb: BB,
         scope: Ptr<ast::Scope>,
     ) -> CompileResult<BB> {
-        todo!()
+        {
+            // Condition
+            let cond = i.cond.cp();
+            let inst = &mut bb.borrow_mut().inst;
+            let cond_ty = self.gen_expr(cond, inst, scope.cp())?;
+            conv(cond_ty, Self::int_type(1), inst)?;
+        }
+        let (while_bb_id, while_bb) = self.new_bb();
+        let (final_bb_id, final_bb) = self.new_bb();
+        self.break_tgt.push(final_bb_id);
+        let while_bb = self.gen_stmt(&*i.block.borrow(), while_bb, scope.cp())?;
+        {
+            // Condition
+            let cond = i.cond.cp();
+            let inst = &mut while_bb.borrow_mut().inst;
+            let cond_ty = self.gen_expr(cond, inst, scope.cp())?;
+            conv(cond_ty, Self::int_type(1), inst)?;
+        }
+        self.break_tgt.pop();
+        {
+            bb.borrow_mut().end = BlockEndJump::Conditional {
+                nz: while_bb_id,
+                z: final_bb_id,
+            };
+            while_bb.borrow_mut().end = BlockEndJump::Conditional {
+                nz: while_bb_id,
+                z: final_bb_id,
+            };
+        }
+        Ok(final_bb)
     }
 
-    fn gen_break(&mut self, bb: BB, scope: Ptr<ast::Scope>) -> CompileResult<BB> {
-        todo!()
+    fn gen_break(&mut self, bb: BB, _: Ptr<ast::Scope>) -> CompileResult<BB> {
+        let break_tgt = *self.break_tgt.last().ok_or(CompileError::NoTargetToBreak)?;
+        let (_, dummy_bb) = self.new_bb();
+        bb.borrow_mut().end = BlockEndJump::Unconditional(break_tgt);
+        Ok(dummy_bb)
     }
 
     fn gen_scan(
