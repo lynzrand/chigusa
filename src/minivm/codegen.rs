@@ -672,6 +672,21 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
         }
     }
 
+    fn gen_expr(&mut self, expr: Ptr<ast::Expr>, scope: Ptr<ast::Scope>) -> CompileResult<Type> {
+        let expr = expr.borrow();
+        let expr = &*expr;
+        match &expr.var {
+            ast::ExprVariant::BinaryOp(b) => self.gen_bin_op(b, scope),
+            ast::ExprVariant::UnaryOp(u) => self.gen_una_op(u, scope),
+            ast::ExprVariant::Ident(i) => self.gen_ident_expr(i, scope),
+            ast::ExprVariant::FunctionCall(f) => self.gen_func_call(f, scope),
+            ast::ExprVariant::Literal(lit) => self.gen_literal(lit, scope),
+            _ => Err(CompileError::NotImplemented(
+                "Implement other expression variants".into(),
+            )),
+        }
+    }
+
     fn gen_scope(&mut self, block: &ast::Block, scope: Ptr<ast::Scope>) -> CompileResult<()> {
         self.loc.dive_into_scope();
 
@@ -720,180 +735,185 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
         }
     }
 
-    fn gen_expr(&mut self, expr: Ptr<ast::Expr>, scope: Ptr<ast::Scope>) -> CompileResult<Type> {
-        let expr = expr.borrow();
-        let expr = &*expr;
-        match &expr.var {
-            ast::ExprVariant::BinaryOp(b) => {
-                if b.op == ast::OpVar::_Asn || b.op == ast::OpVar::_Csn {
-                    // * This generates address for lhs.
-                    let lhs =
-                        self.gen_l_value_address(b.lhs.cp(), b.op == ast::OpVar::_Csn, scope.cp())?;
+    fn gen_bin_op(&mut self, b: &ast::BinaryOp, scope: Ptr<ast::Scope>) -> CompileResult<Type> {
+        if b.op == ast::OpVar::_Asn || b.op == ast::OpVar::_Csn {
+            // * This generates address for lhs.
+            let lhs = self.gen_l_value_address(b.lhs.cp(), b.op == ast::OpVar::_Csn, scope.cp())?;
 
-                    let rhs = self.gen_expr(b.rhs.cp(), scope.cp())?;
+            let rhs = self.gen_expr(b.rhs.cp(), scope.cp())?;
 
-                    let _ = conv(rhs, lhs.cp(), self.inst_sink())?;
+            let _ = conv(rhs, lhs.cp(), self.inst_sink())?;
 
-                    // store lhs
-                    store(lhs, self.inst_sink())?;
+            // store lhs
+            store(lhs, self.inst_sink())?;
 
-                    // * Assignment evaluates as unit type!
-                    Ok(Ptr::new(ast::TypeDef::Unit))
-                } else {
-                    // Normal expressions
-                    self.inst.push(self.sink_pool.get());
-                    let lhs = self.gen_expr(b.lhs.cp(), scope.cp())?;
-                    let mut lhs_op = self.inst.pop().unwrap();
+            // * Assignment evaluates as unit type!
+            Ok(Ptr::new(ast::TypeDef::Unit))
+        } else {
+            // Normal expressions
+            self.inst.push(self.sink_pool.get());
+            let lhs = self.gen_expr(b.lhs.cp(), scope.cp())?;
+            let mut lhs_op = self.inst.pop().unwrap();
 
-                    self.inst.push(self.sink_pool.get());
-                    let rhs = self.gen_expr(b.rhs.cp(), scope.cp())?;
-                    let mut rhs_op = self.inst.pop().unwrap();
+            self.inst.push(self.sink_pool.get());
+            let rhs = self.gen_expr(b.rhs.cp(), scope.cp())?;
+            let mut rhs_op = self.inst.pop().unwrap();
 
-                    let typ = flatten_ty(lhs, &mut lhs_op, rhs, &mut rhs_op)?;
+            let typ = flatten_ty(lhs, &mut lhs_op, rhs, &mut rhs_op)?;
 
-                    self.inst_sink().append_all(&mut lhs_op);
-                    self.inst_sink().append_all(&mut rhs_op);
+            self.inst_sink().append_all(&mut lhs_op);
+            self.inst_sink().append_all(&mut rhs_op);
 
-                    b.op.inst(self.inst_sink(), typ.cp())?;
+            b.op.inst(self.inst_sink(), typ.cp())?;
 
-                    self.sink_pool.put(lhs_op);
-                    self.sink_pool.put(rhs_op);
+            self.sink_pool.put(lhs_op);
+            self.sink_pool.put(rhs_op);
 
-                    Ok(typ)
-                }
-            }
+            Ok(typ)
+        }
+    }
 
-            ast::ExprVariant::UnaryOp(u) => {
-                // Calculate expression body
-                // self.inst.push(self.sink_pool.get());
-                let lhs = self.gen_expr(u.val.cp(), scope.cp())?;
-                // let mut lhs_op = self.inst.pop().unwrap();
+    fn gen_una_op(&mut self, u: &ast::UnaryOp, scope: Ptr<ast::Scope>) -> CompileResult<Type> {
+        // Calculate expression body
+        // self.inst.push(self.sink_pool.get());
+        let lhs = self.gen_expr(u.val.cp(), scope.cp())?;
+        // let mut lhs_op = self.inst.pop().unwrap();
 
-                u.op.inst(&mut self.inst_sink(), lhs.cp())?;
+        u.op.inst(&mut self.inst_sink(), lhs.cp())?;
 
-                Ok(lhs)
-            }
+        Ok(lhs)
+    }
 
-            ast::ExprVariant::Ident(i) => {
-                let def = scope.borrow().find_def_depth(&i.name).unwrap();
-                let loc = self.loc.get_var(&format!("{}`{}", i.name, def.1)).ok_or(
-                    CompileError::Error(format!("Unable to find  identifier {}", i.name)),
-                )?;
-                let typ = loc.typ.cp();
-                let offset = loc.offset as i32;
-                self.inst_sink().push(Inst::LoadA(0, offset));
-                load(typ.cp(), self.inst_sink())?;
+    fn gen_ident_expr(
+        &mut self,
+        i: &ast::Identifier,
+        scope: Ptr<ast::Scope>,
+    ) -> CompileResult<Type> {
+        let def = scope.borrow().find_def_depth(&i.name).unwrap();
+        let loc = self
+            .loc
+            .get_var(&format!("{}`{}", i.name, def.1))
+            .ok_or(CompileError::Error(format!(
+                "Unable to find  identifier {}",
+                i.name
+            )))?;
+        let typ = loc.typ.cp();
+        let offset = loc.offset as i32;
+        self.inst_sink().push(Inst::LoadA(0, offset));
+        load(typ.cp(), self.inst_sink())?;
+        Ok(typ)
+    }
+
+    fn gen_func_call(
+        &mut self,
+        f: &ast::FunctionCall,
+        scope: Ptr<ast::Scope>,
+    ) -> CompileResult<Type> {
+        let func = &f.func;
+        let func_entry = self
+            .data
+            .fns
+            .get_full(func)
+            .ok_or_else(|| CompileError::NonExistFunc("Function does not exist".into()))?;
+
+        let params = &func_entry.2.params;
+
+        if f.params.len() != params.len() {
+            return Err(CompileError::ParamLengthMismatch);
+        }
+        let f_idx = func_entry.0 as u16;
+        let f_ret_typ = func_entry.2.return_type.cp();
+
+        // Push each param into stack
+        // * Rust complains about lifetimes here, so we'll just move everything into
+        // * a vector for now. A little waste of memory, but hey it works.
+        let params_pair_iter: Vec<_> = f
+            .params
+            .iter()
+            .zip(params.iter().map(|param| param.cp()))
+            .collect();
+
+        for param in params_pair_iter {
+            let res = self.gen_expr(param.0.cp(), scope.cp())?;
+            conv(res, param.1.cp(), self.inst_sink())?;
+        }
+
+        self.inst_sink().push(Inst::Call(f_idx));
+
+        Ok(f_ret_typ)
+    }
+
+    fn gen_literal(&mut self, lit: &ast::Literal, scope: Ptr<ast::Scope>) -> CompileResult<Type> {
+        match lit {
+            ast::Literal::Boolean { val } => {
+                self.inst_sink().push(Inst::IPush(*val as i32));
+                let typ = Ptr::new(ast::TypeDef::Primitive(ast::PrimitiveType {
+                    var: ast::PrimitiveTypeVar::UnsignedInt,
+                    occupy_bytes: 1,
+                }));
                 Ok(typ)
             }
 
-            ast::ExprVariant::FunctionCall(f) => {
-                let func = &f.func;
-                let func_entry =
-                    self.data.fns.get_full(func).ok_or_else(|| {
-                        CompileError::NonExistFunc("Function does not exist".into())
-                    })?;
+            ast::Literal::Integer { val } => {
+                let val: i32 = val.try_into().map_err(|_| CompileError::IntOverflow)?;
+                self.inst_sink().push(Inst::IPush(val));
 
-                let params = &func_entry.2.params;
-
-                if f.params.len() != params.len() {
-                    return Err(CompileError::ParamLengthMismatch);
-                }
-                let f_idx = func_entry.0 as u16;
-                let f_ret_typ = func_entry.2.return_type.cp();
-
-                // Push each param into stack
-                // * Rust complains about lifetimes here, so we'll just move everything into
-                // * a vector for now. A little waste of memory, but hey it works.
-                let params_pair_iter: Vec<_> = f
-                    .params
-                    .iter()
-                    .zip(params.iter().map(|param| param.cp()))
-                    .collect();
-
-                for param in params_pair_iter {
-                    let res = self.gen_expr(param.0.cp(), scope.cp())?;
-                    conv(res, param.1.cp(), self.inst_sink())?;
-                }
-
-                self.inst_sink().push(Inst::Call(f_idx));
-
-                Ok(f_ret_typ)
+                let typ = Ptr::new(ast::TypeDef::Primitive(ast::PrimitiveType {
+                    var: ast::PrimitiveTypeVar::UnsignedInt,
+                    occupy_bytes: 4,
+                }));
+                Ok(typ)
             }
 
-            ast::ExprVariant::Literal(lit) => match lit {
-                ast::Literal::Boolean { val } => {
-                    self.inst_sink().push(Inst::IPush(*val as i32));
-                    let typ = Ptr::new(ast::TypeDef::Primitive(ast::PrimitiveType {
+            ast::Literal::Float { val } => {
+                let typ = Ptr::new(ast::TypeDef::Primitive(ast::PrimitiveType {
+                    var: ast::PrimitiveTypeVar::Float,
+                    occupy_bytes: 8,
+                }));
+
+                let val: f64 = val.to_f64();
+                let idx = self
+                    .data
+                    .consts
+                    .put_data(
+                        &format!("`{}``str{}", self.name, self.data_cnt),
+                        Data {
+                            typ: typ.cp(),
+                            init_val: Either::Left(Constant::Float(val)),
+                            is_const: true,
+                        },
+                    )
+                    .expect("Unable to add double data");
+                self.inst_sink().push(Inst::LoadC(idx));
+                self.data_cnt += 1;
+
+                // let val = self.builder.ins().f64const(val.to_f64());
+                Ok(typ)
+            }
+
+            ast::Literal::String { val } => {
+                let offset = self
+                    .data
+                    .consts
+                    .put_str(
+                        &format!("`{}``str{}", self.name, self.data_cnt),
+                        val.into(),
+                        true,
+                    )
+                    .unwrap();
+                self.data_cnt += 1;
+                self.inst_sink().push(Inst::LoadC(offset));
+                let typ = Ptr::new(ast::TypeDef::Ref(ast::RefType {
+                    target: Ptr::new(ast::TypeDef::Primitive(ast::PrimitiveType {
                         var: ast::PrimitiveTypeVar::UnsignedInt,
                         occupy_bytes: 1,
-                    }));
-                    Ok(typ)
-                }
+                    })),
+                }));
+                Ok(typ)
+            }
 
-                ast::Literal::Integer { val } => {
-                    let val: i32 = val.try_into().map_err(|_| CompileError::IntOverflow)?;
-                    self.inst_sink().push(Inst::IPush(val));
-
-                    let typ = Ptr::new(ast::TypeDef::Primitive(ast::PrimitiveType {
-                        var: ast::PrimitiveTypeVar::UnsignedInt,
-                        occupy_bytes: 4,
-                    }));
-                    Ok(typ)
-                }
-
-                ast::Literal::Float { val } => {
-                    let typ = Ptr::new(ast::TypeDef::Primitive(ast::PrimitiveType {
-                        var: ast::PrimitiveTypeVar::Float,
-                        occupy_bytes: 8,
-                    }));
-
-                    let val: f64 = val.to_f64();
-                    let idx = self
-                        .data
-                        .consts
-                        .put_data(
-                            &format!("`{}``str{}", self.name, self.data_cnt),
-                            Data {
-                                typ: typ.cp(),
-                                init_val: Either::Left(Constant::Float(val)),
-                                is_const: true,
-                            },
-                        )
-                        .expect("Unable to add double data");
-                    self.inst_sink().push(Inst::LoadC(idx));
-                    self.data_cnt += 1;
-
-                    // let val = self.builder.ins().f64const(val.to_f64());
-                    Ok(typ)
-                }
-
-                ast::Literal::String { val } => {
-                    let offset = self
-                        .data
-                        .consts
-                        .put_str(
-                            &format!("`{}``str{}", self.name, self.data_cnt),
-                            val.into(),
-                            true,
-                        )
-                        .unwrap();
-                    self.data_cnt += 1;
-                    self.inst_sink().push(Inst::LoadC(offset));
-                    let typ = Ptr::new(ast::TypeDef::Ref(ast::RefType {
-                        target: Ptr::new(ast::TypeDef::Primitive(ast::PrimitiveType {
-                            var: ast::PrimitiveTypeVar::UnsignedInt,
-                            occupy_bytes: 1,
-                        })),
-                    }));
-                    Ok(typ)
-                }
-
-                ast::Literal::Struct { .. } => Err(CompileError::InternalError(
-                    "Structs are not yet supported!".into(),
-                )),
-            },
-            _ => Err(CompileError::NotImplemented(
-                "Implement other expression variants".into(),
+            ast::Literal::Struct { .. } => Err(CompileError::InternalError(
+                "Structs are not yet supported!".into(),
             )),
         }
     }
