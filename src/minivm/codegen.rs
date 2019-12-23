@@ -1,4 +1,5 @@
 use super::err::*;
+use super::instgen::*;
 use super::*;
 use crate::c0::ast::{self, *};
 use crate::prelude::*;
@@ -84,27 +85,28 @@ pub(super) struct FunctionType {
     pub params: Vec<Ptr<TypeDef>>,
     pub return_type: Ptr<TypeDef>,
     pub body: Option<InstSink>,
+    pub param_siz: u32,
     pub is_extern: bool,
     pub name_idx: u16,
 }
 
-impl From<ast::FunctionType> for FunctionType {
-    fn from(t: ast::FunctionType) -> Self {
-        FunctionType {
-            params: t.params,
-            return_type: t.return_type,
-            body: None,
-            is_extern: t.is_extern,
-            name_idx: 0,
+impl Into<FnInfo> for FunctionType {
+    fn into(self) -> FnInfo {
+        FnInfo {
+            name_idx: self.name_idx,
+            ins: self.body.unwrap().unwrap(),
+            lvl: 1,
+            // TODO
+            param_siz: self.param_siz as u16,
         }
     }
 }
 
 #[derive(Debug, Clone)]
 struct GlobalData {
-    vars: DataSink,
-    consts: DataSink,
-    fns: IndexMap<String, FunctionType>,
+    pub vars: DataSink,
+    pub consts: DataSink,
+    pub fns: IndexMap<String, FunctionType>,
 }
 
 impl GlobalData {
@@ -169,7 +171,6 @@ impl InstSink {
 pub struct Codegen<'a> {
     prog: &'a ast::Program,
     glob: GlobalData,
-    fn_types: Vec<FnInfo>,
 }
 
 impl<'a> Codegen<'a> {
@@ -177,15 +178,11 @@ impl<'a> Codegen<'a> {
         Codegen {
             prog,
             glob: GlobalData::new(),
-            fn_types: vec![],
         }
     }
 
     pub fn compile(mut self) -> CompileResult<O0> {
         let start_stmts = &self.prog.stmts;
-        // TODO: Make _start function
-
-        let start_code = InstSink::new();
 
         let decls = &self.prog.scope;
         let decls = &*decls.borrow();
@@ -194,15 +191,17 @@ impl<'a> Codegen<'a> {
             // TODO: add global variables
         }
 
+        // TODO: Make _start function
+
+        let start_code = InstSink::new();
+
         for item in decls.defs.iter() {
             let name = item.0;
             let def = item.1.borrow();
             if let ast::SymbolDef::Var { typ, .. } = &*def {
                 let typ = typ.borrow();
                 if let ast::TypeDef::Function(f) = &*typ {
-                    let result = self.compile_fn(f, name)?;
-                    log::info!("{:#?}", result);
-                    self.fn_types.push(result);
+                    self.compile_fn(f, name)?;
                 }
             }
         }
@@ -222,33 +221,48 @@ impl<'a> Codegen<'a> {
             start_code: StartCodeInfo {
                 ins: start_code.unwrap(),
             },
-            functions: self.fn_types,
+            functions: self.glob.fns.into_iter().map(|f| f.1.into()).collect(),
         })
     }
 
-    fn compile_fn(&mut self, func: &ast::FunctionType, name: &str) -> CompileResult<FnInfo> {
+    fn compile_fn(&mut self, func: &ast::FunctionType, name: &str) -> CompileResult<()> {
         // TODO: Add signature extractor
+        let fn_name = format!("`function_name`{}", name);
         let name_idx = self
             .glob
             .consts
-            .put_str(&format!("`function_name`{}", name), name.into(), true)
+            .put_str(&fn_name, name.into(), true)
             .unwrap();
         // let sig = FnCodegen::extract_sig(func, self);
 
-        let ret = resolve_ty(&*func.return_type.borrow(), self.prog.scope.cp());
-        let mut fnc = FnCodegen::new(func, name, self, Ptr::new(ret));
+        let ret = Ptr::new(resolve_ty(
+            &*func.return_type.borrow(),
+            self.prog.scope.cp(),
+        ));
+        let params: Vec<_> = func
+            .params
+            .iter()
+            .map(|i| Ptr::new(resolve_ty(&*i.borrow(), self.prog.scope.cp())))
+            .collect();
+        let params_clone = params.clone();
+        let mut fnc = FnCodegen::new(func, name, self, ret.cp(), params);
 
-        fnc.gen();
+        fnc.gen()?;
+        let param_siz = fnc.param_siz;
         let inst = fnc.finish();
-        let func = FnInfo {
+        let func = FunctionType {
             name_idx,
-            ins: inst.unwrap(),
-            lvl: 1,
             // TODO
-            param_siz: 0,
+            param_siz,
+            params: params_clone,
+            return_type: ret,
+            body: Some(inst),
+            is_extern: false,
         };
 
-        Ok(func)
+        // * This operation **WILL** replace the old function entry, but the index is preserved
+        self.glob.fns.insert(fn_name, func);
+        Ok(())
     }
 }
 
@@ -347,6 +361,12 @@ impl LocalVars {
             is_const,
             typ: typ.cp(),
         };
+        log::trace!(
+            "Inserting local variable: {}, size {}, offset {}",
+            name,
+            size,
+            cur_stack_size
+        );
         self.def_map.insert(name.into(), loc).map_or_else(
             || Ok(()),
             |_| {
@@ -355,10 +375,18 @@ impl LocalVars {
                 ))
             },
         )?;
+        {
+            let last = self.size_stack.last_mut().unwrap();
+            *last = *last + size;
+        }
         if cur_stack_size + size > self.max_stack_size {
             self.max_stack_size = cur_stack_size + size;
         }
         Ok(())
+    }
+
+    pub fn get_var(&self, name: &str) -> Option<&LocalVar> {
+        self.def_map.get(name)
     }
 
     pub fn dive_into_scope(&mut self) {
@@ -428,11 +456,15 @@ where
 pub(super) struct FnCodegen<'a, 'b> {
     f: &'b ast::FunctionType,
     ret_type: Type,
+    params: Vec<Type>,
+    param_siz: u32,
 
     name: &'b str,
     // ctx: &'b mut Codegen<'a, T>,
-    ebb_cnt: u32,
+    branch_cnt: u32,
+    branch_returned: u32,
     loc_cnt: u16,
+
     /// Data count, only for naming usage
     data_cnt: u32,
     data: &'b mut GlobalData,
@@ -450,12 +482,16 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
         name: &'b str,
         ctx: &'b mut Codegen<'c>,
         ret_type: Type,
+        params: Vec<Type>,
     ) -> FnCodegen<'a, 'b> {
         FnCodegen {
             f,
             name,
             ret_type,
-            ebb_cnt: 0,
+            params,
+            param_siz: 0,
+            branch_cnt: 1,
+            branch_returned: 0,
             data_cnt: 0,
             loc_cnt: 0,
             data: &mut ctx.glob,
@@ -473,17 +509,27 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
     }
 
     pub fn gen(&mut self) -> CompileResult<()> {
-        println!("{:#?}", self);
         if let Some(b) = &self.f.body {
+            self.param_siz = self.params.iter().try_fold(0, |sum, item| {
+                Ok(item
+                    .borrow()
+                    .occupy_slots()
+                    .ok_or(CompileError::RequireSized("".into()))?
+                    + sum)
+            })?;
             self.gen_scope(b, b.scope.cp())?;
 
-            // Check local variable size
+            // Calculate local variable size
             {
                 let stack_size = self.loc.max_stack_size();
 
-                // * We have one instruction sink left
-                self.inst_sink().prepend(Inst::SNew(stack_size));
-                // * cur_inst gets deallocated because we dont need it anymore.
+                log::info!(
+                    "The function has max stack size of {} slots, of which {} are params.",
+                    stack_size,
+                    self.param_siz
+                );
+                let param_siz = self.param_siz;
+                self.inst_sink().prepend(Inst::SNew(stack_size - param_siz));
             }
 
             // Check return type
@@ -532,13 +578,13 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
                     let var_loc = self.loc_cnt;
                     self.loc_cnt = self.loc_cnt + 1;
 
+                    let typ = resolve_ty(&*typ.borrow(), scope);
                     let occupy_slots = typ
-                        .borrow()
                         .occupy_slots()
                         .ok_or(CompileError::RequireSized(format!("{:?}", typ)))?;
 
                     self.loc
-                        .add_var(&var_name, occupy_slots, *is_const, typ.cp())?;
+                        .add_var(&var_name, occupy_slots, *is_const, Ptr::new(typ))?;
                 } else {
                     todo!("Add global values");
                     // self.builder.create_global_value();
@@ -553,7 +599,7 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
             ast::StmtVariant::Expr(e) => {
                 let typ = self.gen_expr(e.cp(), scope.cp())?;
                 if !typ.borrow().is_unit() {
-                    self.pop(typ.cp())?;
+                    pop(typ.cp(), self.inst_sink())?;
                 }
                 Ok(())
             }
@@ -561,7 +607,7 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
                 for e in e {
                     let typ = self.gen_expr(e.cp(), scope.cp())?;
                     if !typ.borrow().is_unit() {
-                        self.pop(typ.cp())?;
+                        pop(typ.cp(), self.inst_sink())?;
                     }
                 }
                 Ok(())
@@ -581,6 +627,11 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
         self.loc.dive_into_scope();
 
         let scope = block.scope.cp();
+        let defs = scope.borrow();
+        for local in &defs.defs {
+            self.add_local(&local.0, &*local.1.borrow(), defs.id, scope.cp())?;
+        }
+
         let stmts = &block.stmts;
         for stmt in stmts {
             self.gen_stmt(stmt, scope.cp())?;
@@ -590,7 +641,7 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
         Ok(())
     }
 
-    fn gen_l_value_store(
+    fn gen_l_value_address(
         &mut self,
         expr: Ptr<ast::Expr>,
         is_const_storage: bool,
@@ -600,11 +651,24 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
         let expr = &*expr;
 
         match &expr.var {
-            ast::ExprVariant::Ident(i) => {}
-            _ => Err(CompileError::NotLValue(format!("{}", expr)))?,
+            ast::ExprVariant::Ident(i) => {
+                let def = scope.borrow().find_def_depth(&i.name).unwrap();
+                if def.1 != 0 {
+                    // Local variable
+                    let loc = self.loc.get_var(&format!("{}`{}", i.name, def.1)).ok_or(
+                        CompileError::Error(format!("Unable to find  identifier {}", i.name)),
+                    )?;
+                    let typ = loc.typ.cp();
+                    let offset = loc.offset as i32;
+                    self.inst_sink().push(Inst::LoadA(0, offset));
+                    Ok(typ)
+                } else {
+                    // Global variable
+                    todo!("Global variable")
+                }
+            }
+            _ => Err(CompileError::NotLValue(format!("{}", expr))),
         }
-
-        todo!()
     }
 
     fn gen_expr(&mut self, expr: Ptr<ast::Expr>, scope: Ptr<ast::Scope>) -> CompileResult<Type> {
@@ -613,25 +677,16 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
         match &expr.var {
             ast::ExprVariant::BinaryOp(b) => {
                 if b.op == ast::OpVar::_Asn || b.op == ast::OpVar::_Csn {
-                    // It's an assignment
-                    // * This generates storage procedure for lhs.
-                    self.inst.push(self.sink_pool.get());
+                    // * This generates address for lhs.
                     let lhs =
-                        self.gen_l_value_store(b.lhs.cp(), b.op == ast::OpVar::_Csn, scope.cp())?;
-                    let mut lhs_store = self.inst.pop().unwrap();
+                        self.gen_l_value_address(b.lhs.cp(), b.op == ast::OpVar::_Csn, scope.cp())?;
 
-                    self.inst.push(self.sink_pool.get());
                     let rhs = self.gen_expr(b.rhs.cp(), scope.cp())?;
-                    let mut rhs_op = self.inst.pop().unwrap();
 
-                    let _ = self.conv(rhs, lhs, &mut rhs_op)?;
+                    let _ = conv(rhs, lhs.cp(), self.inst_sink())?;
 
-                    self.inst_sink().append_all(&mut rhs_op);
-                    self.inst_sink().append_all(&mut lhs_store);
-
-                    // Put sinks back to pool
-                    self.sink_pool.put(lhs_store);
-                    self.sink_pool.put(rhs_op);
+                    // store lhs
+                    store(lhs, self.inst_sink())?;
 
                     // * Assignment evaluates as unit type!
                     Ok(Ptr::new(ast::TypeDef::Unit))
@@ -645,7 +700,7 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
                     let rhs = self.gen_expr(b.rhs.cp(), scope.cp())?;
                     let mut rhs_op = self.inst.pop().unwrap();
 
-                    let typ = self.flatten_ty(lhs, &mut lhs_op, rhs, &mut rhs_op)?;
+                    let typ = flatten_ty(lhs, &mut lhs_op, rhs, &mut rhs_op)?;
 
                     self.inst_sink().append_all(&mut lhs_op);
                     self.inst_sink().append_all(&mut rhs_op);
@@ -665,11 +720,15 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
             }
 
             ast::ExprVariant::Ident(i) => {
-                todo!()
-                // let Type = self.loc.get(&i.name).unwrap();
-                // let val = self.builder.use_var(Type.0);
-                // let typ = Type.1.cp();
-                // Ok(Type(val, typ))
+                let def = scope.borrow().find_def_depth(&i.name).unwrap();
+                let loc = self.loc.get_var(&format!("{}`{}", i.name, def.1)).ok_or(
+                    CompileError::Error(format!("Unable to find  identifier {}", i.name)),
+                )?;
+                let typ = loc.typ.cp();
+                let offset = loc.offset as i32;
+                self.inst_sink().push(Inst::LoadA(0, offset));
+                self.inst_sink().push(Inst::ILoad);
+                Ok(typ)
             }
 
             ast::ExprVariant::FunctionCall(f) => {

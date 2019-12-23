@@ -89,10 +89,11 @@ impl Scope {
     }
 
     pub fn new() -> Scope {
+        let id = unsafe { scope_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst) };
         Scope {
             last: None,
             defs: IndexMap::new(),
-            id: 0,
+            id,
         }
     }
 
@@ -170,6 +171,7 @@ impl Scope {
 impl fmt::Debug for Scope {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Scope")
+            .field("id", &self.id)
             .field(
                 "parent",
                 &match self.last {

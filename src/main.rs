@@ -1,5 +1,6 @@
 use chigusa::c0::lexer;
 use clap;
+use failure::Fail;
 use std::fs::*;
 use std::io::{Read, Write};
 use std::path::PathBuf;
@@ -135,7 +136,7 @@ impl EmitOption {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Fail)]
 enum MainError {
     Parsing(chigusa::c0::err::ParseError),
     Compiling(chigusa::minivm::err::CompileError),
