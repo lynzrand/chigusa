@@ -151,6 +151,10 @@ impl InstSink {
         }
     }
 
+    pub fn prepend(&mut self, inst: Inst) {
+        self.0.insert(0, inst);
+    }
+
     pub fn reset(&mut self) {
         self.0.clear()
     }
@@ -305,6 +309,71 @@ fn type_bits(len: u32) -> Option<u16> {
     }
 }
 
+#[derive(Clone, Eq, PartialEq, Debug)]
+pub(super) struct LocalVar {
+    size: u32,
+    offset: u32,
+    is_const: bool,
+    typ: Type,
+}
+
+#[derive(Clone, Eq, PartialEq, Debug)]
+pub(super) struct LocalVars {
+    def_map: IndexMap<String, LocalVar>,
+    size_stack: Vec<u32>,
+    max_stack_size: u32,
+}
+
+impl LocalVars {
+    pub fn new() -> LocalVars {
+        LocalVars {
+            def_map: IndexMap::new(),
+            size_stack: Vec::new(),
+            max_stack_size: 0,
+        }
+    }
+
+    pub fn add_var(
+        &mut self,
+        name: &str,
+        size: u32,
+        is_const: bool,
+        typ: Type,
+    ) -> CompileResult<()> {
+        let cur_stack_size = self.size_stack.iter().sum();
+        let loc = LocalVar {
+            offset: cur_stack_size,
+            size,
+            is_const,
+            typ: typ.cp(),
+        };
+        self.def_map.insert(name.into(), loc).map_or_else(
+            || Ok(()),
+            |_| {
+                Err(CompileError::InternalError(
+                    "Name conflict on local variable declaration".into(),
+                ))
+            },
+        )?;
+        if cur_stack_size + size > self.max_stack_size {
+            self.max_stack_size = cur_stack_size + size;
+        }
+        Ok(())
+    }
+
+    pub fn dive_into_scope(&mut self) {
+        self.size_stack.push(0);
+    }
+
+    pub fn pop_scope(&mut self) {
+        self.size_stack.pop();
+    }
+
+    pub fn max_stack_size(&self) -> u32 {
+        self.max_stack_size
+    }
+}
+
 pub struct DeqPool<'a, T> {
     pool: std::collections::VecDeque<T>,
     new_item: &'a dyn Fn() -> T,
@@ -367,7 +436,7 @@ pub(super) struct FnCodegen<'a, 'b> {
     /// Data count, only for naming usage
     data_cnt: u32,
     data: &'b mut GlobalData,
-    loc: DataSink,
+    loc: LocalVars,
 
     /// Instruction sinks; The one at the top of the stack is the one currently used
     inst: Vec<InstSink>,
@@ -390,7 +459,7 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
             data_cnt: 0,
             loc_cnt: 0,
             data: &mut ctx.glob,
-            loc: DataSink::new(),
+            loc: LocalVars::new(),
             // module: &mut ctx.module,,
             inst: vec![InstSink::new()],
             sink_pool: DeqPool::new_with_reset(&InstSink::new, &InstSink::reset),
@@ -406,10 +475,15 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
     pub fn gen(&mut self) -> CompileResult<()> {
         println!("{:#?}", self);
         if let Some(b) = &self.f.body {
-            let scope = b.scope.cp();
-            let stmts = &b.stmts;
-            for stmt in stmts {
-                self.gen_stmt(stmt, scope.cp())?;
+            self.gen_scope(b, b.scope.cp())?;
+
+            // Check local variable size
+            {
+                let stack_size = self.loc.max_stack_size();
+
+                // * We have one instruction sink left
+                self.inst_sink().prepend(Inst::SNew(stack_size));
+                // * cur_inst gets deallocated because we dont need it anymore.
             }
 
             // Check return type
@@ -422,6 +496,7 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
                     self.inst_sink().push(Inst::Ret);
                 }
             }
+
             Ok(())
         } else {
             if self.f.is_extern {
@@ -462,16 +537,8 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
                         .occupy_slots()
                         .ok_or(CompileError::RequireSized(format!("{:?}", typ)))?;
 
-                    let data = Data {
-                        typ: typ.cp(),
-                        init_val: Either::Right(occupy_slots),
-                        is_const: *is_const,
-                    };
                     self.loc
-                        .put_data(&var_name, data)
-                        .ok_or(CompileError::InternalError(
-                            "Conflicting name inside AST".into(),
-                        ))?;
+                        .add_var(&var_name, occupy_slots, *is_const, typ.cp())?;
                 } else {
                     todo!("Add global values");
                     // self.builder.create_global_value();
@@ -508,6 +575,19 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
             ast::StmtVariant::While(e) => todo!("Generate code for ret`urn"),
             ast::StmtVariant::Empty => Ok(()),
         }
+    }
+
+    fn gen_scope(&mut self, block: &ast::Block, scope: Ptr<ast::Scope>) -> CompileResult<()> {
+        self.loc.dive_into_scope();
+
+        let scope = block.scope.cp();
+        let stmts = &block.stmts;
+        for stmt in stmts {
+            self.gen_stmt(stmt, scope.cp())?;
+        }
+
+        self.loc.pop_scope();
+        Ok(())
     }
 
     fn gen_l_value_store(
@@ -784,7 +864,7 @@ impl ast::TypeDef {
     /// Calculate the bytes one type occupy
     ///
     /// We don't have Sized trait, but we can still calculate the bytes types occupy
-    pub fn occupy_slots(&self) -> Option<u16> {
+    pub fn occupy_slots(&self) -> Option<u32> {
         match self {
             ast::TypeDef::Unit => Some(0),
             ast::TypeDef::Ref(..) => Some(1),
@@ -792,11 +872,11 @@ impl ast::TypeDef {
                 (a.target
                     .borrow()
                     .occupy_slots()
-                    .map(|s| (s * l as u16) as u16))
+                    .map(|s| (s * l as u32) as u32))
             }),
             ast::TypeDef::Function(..) => None,
             ast::TypeDef::NamedType(..) => None,
-            ast::TypeDef::Primitive(p) => Some(((p.occupy_bytes + 3) / 4) as u16),
+            ast::TypeDef::Primitive(p) => Some(((p.occupy_bytes + 3) / 4) as u32),
             _ => None,
         }
     }
