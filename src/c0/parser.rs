@@ -810,7 +810,7 @@ where
                 let expr = self.p_item(scope.cp())?;
                 let span = span + expr.borrow().span();
                 Ok(Ptr::new(Expr {
-                    var: ExprVariant::TypeConversion(TypeConversion { from: typ, expr }),
+                    var: ExprVariant::TypeConversion(TypeConversion { to: typ, expr }),
                     span,
                 }))
             } else {

@@ -161,6 +161,10 @@ impl InstSink {
         self.0.pop()
     }
 
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
     pub fn reset(&mut self) {
         self.0.clear()
     }
@@ -501,6 +505,7 @@ where
     }
 }
 
+/// A function code generator. Responsible for generating
 #[derive(Debug)]
 pub(super) struct FnCodegen<'a, 'b> {
     f: &'b ast::FunctionType,
@@ -512,7 +517,12 @@ pub(super) struct FnCodegen<'a, 'b> {
     // ctx: &'b mut Codegen<'a, T>,
     branch_cnt: u32,
     branch_returned: u32,
-    loc_cnt: u16,
+
+    /// How many instructions are yet to be inserted?
+    ///
+    /// This field is for usage in conditionals, so not-yet-inserted instructions
+    /// in expressions will not be count.
+    pending_inst_cnt: u16,
 
     /// Data count, only for naming usage
     data_cnt: u32,
@@ -542,7 +552,7 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
             branch_cnt: 1,
             branch_returned: 0,
             data_cnt: 0,
-            loc_cnt: 0,
+            pending_inst_cnt: 0,
             data: &mut ctx.glob,
             loc: LocalVars::new(),
             // module: &mut ctx.module,,
@@ -557,6 +567,13 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
             .expect("A function generator must have at least one instruction sink")
     }
 
+    pub fn cur_pos(&self) -> u16 {
+        self.inst
+            .iter()
+            .fold(0u16, |sum, vec| sum + vec.len() as u16)
+            + self.pending_inst_cnt
+    }
+
     pub fn gen(&mut self) -> CompileResult<()> {
         if let Some(b) = &self.f.body {
             self.param_siz = self.params.iter().try_fold(0, |sum, item| {
@@ -566,6 +583,10 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
                     .ok_or(CompileError::RequireSized("".into()))?
                     + sum)
             })?;
+
+            // * One instruction for that stack allocation
+            self.pending_inst_cnt += 1;
+
             self.gen_scope(b, b.scope.cp())?;
 
             // Calculate local variable size
@@ -579,6 +600,8 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
                 );
                 let param_siz = self.param_siz;
                 self.inst_sink().prepend(Inst::SNew(stack_size - param_siz));
+
+                self.pending_inst_cnt -= 1;
             }
 
             // Check return type
@@ -587,7 +610,8 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
                     let ret = self.ret_type.borrow();
                     ast::TypeDef::Unit == *ret
                 };
-                if is_void {
+                // If there are branches not returned, add a return statement
+                if is_void && self.branch_returned != self.branch_cnt {
                     self.inst_sink().push(Inst::Ret);
                 }
             }
@@ -624,8 +648,6 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
                 if id != 0 {
                     // Who cares about constants?
                     let var_name = format!("{}`{}", name, id);
-                    let var_loc = self.loc_cnt;
-                    self.loc_cnt = self.loc_cnt + 1;
 
                     let typ = resolve_ty(&*typ.borrow(), scope);
                     let occupy_slots = typ
@@ -662,12 +684,12 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
                 Ok(())
             }
             ast::StmtVariant::Return(e) => self.gen_return(e, scope),
-            ast::StmtVariant::Block(e) => todo!("Generate code for block"),
+            ast::StmtVariant::Block(e) => self.gen_scope(e, scope),
             ast::StmtVariant::Print(e) => self.gen_print(e, scope),
             ast::StmtVariant::Scan(e) => self.gen_scan(e, scope),
-            ast::StmtVariant::Break => todo!("Generate code for return"),
-            ast::StmtVariant::If(e) => todo!("Generate code for return`"),
-            ast::StmtVariant::While(e) => todo!("Generate code for ret`urn"),
+            ast::StmtVariant::Break => self.gen_break(scope),
+            ast::StmtVariant::If(e) => self.gen_if(e, scope),
+            ast::StmtVariant::While(e) => self.gen_while(e, scope),
             ast::StmtVariant::Empty => Ok(()),
         }
     }
@@ -681,6 +703,7 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
             ast::ExprVariant::Ident(i) => self.gen_ident_expr(i, scope),
             ast::ExprVariant::FunctionCall(f) => self.gen_func_call(f, scope),
             ast::ExprVariant::Literal(lit) => self.gen_literal(lit, scope),
+            ast::ExprVariant::TypeConversion(ty) => self.gen_ty_conversion(ty, scope),
             _ => Err(CompileError::NotImplemented(
                 "Implement other expression variants".into(),
             )),
@@ -928,7 +951,21 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
         }
     }
 
+    fn gen_ty_conversion(
+        &mut self,
+        i: &ast::TypeConversion,
+        scope: Ptr<ast::Scope>,
+    ) -> CompileResult<Type> {
+        let expr = i.expr.cp();
+        let ty = i.to.cp();
+
+        let expr_ty = self.gen_expr(expr, scope)?;
+
+        conv(expr_ty, ty, self.inst_sink())
+    }
+
     fn gen_if(&mut self, i: &ast::IfConditional, scope: Ptr<ast::Scope>) -> CompileResult<()> {
+        let cond = i.cond.cp();
         todo!()
     }
 
@@ -941,10 +978,6 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
     }
 
     fn gen_break(&mut self, scope: Ptr<ast::Scope>) -> CompileResult<()> {
-        todo!()
-    }
-
-    fn gen_block(&mut self, i: &ast::Block, scope: Ptr<ast::Scope>) -> CompileResult<()> {
         todo!()
     }
 
