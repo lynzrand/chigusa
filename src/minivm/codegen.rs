@@ -1223,12 +1223,12 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
         self.break_tgt.pop();
         {
             bb.borrow_mut().end = BlockEndJump::Conditional {
-                nz: while_bb_id,
                 z: final_bb_id,
+                nz: while_bb_id,
             };
             while_bb.borrow_mut().end = BlockEndJump::Conditional {
-                nz: while_bb_id,
                 z: final_bb_id,
+                nz: while_bb_id,
             };
         }
         Ok(final_bb)
@@ -1396,10 +1396,10 @@ impl ast::OpVar {
                  *
                  * Should be recognized and replaced in conditionals
                  */
-                Eq => sink.push_many(&[ICmp, IPush(2), ISub]),
+                Eq => sink.push_many(&[ICmp, Dup, IMul, IPush(1), ICmp]),
                 Neq => sink.push_many(&[ICmp]),
-                Gt => sink.push_many(&[ICmp, IPush(1), ISub, IPush(0), ICmp, IPush(2), ISub]),
-                Lt => sink.push_many(&[ICmp, IPush(1), IAdd, IPush(0), ICmp, IPush(2), ISub]),
+                Gt => sink.push_many(&[ICmp, IPush(1), ISub, IPush(1), ICmp]),
+                Lt => sink.push_many(&[ICmp, IPush(1), IAdd, IPush(1), ICmp]),
                 Gte => sink.push_many(&[ICmp, IPush(1), IAdd]),
                 Lte => sink.push_many(&[ICmp, IPush(1), ISub]),
 
@@ -1426,8 +1426,8 @@ impl ast::OpVar {
 
                 Eq => sink.push_many(&[DCmp, IPush(2), ISub]),
                 Neq => sink.push_many(&[DCmp]),
-                Gt => sink.push_many(&[DCmp, IPush(1), ISub, IPush(0), ICmp, IPush(2), ISub]),
-                Lt => sink.push_many(&[DCmp, IPush(1), IAdd, IPush(0), ICmp, IPush(2), ISub]),
+                Gt => sink.push_many(&[DCmp, IPush(1), ISub, IPush(1), ICmp]),
+                Lt => sink.push_many(&[DCmp, IPush(1), IAdd, IPush(1), ICmp]),
                 Gte => sink.push_many(&[DCmp, IPush(1), IAdd]),
                 Lte => sink.push_many(&[DCmp, IPush(1), ISub]),
 

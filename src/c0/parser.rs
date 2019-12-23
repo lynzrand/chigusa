@@ -225,6 +225,7 @@ where
             TokenType::While => self.p_while_stmt(scope),
             TokenType::Scan => self.p_scan_stmt(scope),
             TokenType::Print => self.p_print_stmt(scope),
+            TokenType::Break => self.p_break_stmt(scope),
             TokenType::Return => {
                 let ret = self.bump();
                 if self.expect(&TokenType::Semicolon) {
@@ -626,6 +627,17 @@ where
         self.expect_report(&TokenType::Semicolon)?;
         Ok(Stmt {
             var: StmtVariant::Scan(ident),
+            span,
+        })
+    }
+
+    fn p_break_stmt(&mut self, scope: Ptr<Scope>) -> ParseResult<Stmt> {
+        let span = self.cur.span;
+        self.expect_report(&TokenType::Break)?;
+        self.expect_report(&TokenType::Semicolon)?;
+
+        Ok(Stmt {
+            var: StmtVariant::Break,
             span,
         })
     }
