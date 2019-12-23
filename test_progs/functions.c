@@ -1,12 +1,17 @@
-int test(int a){
-    return a+1;
+int fib(int a) {
+  if (a <= 1) {
+    return 1;
+  } else {
+    return fib(a - 1) + fib(a - 2);
+  }
 }
-int add(int a, int b){
-    return a+b;
-}
-void main(){
-    int a=3;
-    print(a);
-    print(test(a));
-    print(add(test(a),a));
+
+void main() {
+  int a = 0;
+  while (a < 15) {
+    print(fib(a));
+    a = a + 1;
+    if (a == 10)
+      break;
+  }
 }

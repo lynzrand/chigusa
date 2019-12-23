@@ -1,0 +1,10 @@
+int g0 = 42;
+double g1 = 1.0;
+
+int fun(int num) {
+    return -num;
+}
+
+int main() {
+    return fun(-123456);
+}
