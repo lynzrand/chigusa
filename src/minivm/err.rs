@@ -9,6 +9,7 @@ pub enum CompileError {
     AssignVoid,
     UnsupportedType,
     UnsupportedOp,
+    NoExternFunction,
 
     ErrorType,
     MakeRefFromPrimitive,
@@ -16,8 +17,13 @@ pub enum CompileError {
     RequireSized(String),
     RequirePrintable(String),
     IntOverflow,
+    ParamLengthMismatch,
+    ReturnTypeMismatch(String),
+    NonExistFunc(String),
+    NonExistVar(String),
 
     NotLValue(String),
+    NotImplemented(String),
 
     Error(String),
     InternalError(String),

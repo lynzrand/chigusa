@@ -157,6 +157,10 @@ impl InstSink {
         self.0.insert(0, inst);
     }
 
+    pub fn pop(&mut self) -> Option<Inst> {
+        self.0.pop()
+    }
+
     pub fn reset(&mut self) {
         self.0.clear()
     }
@@ -188,7 +192,17 @@ impl<'a> Codegen<'a> {
         let decls = &*decls.borrow();
 
         for item in decls.defs.iter() {
-            // TODO: add global variables
+            let name = item.0;
+            let def = item.1.borrow();
+            if let ast::SymbolDef::Var { typ, .. } = &*def {
+                let typ = typ.borrow();
+                if let ast::TypeDef::Function(f) = &*typ {
+                    self.add_fn(f, name)?;
+                } else {
+                    todo!("Implement global variables")
+                    // self.add_var(t)
+                }
+            }
         }
 
         // TODO: Make _start function
@@ -225,43 +239,78 @@ impl<'a> Codegen<'a> {
         })
     }
 
-    fn compile_fn(&mut self, func: &ast::FunctionType, name: &str) -> CompileResult<()> {
-        // TODO: Add signature extractor
-        let fn_name = format!("`function_name`{}", name);
-        let name_idx = self
-            .glob
-            .consts
-            .put_str(&fn_name, name.into(), true)
-            .unwrap();
-        // let sig = FnCodegen::extract_sig(func, self);
+    /// Add the signature of a function to `self.glob`, but does not compile it.
+    fn add_fn(&mut self, func: &ast::FunctionType, name: &str) -> CompileResult<()> {
+        if !func.is_extern {
+            let fn_name = format!("`function_name`{}", name);
+            // ** The `fn_name` variable is only for identifying the string name!
+            let name_idx = self
+                .glob
+                .consts
+                .put_str(&fn_name, name.into(), true)
+                .unwrap();
 
-        let ret = Ptr::new(resolve_ty(
-            &*func.return_type.borrow(),
-            self.prog.scope.cp(),
-        ));
-        let params: Vec<_> = func
-            .params
-            .iter()
-            .map(|i| Ptr::new(resolve_ty(&*i.borrow(), self.prog.scope.cp())))
-            .collect();
-        let params_clone = params.clone();
-        let mut fnc = FnCodegen::new(func, name, self, ret.cp(), params);
+            let ret = Ptr::new(resolve_ty(
+                &*func.return_type.borrow(),
+                self.prog.scope.cp(),
+            ));
+
+            let params: Vec<_> = func
+                .params
+                .iter()
+                .map(|i| Ptr::new(resolve_ty(&*i.borrow(), self.prog.scope.cp())))
+                .collect();
+
+            let param_siz = params.iter().try_fold(0, |sum, item| {
+                Ok(item
+                    .borrow()
+                    .occupy_slots()
+                    .ok_or(CompileError::RequireSized("".into()))?
+                    + sum)
+            })?;
+
+            let func = FunctionType {
+                name_idx,
+                param_siz,
+                params,
+                return_type: ret,
+                body: None,
+                is_extern: false,
+            };
+
+            // ** We insert the original name to global function registry
+            self.glob.fns.insert(name.into(), func);
+
+            Ok(())
+        } else {
+            Err(CompileError::NoExternFunction)
+        }
+    }
+
+    /// Add a global variable to `self.glob`
+    fn add_var(&mut self, func: &ast::FunctionType, name: &str) -> CompileResult<()> {
+        todo!("Add global variables")
+    }
+
+    /// Compile and repair the function declaration in `self.glob`
+    fn compile_fn(&mut self, func: &ast::FunctionType, name: &str) -> CompileResult<()> {
+        // Get the function. Things can't go wrong here right?
+        let fn_ref = self.glob.fns.get(name).unwrap();
+
+        let ret = fn_ref.return_type.cp();
+        let params = fn_ref.params.iter().map(|x| x.cp()).collect();
+        // * Return fn_ref so that we can borrow self for function compilation
+
+        let mut fnc = FnCodegen::new(func, name, self, ret, params);
 
         fnc.gen()?;
-        let param_siz = fnc.param_siz;
         let inst = fnc.finish();
-        let func = FunctionType {
-            name_idx,
-            // TODO
-            param_siz,
-            params: params_clone,
-            return_type: ret,
-            body: Some(inst),
-            is_extern: false,
-        };
 
-        // * This operation **WILL** replace the old function entry, but the index is preserved
-        self.glob.fns.insert(fn_name, func);
+        // * We're done here. Add the instructions
+        let fn_ref = self.glob.fns.get_mut(name).unwrap();
+
+        fn_ref.body = Some(inst);
+
         Ok(())
     }
 }
@@ -612,7 +661,7 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
                 }
                 Ok(())
             }
-            ast::StmtVariant::Return(e) => todo!("Generate code for return"),
+            ast::StmtVariant::Return(e) => self.gen_return(e, scope),
             ast::StmtVariant::Block(e) => todo!("Generate code for block"),
             ast::StmtVariant::Print(e) => self.gen_print(e, scope),
             ast::StmtVariant::Scan(e) => todo!("Generate code for scan"),
@@ -715,8 +764,14 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
             }
 
             ast::ExprVariant::UnaryOp(u) => {
-                // TODO
-                todo!("Implement unary operators")
+                // Calculate expression body
+                // self.inst.push(self.sink_pool.get());
+                let lhs = self.gen_expr(u.val.cp(), scope.cp())?;
+                // let mut lhs_op = self.inst.pop().unwrap();
+
+                u.op.inst(&mut self.inst_sink(), lhs.cp())?;
+
+                Ok(lhs)
             }
 
             ast::ExprVariant::Ident(i) => {
@@ -727,13 +782,42 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
                 let typ = loc.typ.cp();
                 let offset = loc.offset as i32;
                 self.inst_sink().push(Inst::LoadA(0, offset));
-                self.inst_sink().push(Inst::ILoad);
+                load(typ.cp(), self.inst_sink())?;
                 Ok(typ)
             }
 
             ast::ExprVariant::FunctionCall(f) => {
-                // TODO
-                todo!("Implement function calls")
+                let func = &f.func;
+                let func_entry =
+                    self.data.fns.get_full(func).ok_or_else(|| {
+                        CompileError::NonExistFunc("Function does not exist".into())
+                    })?;
+
+                let params = &func_entry.2.params;
+
+                if f.params.len() != params.len() {
+                    return Err(CompileError::ParamLengthMismatch);
+                }
+                let f_idx = func_entry.0 as u16;
+                let f_ret_typ = func_entry.2.return_type.cp();
+
+                // Push each param into stack
+                // * Rust complains about lifetimes here, so we'll just move everything into
+                // * a vector for now. A little waste of memory, but hey it works.
+                let params_pair_iter: Vec<_> = f
+                    .params
+                    .iter()
+                    .zip(params.iter().map(|param| param.cp()))
+                    .collect();
+
+                for param in params_pair_iter {
+                    let res = self.gen_expr(param.0.cp(), scope.cp())?;
+                    conv(res, param.1.cp(), self.inst_sink())?;
+                }
+
+                self.inst_sink().push(Inst::Call(f_idx));
+
+                Ok(f_ret_typ)
             }
 
             ast::ExprVariant::Literal(lit) => match lit {
@@ -808,28 +892,79 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
                     "Structs are not yet supported!".into(),
                 )),
             },
-            _ => todo!("Implement other expression variants"),
+            _ => Err(CompileError::NotImplemented(
+                "Implement other expression variants".into(),
+            )),
         }
     }
 
     fn gen_print(&mut self, print: &Vec<Ptr<Expr>>, scope: Ptr<ast::Scope>) -> CompileResult<()> {
+        let mut is_first = true;
         for val in print {
+            if is_first {
+                is_first = false;
+            } else {
+                // Print spaces
+                self.inst_sink().push(Inst::IPush(b' ' as i32));
+                self.inst_sink().push(Inst::CPrint);
+            }
             let typ = self.gen_expr(val.cp(), scope.cp())?;
             let typ_borrow = typ.borrow();
             match &*typ_borrow {
                 ast::TypeDef::Primitive(p) => match p.var {
                     ast::PrimitiveTypeVar::Float => self.inst_sink().push(Inst::DPrint),
-                    _ => self.inst_sink().push(Inst::IPrint),
+                    ast::PrimitiveTypeVar::UnsignedInt => {
+                        if p.occupy_bytes == 1 {
+                            // Char
+                            self.inst_sink().push(Inst::CPrint)
+                        } else {
+                            self.inst_sink().push(Inst::IPrint)
+                        }
+                    }
+                    ast::PrimitiveTypeVar::SignedInt => self.inst_sink().push(Inst::IPrint),
                 },
                 ast::TypeDef::Ref(..) => {
-                    // ! For now we assume all ref types are strings
+                    // ! For now we assume all ref types are strings. To be changed. Maybe.
                     self.inst_sink().push(Inst::SPrint)
                 }
                 _ => Err(CompileError::RequirePrintable(format!("{:?}", typ)))?,
             }
         }
+
         self.inst_sink().push(Inst::PrintLn);
         Ok(())
+    }
+
+    fn gen_return(
+        &mut self,
+        ret_expr: &Option<Ptr<ast::Expr>>,
+        scope: Ptr<ast::Scope>,
+    ) -> CompileResult<()> {
+        if let Some(e) = ret_expr {
+            // TODO: Check if every branch returns
+            if self.ret_type.borrow().is_unit() {
+                return Err(CompileError::ReturnTypeMismatch(format!(
+                    "{:?}",
+                    self.ret_type.borrow()
+                )));
+            }
+            // * Non-void return:
+
+            let expr_typ = self.gen_expr(e.cp(), scope.cp())?;
+            let typ = conv(expr_typ, self.ret_type.cp(), self.inst_sink())?;
+            ret(typ, self.inst_sink())?;
+            Ok(())
+        } else {
+            // * void return
+            if !self.ret_type.borrow().is_unit() {
+                return Err(CompileError::ReturnTypeMismatch(format!(
+                    "{:?}",
+                    self.ret_type.borrow()
+                )));
+            }
+            self.inst_sink().push(Inst::Ret);
+            Ok(())
+        }
     }
 }
 

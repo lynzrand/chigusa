@@ -114,6 +114,34 @@ pub(super) fn pop(ty: Type, sink: &mut InstSink) -> CompileResult<()> {
     Ok(())
 }
 
+pub(super) fn ret(ty: Type, sink: &mut InstSink) -> CompileResult<()> {
+    let slots = ty
+        .borrow()
+        .occupy_slots()
+        .ok_or(CompileError::RequireSized(format!("{:?}", ty.cp())))?;
+    match slots {
+        0 => sink.push(Inst::Ret),
+        1 => sink.push(Inst::IRet),
+        2 => sink.push(Inst::DRet),
+        _n @ _ => Err(CompileError::UnsupportedType)?,
+    }
+    Ok(())
+}
+
+pub(super) fn load(ty: Type, sink: &mut InstSink) -> CompileResult<()> {
+    let slots = ty
+        .borrow()
+        .occupy_slots()
+        .ok_or(CompileError::RequireSized(format!("{:?}", ty.cp())))?;
+    match slots {
+        0 => (),
+        1 => sink.push(Inst::ILoad),
+        2 => sink.push(Inst::DLoad),
+        _n @ _ => Err(CompileError::UnsupportedType)?,
+    }
+    Ok(())
+}
+
 pub(super) fn store(ty: Type, sink: &mut InstSink) -> CompileResult<()> {
     let slots = ty
         .borrow()
@@ -123,7 +151,7 @@ pub(super) fn store(ty: Type, sink: &mut InstSink) -> CompileResult<()> {
         0 => (),
         1 => sink.push(Inst::IStore),
         2 => sink.push(Inst::DStore),
-        n @ _ => Err(CompileError::UnsupportedType)?,
+        _n @ _ => Err(CompileError::UnsupportedType)?,
     }
     Ok(())
 }
