@@ -17,11 +17,15 @@ pub enum CompileError {
     RequireSized(String),
     RequirePrintable(String),
     RequireScannable(String),
+
     IntOverflow,
     ParamLengthMismatch,
     ReturnTypeMismatch(String),
     NonExistFunc(String),
     NonExistVar(String),
+
+    ControlReachesEndOfNonVoidFunction,
+    NoTargetToBreak,
 
     NotLValue(String),
     NotImplemented(String),

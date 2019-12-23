@@ -4,7 +4,7 @@ use super::*;
 use crate::c0::ast::{self, *};
 use crate::prelude::*;
 use either::Either;
-use indexmap::{map::Entry, IndexMap};
+use indexmap::{map::Entry, IndexMap, IndexSet};
 use std::convert::TryInto;
 use std::iter::Iterator;
 const bytes_per_slot: u16 = 4;
@@ -80,6 +80,42 @@ impl DataSink {
     }
 }
 
+type BB = Ptr<BasicBlock>;
+
+#[derive(Debug, Clone)]
+pub(super) struct BasicBlock {
+    pub id: usize,
+    pub inst: InstSink,
+    pub end: BlockEndJump,
+}
+
+impl BasicBlock {
+    pub fn end_len(&self) -> Option<u16> {
+        match self.end {
+            // Jmp(..)
+            BlockEndJump::Unconditional(..) => Some(1),
+            // Jnz(..), Jmp(..)
+            BlockEndJump::Conditional { .. } => Some(2),
+            // We assume the return instruction is already inserted
+            BlockEndJump::Return => Some(0),
+            BlockEndJump::Unknown => None,
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.inst.len()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(super) enum BlockEndJump {
+    Unknown,
+    // We assume the return instruction is already inserted
+    Return,
+    Unconditional(usize),
+    Conditional { z: usize, nz: usize },
+}
+
 #[derive(Debug, Clone)]
 pub(super) struct FunctionType {
     pub params: Vec<Ptr<TypeDef>>,
@@ -123,7 +159,7 @@ pub type Type = Ptr<ast::TypeDef>;
 
 /// An opaque sink of instructions
 #[derive(Debug, Clone)]
-pub(super) struct InstSink(Vec<Inst>);
+pub(super) struct InstSink(pub Vec<Inst>);
 
 impl InstSink {
     pub fn new() -> InstSink {
@@ -308,7 +344,7 @@ impl<'a> Codegen<'a> {
         let mut fnc = FnCodegen::new(func, name, self, ret, params);
 
         fnc.gen()?;
-        let inst = fnc.finish();
+        let inst = fnc.finish()?;
 
         // * We're done here. Add the instructions
         let fn_ref = self.glob.fns.get_mut(name).unwrap();
@@ -514,24 +550,19 @@ pub(super) struct FnCodegen<'a, 'b> {
     param_siz: u32,
 
     name: &'b str,
-    // ctx: &'b mut Codegen<'a, T>,
-    branch_cnt: u32,
-    branch_returned: u32,
 
-    /// How many instructions are yet to be inserted?
-    ///
-    /// This field is for usage in conditionals, so not-yet-inserted instructions
-    /// in expressions will not be count.
-    pending_inst_cnt: u16,
+    break_tgt: Vec<usize>,
 
     /// Data count, only for naming usage
     data_cnt: u32,
     data: &'b mut GlobalData,
     loc: LocalVars,
 
-    /// Instruction sinks; The one at the top of the stack is the one currently used
-    inst: Vec<InstSink>,
+    inst: Option<&'a mut InstSink>,
     sink_pool: DeqPool<'a, InstSink>,
+
+    start_bb: BB,
+    bbs: Vec<BB>,
 }
 
 /// Implementation for larger function, statement and expression structures
@@ -543,35 +574,33 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
         ret_type: Type,
         params: Vec<Type>,
     ) -> FnCodegen<'a, 'b> {
+        let start_bb = Ptr::new(BasicBlock {
+            id: 0,
+            inst: InstSink::new(),
+            end: BlockEndJump::Unknown,
+        });
+
         FnCodegen {
             f,
             name,
             ret_type,
             params,
             param_siz: 0,
-            branch_cnt: 1,
-            branch_returned: 0,
             data_cnt: 0,
-            pending_inst_cnt: 0,
+            break_tgt: vec![],
             data: &mut ctx.glob,
             loc: LocalVars::new(),
             // module: &mut ctx.module,,
-            inst: vec![InstSink::new()],
+            inst: None,
             sink_pool: DeqPool::new_with_reset(&InstSink::new, &InstSink::reset),
+
+            start_bb: start_bb.cp(),
+            bbs: vec![start_bb],
         }
     }
 
     pub(super) fn inst_sink(&mut self) -> &mut InstSink {
-        self.inst
-            .last_mut()
-            .expect("A function generator must have at least one instruction sink")
-    }
-
-    pub fn cur_pos(&self) -> u16 {
-        self.inst
-            .iter()
-            .fold(0u16, |sum, vec| sum + vec.len() as u16)
-            + self.pending_inst_cnt
+        self.inst.as_mut().unwrap()
     }
 
     pub fn gen(&mut self) -> CompileResult<()> {
@@ -584,10 +613,7 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
                     + sum)
             })?;
 
-            // * One instruction for that stack allocation
-            self.pending_inst_cnt += 1;
-
-            self.gen_scope(b, b.scope.cp())?;
+            self.gen_scope(b, self.start_bb.cp(), b.scope.cp())?;
 
             // Calculate local variable size
             {
@@ -599,21 +625,10 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
                     self.param_siz
                 );
                 let param_siz = self.param_siz;
-                self.inst_sink().prepend(Inst::SNew(stack_size - param_siz));
-
-                self.pending_inst_cnt -= 1;
-            }
-
-            // Check return type
-            {
-                let is_void = {
-                    let ret = self.ret_type.borrow();
-                    ast::TypeDef::Unit == *ret
-                };
-                // If there are branches not returned, add a return statement
-                if is_void && self.branch_returned != self.branch_cnt {
-                    self.inst_sink().push(Inst::Ret);
-                }
+                self.start_bb
+                    .borrow_mut()
+                    .inst
+                    .prepend(Inst::SNew(stack_size - param_siz));
             }
 
             Ok(())
@@ -626,9 +641,99 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
         }
     }
 
-    pub fn finish(mut self) -> InstSink {
-        assert!(self.inst.len() == 1);
-        self.inst.pop().expect("The one and only instruction sink")
+    pub fn finish(self) -> CompileResult<InstSink> {
+        let mut bb_start: IndexMap<usize, usize> = IndexMap::new();
+        let mut bb_length: IndexMap<usize, usize> = IndexMap::new();
+        let mut finished_bb: IndexSet<usize> = IndexSet::new();
+        let mut inst = InstSink::new();
+        let mut pending_bb = Vec::new();
+        pending_bb.push(0);
+
+        while pending_bb.len() != 0 {
+            let bb_id = pending_bb.pop().unwrap();
+            let bb = self.bbs.get(bb_id).unwrap();
+            let mut bb_mut = bb.borrow_mut();
+
+            if !bb_start.contains_key(&bb_id) {
+                // * Brand new basic block
+                bb_start.insert(bb_mut.id, inst.len());
+                bb_length.insert(bb_mut.id, bb_mut.len());
+                inst.append_all(&mut bb_mut.inst);
+                match bb_mut.end {
+                    BlockEndJump::Conditional { z, nz } => {
+                        // * To be replaced with `JNz(nz)`
+                        inst.push(Inst::Nop);
+                        // * To be replaced with `Jmp(z)`
+                        inst.push(Inst::Nop);
+
+                        pending_bb.push(bb_id);
+                        pending_bb.push(z);
+                        pending_bb.push(nz);
+                    }
+                    BlockEndJump::Unconditional(z) => {
+                        // * To be replaced with `Jmp(z)`
+                        inst.push(Inst::Nop);
+
+                        pending_bb.push(bb_id);
+                        pending_bb.push(z);
+                    }
+                    BlockEndJump::Return => {
+                        // * Already finished because BB does not link to another
+                        finished_bb.insert(bb_id);
+                    }
+                    BlockEndJump::Unknown => {
+                        if self.ret_type.borrow().is_unit() {
+                            // * Unit return type. Manually add `ret` here. Same as above.
+                            inst.push(Inst::Ret);
+                            finished_bb.insert(bb_id);
+                        } else {
+                            // * Hey, your favorite error message!
+                            return Err(CompileError::ControlReachesEndOfNonVoidFunction);
+                        }
+                    }
+                }
+            } else if !finished_bb.contains(&bb_id) {
+                // * Basic block that has its decendants resolved
+                match bb_mut.end {
+                    BlockEndJump::Conditional { z, nz } => {
+                        let nz_place =
+                            *bb_start.get(&bb_id).unwrap() + *bb_length.get(&bb_id).unwrap();
+
+                        // Replace nop with `JNz(nz)`
+                        let replace_nz = inst.0.get_mut(nz_place).unwrap();
+                        *replace_nz = Inst::JNe(*bb_start.get(&nz).unwrap() as u16);
+
+                        // Replace nop with `Jmp(z)`
+                        let replace_nz = inst.0.get_mut(nz_place + 1).unwrap();
+                        *replace_nz = Inst::Jmp(*bb_start.get(&z).unwrap() as u16);
+                    }
+                    BlockEndJump::Unconditional(z) => {
+                        let z_place =
+                            *bb_start.get(&bb_id).unwrap() + *bb_length.get(&bb_id).unwrap();
+
+                        // Replace nop with `Jmp(nz)`
+                        let replace_nz = inst.0.get_mut(z_place).unwrap();
+                        *replace_nz = Inst::Jmp(*bb_start.get(&z).unwrap() as u16);
+                    }
+                    _ => {
+                        // Already finished!
+                    }
+                }
+            }
+        }
+
+        Ok(inst)
+    }
+
+    pub(super) fn new_bb(&mut self) -> (usize, BB) {
+        let bb_id = self.bbs.len();
+        let bb = Ptr::new(BasicBlock {
+            id: bb_id,
+            inst: InstSink::new(),
+            end: BlockEndJump::Unknown,
+        });
+        self.bbs.push(bb.cp());
+        (bb_id, bb)
     }
 
     pub(super) fn add_local(
@@ -665,52 +770,71 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
         Ok(())
     }
 
-    fn gen_stmt(&mut self, stmt: &ast::Stmt, scope: Ptr<ast::Scope>) -> CompileResult<()> {
+    fn gen_stmt(&mut self, stmt: &ast::Stmt, bb: BB, scope: Ptr<ast::Scope>) -> CompileResult<BB> {
         match &stmt.var {
             ast::StmtVariant::Expr(e) => {
-                let typ = self.gen_expr(e.cp(), scope.cp())?;
-                if !typ.borrow().is_unit() {
-                    pop(typ.cp(), self.inst_sink())?;
-                }
-                Ok(())
-            }
-            ast::StmtVariant::ManyExpr(e) => {
-                for e in e {
-                    let typ = self.gen_expr(e.cp(), scope.cp())?;
+                {
+                    let inst = &mut bb.borrow_mut().inst;
+
+                    let typ = self.gen_expr(e.cp(), inst, scope.cp())?;
                     if !typ.borrow().is_unit() {
-                        pop(typ.cp(), self.inst_sink())?;
+                        pop(typ.cp(), inst)?;
                     }
                 }
-                Ok(())
+                Ok(bb)
             }
-            ast::StmtVariant::Return(e) => self.gen_return(e, scope),
-            ast::StmtVariant::Block(e) => self.gen_scope(e, scope),
-            ast::StmtVariant::Print(e) => self.gen_print(e, scope),
-            ast::StmtVariant::Scan(e) => self.gen_scan(e, scope),
-            ast::StmtVariant::Break => self.gen_break(scope),
-            ast::StmtVariant::If(e) => self.gen_if(e, scope),
-            ast::StmtVariant::While(e) => self.gen_while(e, scope),
-            ast::StmtVariant::Empty => Ok(()),
+            ast::StmtVariant::ManyExpr(e) => {
+                {
+                    let inst = &mut bb.borrow_mut().inst;
+
+                    for e in e {
+                        let typ = self.gen_expr(e.cp(), inst, scope.cp())?;
+                        if !typ.borrow().is_unit() {
+                            pop(typ.cp(), inst)?;
+                        }
+                    }
+                }
+
+                Ok(bb)
+            }
+            ast::StmtVariant::Return(e) => self.gen_return(e, bb, scope),
+            ast::StmtVariant::Block(e) => self.gen_scope(e, bb, scope),
+            ast::StmtVariant::Print(e) => self.gen_print(e, bb, scope),
+            ast::StmtVariant::Scan(e) => self.gen_scan(e, bb, scope),
+            ast::StmtVariant::Break => self.gen_break(bb, scope),
+            ast::StmtVariant::If(e) => self.gen_if(e, bb, scope),
+            ast::StmtVariant::While(e) => self.gen_while(e, bb, scope),
+            ast::StmtVariant::Empty => Ok(bb),
         }
     }
 
-    fn gen_expr(&mut self, expr: Ptr<ast::Expr>, scope: Ptr<ast::Scope>) -> CompileResult<Type> {
+    fn gen_expr(
+        &mut self,
+        expr: Ptr<ast::Expr>,
+        inst: &mut InstSink,
+        scope: Ptr<ast::Scope>,
+    ) -> CompileResult<Type> {
         let expr = expr.borrow();
         let expr = &*expr;
         match &expr.var {
-            ast::ExprVariant::BinaryOp(b) => self.gen_bin_op(b, scope),
-            ast::ExprVariant::UnaryOp(u) => self.gen_una_op(u, scope),
-            ast::ExprVariant::Ident(i) => self.gen_ident_expr(i, scope),
-            ast::ExprVariant::FunctionCall(f) => self.gen_func_call(f, scope),
-            ast::ExprVariant::Literal(lit) => self.gen_literal(lit, scope),
-            ast::ExprVariant::TypeConversion(ty) => self.gen_ty_conversion(ty, scope),
+            ast::ExprVariant::BinaryOp(b) => self.gen_bin_op(b, inst, scope),
+            ast::ExprVariant::UnaryOp(u) => self.gen_una_op(u, inst, scope),
+            ast::ExprVariant::Ident(i) => self.gen_ident_expr(i, inst, scope),
+            ast::ExprVariant::FunctionCall(f) => self.gen_func_call(f, inst, scope),
+            ast::ExprVariant::Literal(lit) => self.gen_literal(lit, inst, scope),
+            ast::ExprVariant::TypeConversion(ty) => self.gen_ty_conversion(ty, inst, scope),
             _ => Err(CompileError::NotImplemented(
                 "Implement other expression variants".into(),
             )),
         }
     }
 
-    fn gen_scope(&mut self, block: &ast::Block, scope: Ptr<ast::Scope>) -> CompileResult<()> {
+    fn gen_scope(
+        &mut self,
+        block: &ast::Block,
+        bb: BB,
+        scope: Ptr<ast::Scope>,
+    ) -> CompileResult<BB> {
         self.loc.dive_into_scope();
 
         let scope = block.scope.cp();
@@ -720,17 +844,19 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
         }
 
         let stmts = &block.stmts;
+        let mut bb = bb;
         for stmt in stmts {
-            self.gen_stmt(stmt, scope.cp())?;
+            bb = self.gen_stmt(stmt, bb, scope.cp())?;
         }
 
         self.loc.pop_scope();
-        Ok(())
+        Ok(bb)
     }
 
     fn gen_ident_address(
         &mut self,
         i: &ast::Identifier,
+        inst: &mut InstSink,
         scope: Ptr<ast::Scope>,
     ) -> CompileResult<Type> {
         let def = scope.borrow().find_def_depth(&i.name).unwrap();
@@ -745,7 +871,7 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
                     )))?;
             let typ = loc.typ.cp();
             let offset = loc.offset as i32;
-            self.inst_sink().push(Inst::LoadA(0, offset));
+            inst.push(Inst::LoadA(0, offset));
             Ok(typ)
         } else {
             // Global variable
@@ -757,47 +883,53 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
         &mut self,
         expr: Ptr<ast::Expr>,
         is_const_storage: bool,
+        inst: &mut InstSink,
         scope: Ptr<ast::Scope>,
     ) -> CompileResult<Type> {
         let expr = expr.borrow();
         let expr = &*expr;
 
         match &expr.var {
-            ast::ExprVariant::Ident(i) => self.gen_ident_address(i, scope),
+            ast::ExprVariant::Ident(i) => self.gen_ident_address(i, inst, scope),
             _ => Err(CompileError::NotLValue(format!("{}", expr))),
         }
     }
 
-    fn gen_bin_op(&mut self, b: &ast::BinaryOp, scope: Ptr<ast::Scope>) -> CompileResult<Type> {
+    fn gen_bin_op(
+        &mut self,
+        b: &ast::BinaryOp,
+        inst: &mut InstSink,
+        scope: Ptr<ast::Scope>,
+    ) -> CompileResult<Type> {
         if b.op == ast::OpVar::_Asn || b.op == ast::OpVar::_Csn {
             // * This generates address for lhs.
-            let lhs = self.gen_l_value_address(b.lhs.cp(), b.op == ast::OpVar::_Csn, scope.cp())?;
+            let lhs =
+                self.gen_l_value_address(b.lhs.cp(), b.op == ast::OpVar::_Csn, inst, scope.cp())?;
 
-            let rhs = self.gen_expr(b.rhs.cp(), scope.cp())?;
+            let rhs = self.gen_expr(b.rhs.cp(), inst, scope.cp())?;
 
-            conv(rhs, lhs.cp(), self.inst_sink())?;
+            conv(rhs, lhs.cp(), inst)?;
 
             // store lhs
-            store(lhs, self.inst_sink())?;
+            store(lhs, inst)?;
 
             // * Assignment evaluates as unit type!
             Ok(Ptr::new(ast::TypeDef::Unit))
         } else {
             // Normal expressions
-            self.inst.push(self.sink_pool.get());
-            let lhs = self.gen_expr(b.lhs.cp(), scope.cp())?;
-            let mut lhs_op = self.inst.pop().unwrap();
+            let mut lhs_op = self.sink_pool.get();
 
-            self.inst.push(self.sink_pool.get());
-            let rhs = self.gen_expr(b.rhs.cp(), scope.cp())?;
-            let mut rhs_op = self.inst.pop().unwrap();
+            let lhs = self.gen_expr(b.lhs.cp(), &mut lhs_op, scope.cp())?;
+
+            let mut rhs_op = self.sink_pool.get();
+            let rhs = self.gen_expr(b.rhs.cp(), &mut rhs_op, scope.cp())?;
 
             let typ = flatten_ty(lhs, &mut lhs_op, rhs, &mut rhs_op)?;
 
-            self.inst_sink().append_all(&mut lhs_op);
-            self.inst_sink().append_all(&mut rhs_op);
+            inst.append_all(&mut lhs_op);
+            inst.append_all(&mut rhs_op);
 
-            b.op.inst(self.inst_sink(), typ.cp())?;
+            b.op.inst(inst, typ.cp())?;
 
             self.sink_pool.put(lhs_op);
             self.sink_pool.put(rhs_op);
@@ -806,13 +938,18 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
         }
     }
 
-    fn gen_una_op(&mut self, u: &ast::UnaryOp, scope: Ptr<ast::Scope>) -> CompileResult<Type> {
+    fn gen_una_op(
+        &mut self,
+        u: &ast::UnaryOp,
+        inst: &mut InstSink,
+        scope: Ptr<ast::Scope>,
+    ) -> CompileResult<Type> {
         // Calculate expression body
         // self.inst.push(self.sink_pool.get());
-        let lhs = self.gen_expr(u.val.cp(), scope.cp())?;
+        let lhs = self.gen_expr(u.val.cp(), inst, scope.cp())?;
         // let mut lhs_op = self.inst.pop().unwrap();
 
-        u.op.inst(&mut self.inst_sink(), lhs.cp())?;
+        u.op.inst(inst, lhs.cp())?;
 
         Ok(lhs)
     }
@@ -820,6 +957,7 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
     fn gen_ident_expr(
         &mut self,
         i: &ast::Identifier,
+        inst: &mut InstSink,
         scope: Ptr<ast::Scope>,
     ) -> CompileResult<Type> {
         let def = scope.borrow().find_def_depth(&i.name).unwrap();
@@ -827,19 +965,20 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
             .loc
             .get_var(&format!("{}`{}", i.name, def.1))
             .ok_or(CompileError::Error(format!(
-                "Unable to find  identifier {}",
+                "Unable to find identifier {}",
                 i.name
             )))?;
         let typ = loc.typ.cp();
         let offset = loc.offset as i32;
-        self.inst_sink().push(Inst::LoadA(0, offset));
-        load(typ.cp(), self.inst_sink())?;
+        inst.push(Inst::LoadA(0, offset));
+        load(typ.cp(), inst)?;
         Ok(typ)
     }
 
     fn gen_func_call(
         &mut self,
         f: &ast::FunctionCall,
+        inst: &mut InstSink,
         scope: Ptr<ast::Scope>,
     ) -> CompileResult<Type> {
         let func = &f.func;
@@ -867,49 +1006,70 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
             .collect();
 
         for param in params_pair_iter {
-            let res = self.gen_expr(param.0.cp(), scope.cp())?;
-            conv(res, param.1.cp(), self.inst_sink())?;
+            let res = self.gen_expr(param.0.cp(), inst, scope.cp())?;
+            conv(res, param.1.cp(), inst)?;
         }
 
-        self.inst_sink().push(Inst::Call(f_idx));
+        inst.push(Inst::Call(f_idx));
 
         Ok(f_ret_typ)
     }
 
-    fn gen_literal(&mut self, lit: &ast::Literal, scope: Ptr<ast::Scope>) -> CompileResult<Type> {
+    fn uint_type(bytes: usize) -> Type {
+        Ptr::new(ast::TypeDef::Primitive(ast::PrimitiveType {
+            var: ast::PrimitiveTypeVar::UnsignedInt,
+            occupy_bytes: bytes,
+        }))
+    }
+
+    fn int_type(bytes: usize) -> Type {
+        Ptr::new(ast::TypeDef::Primitive(ast::PrimitiveType {
+            var: ast::PrimitiveTypeVar::SignedInt,
+            occupy_bytes: bytes,
+        }))
+    }
+
+    fn float_type(bytes: usize) -> Type {
+        Ptr::new(ast::TypeDef::Primitive(ast::PrimitiveType {
+            var: ast::PrimitiveTypeVar::Float,
+            occupy_bytes: bytes,
+        }))
+    }
+
+    fn ref_type(typ: Type) -> Type {
+        Ptr::new(ast::TypeDef::Ref(ast::RefType { target: typ }))
+    }
+
+    fn gen_literal(
+        &mut self,
+        lit: &ast::Literal,
+        inst: &mut InstSink,
+        scope: Ptr<ast::Scope>,
+    ) -> CompileResult<Type> {
         match lit {
             ast::Literal::Boolean { val } => {
-                self.inst_sink().push(Inst::IPush(*val as i32));
-                let typ = Ptr::new(ast::TypeDef::Primitive(ast::PrimitiveType {
-                    var: ast::PrimitiveTypeVar::UnsignedInt,
-                    occupy_bytes: 1,
-                }));
+                inst.push(Inst::IPush(*val as i32));
+                let typ = Self::uint_type(1);
                 Ok(typ)
             }
 
             ast::Literal::Integer { val } => {
                 let val: i32 = val.try_into().map_err(|_| CompileError::IntOverflow)?;
-                self.inst_sink().push(Inst::IPush(val));
+                inst.push(Inst::IPush(val));
 
-                let typ = Ptr::new(ast::TypeDef::Primitive(ast::PrimitiveType {
-                    var: ast::PrimitiveTypeVar::UnsignedInt,
-                    occupy_bytes: 4,
-                }));
+                let typ = Self::int_type(4);
                 Ok(typ)
             }
 
             ast::Literal::Float { val } => {
-                let typ = Ptr::new(ast::TypeDef::Primitive(ast::PrimitiveType {
-                    var: ast::PrimitiveTypeVar::Float,
-                    occupy_bytes: 8,
-                }));
+                let typ = Self::float_type(8);
 
                 let val: f64 = val.to_f64();
                 let idx = self
                     .data
                     .consts
                     .put_data(
-                        &format!("`{}``str{}", self.name, self.data_cnt),
+                        &format!("`{}``double{}", self.name, self.data_cnt),
                         Data {
                             typ: typ.cp(),
                             init_val: Either::Left(Constant::Float(val)),
@@ -917,7 +1077,7 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
                         },
                     )
                     .expect("Unable to add double data");
-                self.inst_sink().push(Inst::LoadC(idx));
+                inst.push(Inst::LoadC(idx));
                 self.data_cnt += 1;
 
                 // let val = self.builder.ins().f64const(val.to_f64());
@@ -935,13 +1095,8 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
                     )
                     .unwrap();
                 self.data_cnt += 1;
-                self.inst_sink().push(Inst::LoadC(offset));
-                let typ = Ptr::new(ast::TypeDef::Ref(ast::RefType {
-                    target: Ptr::new(ast::TypeDef::Primitive(ast::PrimitiveType {
-                        var: ast::PrimitiveTypeVar::UnsignedInt,
-                        occupy_bytes: 1,
-                    })),
-                }));
+                inst.push(Inst::LoadC(offset));
+                let typ = Self::ref_type(Self::uint_type(8));
                 Ok(typ)
             }
 
@@ -954,104 +1109,157 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
     fn gen_ty_conversion(
         &mut self,
         i: &ast::TypeConversion,
+        inst: &mut InstSink,
         scope: Ptr<ast::Scope>,
     ) -> CompileResult<Type> {
         let expr = i.expr.cp();
         let ty = i.to.cp();
 
-        let expr_ty = self.gen_expr(expr, scope)?;
+        let expr_ty = self.gen_expr(expr, inst, scope)?;
 
-        conv(expr_ty, ty, self.inst_sink())
+        conv(expr_ty, ty, inst)
     }
 
-    fn gen_if(&mut self, i: &ast::IfConditional, scope: Ptr<ast::Scope>) -> CompileResult<()> {
-        let cond = i.cond.cp();
-        todo!()
+    fn gen_if(
+        &mut self,
+        i: &ast::IfConditional,
+        bb: BB,
+        scope: Ptr<ast::Scope>,
+    ) -> CompileResult<BB> {
+        {
+            let cond = i.cond.cp();
+            let inst = &mut bb.borrow_mut().inst;
+            let cond_ty = self.gen_expr(cond, inst, scope.cp())?;
+            conv(cond_ty, Self::int_type(1), inst)?;
+        }
+        // * True branch
+        let (true_bb_id, true_bb) = self.new_bb();
+        let true_bb = self.gen_stmt(&*i.if_block.borrow(), true_bb, scope.cp())?;
+
+        if let Some(else_br) = &i.else_block {
+            let (else_bb_id, else_bb) = self.new_bb();
+            let else_bb = self.gen_stmt(&*else_br.borrow(), else_bb, scope.cp())?;
+
+            let (final_bb_id, final_bb) = self.new_bb();
+
+            bb.borrow_mut().end = BlockEndJump::Conditional {
+                z: else_bb_id,
+                nz: true_bb_id,
+            };
+            true_bb.borrow_mut().end = BlockEndJump::Unconditional(final_bb_id);
+            else_bb.borrow_mut().end = BlockEndJump::Unconditional(final_bb_id);
+
+            Ok(final_bb)
+        } else {
+            let (final_bb_id, final_bb) = self.new_bb();
+
+            bb.borrow_mut().end = BlockEndJump::Conditional {
+                z: final_bb_id,
+                nz: true_bb_id,
+            };
+            true_bb.borrow_mut().end = BlockEndJump::Unconditional(final_bb_id);
+
+            Ok(final_bb)
+        }
     }
 
     fn gen_while(
         &mut self,
         i: &ast::WhileConditional,
+        bb: BB,
         scope: Ptr<ast::Scope>,
-    ) -> CompileResult<()> {
+    ) -> CompileResult<BB> {
         todo!()
     }
 
-    fn gen_break(&mut self, scope: Ptr<ast::Scope>) -> CompileResult<()> {
+    fn gen_break(&mut self, bb: BB, scope: Ptr<ast::Scope>) -> CompileResult<BB> {
         todo!()
     }
 
-    fn gen_scan(&mut self, scan: &ast::Identifier, scope: Ptr<ast::Scope>) -> CompileResult<()> {
-        let typ = self.gen_ident_address(scan, scope.cp())?;
-        let typ_borrow = typ.borrow();
-        match &*typ_borrow {
-            ast::TypeDef::Primitive(p) => {
-                match p.var {
-                    ast::PrimitiveTypeVar::Float => {
-                        self.inst_sink().push_many(&[Inst::DScan, Inst::DStore])
-                    }
-                    ast::PrimitiveTypeVar::UnsignedInt => {
-                        if p.occupy_bytes == 1 {
-                            self.inst_sink().push_many(&[Inst::CScan, Inst::IStore])
-                        } else {
-                            self.inst_sink().push_many(&[Inst::IScan, Inst::IStore])
-                        }
-                    }
-                    ast::PrimitiveTypeVar::SignedInt => {
-                        self.inst_sink().push_many(&[Inst::IScan, Inst::IStore])
-                    }
-                }
-                Ok(())
-            }
-            _ => Err(CompileError::RequireScannable(format!(
-                "{:?}",
-                &*typ.borrow()
-            ))),
-        }
-    }
-
-    fn gen_print(&mut self, print: &Vec<Ptr<Expr>>, scope: Ptr<ast::Scope>) -> CompileResult<()> {
-        let mut is_first = true;
-        for val in print {
-            if is_first {
-                is_first = false;
-            } else {
-                // Print spaces
-                self.inst_sink().push(Inst::IPush(b' ' as i32));
-                self.inst_sink().push(Inst::CPrint);
-            }
-            let typ = self.gen_expr(val.cp(), scope.cp())?;
+    fn gen_scan(
+        &mut self,
+        scan: &ast::Identifier,
+        bb: BB,
+        scope: Ptr<ast::Scope>,
+    ) -> CompileResult<BB> {
+        {
+            let inst = &mut bb.borrow_mut().inst;
+            let typ = self.gen_ident_address(scan, inst, scope.cp())?;
             let typ_borrow = typ.borrow();
             match &*typ_borrow {
                 ast::TypeDef::Primitive(p) => match p.var {
-                    ast::PrimitiveTypeVar::Float => self.inst_sink().push(Inst::DPrint),
+                    ast::PrimitiveTypeVar::Float => inst.push_many(&[Inst::DScan, Inst::DStore]),
                     ast::PrimitiveTypeVar::UnsignedInt => {
                         if p.occupy_bytes == 1 {
-                            // Char
-                            self.inst_sink().push(Inst::CPrint)
+                            inst.push_many(&[Inst::CScan, Inst::IStore])
                         } else {
-                            self.inst_sink().push(Inst::IPrint)
+                            inst.push_many(&[Inst::IScan, Inst::IStore])
                         }
                     }
-                    ast::PrimitiveTypeVar::SignedInt => self.inst_sink().push(Inst::IPrint),
+                    ast::PrimitiveTypeVar::SignedInt => {
+                        inst.push_many(&[Inst::IScan, Inst::IStore])
+                    }
                 },
-                ast::TypeDef::Ref(..) => {
-                    // ! For now we assume all ref types are strings. To be changed. Maybe.
-                    self.inst_sink().push(Inst::SPrint)
-                }
-                _ => Err(CompileError::RequirePrintable(format!("{:?}", typ)))?,
+                _ => Err(CompileError::RequireScannable(format!(
+                    "{:?}",
+                    &*typ.borrow()
+                )))?,
             }
         }
+        Ok(bb)
+    }
 
-        self.inst_sink().push(Inst::PrintLn);
-        Ok(())
+    fn gen_print(
+        &mut self,
+        print: &Vec<Ptr<Expr>>,
+        bb: BB,
+        scope: Ptr<ast::Scope>,
+    ) -> CompileResult<BB> {
+        {
+            let inst = &mut bb.borrow_mut().inst;
+            let mut is_first = true;
+            for val in print {
+                if is_first {
+                    is_first = false;
+                } else {
+                    // Print spaces
+                    inst.push(Inst::IPush(b' ' as i32));
+                    inst.push(Inst::CPrint);
+                }
+                let typ = self.gen_expr(val.cp(), inst, scope.cp())?;
+                let typ_borrow = typ.borrow();
+                match &*typ_borrow {
+                    ast::TypeDef::Primitive(p) => match p.var {
+                        ast::PrimitiveTypeVar::Float => inst.push(Inst::DPrint),
+                        ast::PrimitiveTypeVar::UnsignedInt => {
+                            if p.occupy_bytes == 1 {
+                                // Char
+                                inst.push(Inst::CPrint)
+                            } else {
+                                inst.push(Inst::IPrint)
+                            }
+                        }
+                        ast::PrimitiveTypeVar::SignedInt => inst.push(Inst::IPrint),
+                    },
+                    ast::TypeDef::Ref(..) => {
+                        // ! For now we assume all ref types are strings. To be changed. Maybe.
+                        inst.push(Inst::SPrint)
+                    }
+                    _ => Err(CompileError::RequirePrintable(format!("{:?}", typ)))?,
+                }
+            }
+
+            inst.push(Inst::PrintLn);
+        }
+        Ok(bb)
     }
 
     fn gen_return(
         &mut self,
         ret_expr: &Option<Ptr<ast::Expr>>,
+        bb: BB,
         scope: Ptr<ast::Scope>,
-    ) -> CompileResult<()> {
+    ) -> CompileResult<BB> {
         if let Some(e) = ret_expr {
             // TODO: Check if every branch returns
             if self.ret_type.borrow().is_unit() {
@@ -1061,11 +1269,16 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
                 )));
             }
             // * Non-void return:
+            let mut bb = bb.borrow_mut();
+            let inst = &mut bb.inst;
 
-            let expr_typ = self.gen_expr(e.cp(), scope.cp())?;
-            let typ = conv(expr_typ, self.ret_type.cp(), self.inst_sink())?;
-            ret(typ, self.inst_sink())?;
-            Ok(())
+            let expr_typ = self.gen_expr(e.cp(), inst, scope.cp())?;
+            let typ = conv(expr_typ, self.ret_type.cp(), inst)?;
+            ret(typ, inst)?;
+            bb.end = BlockEndJump::Return;
+
+            let (_, dummy_bb) = self.new_bb();
+            Ok(dummy_bb)
         } else {
             // * void return
             if !self.ret_type.borrow().is_unit() {
@@ -1074,8 +1287,12 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
                     self.ret_type.borrow()
                 )));
             }
-            self.inst_sink().push(Inst::Ret);
-            Ok(())
+            let mut bb = bb.borrow_mut();
+            bb.inst.push(Inst::Ret);
+            bb.end = BlockEndJump::Return;
+
+            let (_, dummy_bb) = self.new_bb();
+            Ok(dummy_bb)
         }
     }
 }
