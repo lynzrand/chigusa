@@ -583,6 +583,7 @@ pub struct WhileConditional {
 pub struct Block {
     pub scope: Ptr<Scope>,
     pub stmts: Vec<Stmt>,
+    pub span: Option<Span>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]

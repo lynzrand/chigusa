@@ -310,13 +310,16 @@ impl<'a> Codegen<'a> {
                 .map(|i| Ptr::new(resolve_ty(&*i.borrow(), self.prog.blk.scope.cp())))
                 .collect();
 
-            let param_siz = params.iter().try_fold(0, |sum, item| {
-                Ok(item
-                    .borrow()
-                    .occupy_slots()
-                    .ok_or(CompileError::RequireSized("".into()))?
-                    + sum)
-            })?;
+            let param_siz =
+                params
+                    .iter()
+                    .try_fold::<u32, _, CompileResult<u32>>(0, |sum, item| {
+                        let item_size = item
+                            .borrow()
+                            .occupy_slots()
+                            .ok_or(compile_err_n(CompileErrorVar::RequireSized("".into())))?;
+                        Ok(item_size + sum)
+                    })?;
 
             let func = FunctionType {
                 name_idx,
@@ -332,7 +335,7 @@ impl<'a> Codegen<'a> {
 
             Ok(())
         } else {
-            Err(CompileError::NoExternFunction)
+            Err(CompileErrorVar::NoExternFunction(name.into()).into())
         }
     }
 
@@ -358,7 +361,7 @@ impl<'a> Codegen<'a> {
 
             Ok(())
         } else {
-            Err(CompileError::FunctionMissingBody)
+            Err(CompileErrorVar::FunctionMissingBody(name.into()).into())
         }
     }
 }
@@ -467,7 +470,7 @@ impl LocalVars {
         self.def_map.insert(name.into(), loc).map_or_else(
             || Ok(()),
             |_| {
-                Err(CompileError::InternalError(
+                Err(CompileErrorVar::InternalError(
                     "Name conflict on local variable declaration".into(),
                 ))
             },
@@ -601,7 +604,6 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
             // module: &mut ctx.module,,
             inst: None,
             sink_pool: DeqPool::new_with_reset(&InstSink::new, &InstSink::reset),
-
             start_bb: start_bb.cp(),
             bbs: vec![start_bb],
         }
@@ -613,13 +615,16 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
 
     pub fn gen(&mut self) -> CompileResult<()> {
         let b = self.f;
-        self.param_siz = self.params.iter().try_fold(0, |sum, item| {
-            Ok(item
-                .borrow()
-                .occupy_slots()
-                .ok_or(CompileError::RequireSized("".into()))?
-                + sum)
-        })?;
+        self.param_siz =
+            self.params
+                .iter()
+                .try_fold::<u32, _, CompileResult<u32>>(0, |sum, item| {
+                    Ok(item
+                        .borrow()
+                        .occupy_slots()
+                        .ok_or(CompileErrorVar::RequireSized("".into()))?
+                        + sum)
+                })?;
 
         self.gen_scope(b, self.start_bb.cp(), b.scope.cp())?;
 
@@ -703,7 +708,10 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
                             finished_bb.insert(bb_id);
                         } else {
                             // * Hey, your favorite error message!
-                            return Err(CompileError::ControlReachesEndOfNonVoidFunction);
+                            return Err(compile_err(
+                                CompileErrorVar::ControlReachesEndOfNonVoidFunction,
+                                self.f.span,
+                            ));
                         }
                     }
                 }
@@ -800,14 +808,14 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
                 if !typ.is_fn() {
                     let occupy_slots = typ
                         .occupy_slots()
-                        .ok_or(CompileError::RequireSized(format!("{:?}", typ)))?;
+                        .ok_or(CompileErrorVar::RequireSized(format!("{:?}", typ)))?;
 
                     self.loc
                         .add_var(&var_name, occupy_slots, *is_const, Ptr::new(typ))?;
 
                     Ok(())
                 } else if self.f.scope.borrow().id != 0 {
-                    Err(CompileError::NestedFunctions)
+                    Err(compile_err_n(CompileErrorVar::NestedFunctions(name.into())))
                 } else {
                     Ok(())
                 }
@@ -854,6 +862,7 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
             ast::StmtVariant::While(e) => self.gen_while(e, bb, scope),
             ast::StmtVariant::Empty => Ok(bb),
         }
+        .with_span(stmt.span)
     }
 
     fn gen_expr(
@@ -871,10 +880,12 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
             ast::ExprVariant::FunctionCall(f) => self.gen_func_call(f, inst, scope),
             ast::ExprVariant::Literal(lit) => self.gen_literal(lit, inst, scope),
             ast::ExprVariant::TypeConversion(ty) => self.gen_ty_conversion(ty, inst, scope),
-            _ => Err(CompileError::NotImplemented(
-                "Implement other expression variants".into(),
-            )),
+            _ => Err(
+                CompileErrorVar::NotImplemented("Implement other expression variants".into())
+                    .into(),
+            ),
         }
+        .with_span(expr.span)
     }
 
     fn gen_scope(
@@ -916,13 +927,9 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
 
         if is_local_var {
             // Local variable
-            let loc =
-                self.loc
-                    .get_var(&format!("{}`{}", i.name, def.1))
-                    .ok_or(CompileError::Error(format!(
-                        "Unable to find local identifier {}",
-                        i.name
-                    )))?;
+            let loc = self.loc.get_var(&format!("{}`{}", i.name, def.1)).ok_or(
+                CompileErrorVar::Error(format!("Unable to find local identifier {}", i.name)),
+            )?;
             let typ = loc.typ.cp();
             let offset = loc.offset as i32;
             inst.push(Inst::LoadA(0, offset));
@@ -933,7 +940,7 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
                 .data
                 .vars
                 .get_var(&format!("{}`{}", i.name, def.1))
-                .ok_or(CompileError::Error(format!(
+                .ok_or(CompileErrorVar::Error(format!(
                     "Unable to find global identifier {}",
                     i.name
                 )))?;
@@ -956,7 +963,7 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
 
         match &expr.var {
             ast::ExprVariant::Ident(i) => self.gen_ident_address(i, inst, scope),
-            _ => Err(CompileError::NotLValue(format!("{}", expr))),
+            _ => Err(CompileErrorVar::NotLValue(format!("{}", expr))).with_span(expr.span),
         }
     }
 
@@ -1049,12 +1056,12 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
             .data
             .fns
             .get_full(func)
-            .ok_or_else(|| CompileError::NonExistFunc("Function does not exist".into()))?;
+            .ok_or_else(|| CompileErrorVar::NonExistFunc("Function does not exist".into()))?;
 
         let params = &func_entry.2.params;
 
         if f.params.len() != params.len() {
-            return Err(CompileError::ParamLengthMismatch);
+            return Err(CompileErrorVar::ParamLengthMismatch.into());
         }
         let f_idx = func_entry.0 as u16;
         let f_ret_typ = func_entry.2.return_type.cp();
@@ -1117,7 +1124,7 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
             }
 
             ast::Literal::Integer { val } => {
-                let val: i32 = val.try_into().map_err(|_| CompileError::IntOverflow)?;
+                let val: i32 = val.try_into().map_err(|_| CompileErrorVar::IntOverflow)?;
                 inst.push(Inst::IPush(val));
 
                 let typ = Self::int_type(4);
@@ -1163,9 +1170,9 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
                 Ok(typ)
             }
 
-            ast::Literal::Struct { .. } => Err(CompileError::InternalError(
-                "Structs are not yet supported!".into(),
-            )),
+            ast::Literal::Struct { .. } => {
+                Err(CompileErrorVar::InternalError("Structs are not yet supported!".into()).into())
+            }
         }
     }
 
@@ -1266,7 +1273,10 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
     }
 
     fn gen_break(&mut self, bb: BB, _: Ptr<ast::Scope>) -> CompileResult<BB> {
-        let break_tgt = *self.break_tgt.last().ok_or(CompileError::NoTargetToBreak)?;
+        let break_tgt = *self
+            .break_tgt
+            .last()
+            .ok_or(CompileErrorVar::NoTargetToBreak)?;
         let (_, dummy_bb) = self.new_bb();
         bb.borrow_mut().end = BlockEndJump::Unconditional(break_tgt);
         Ok(dummy_bb)
@@ -1296,7 +1306,7 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
                         inst.push_many(&[Inst::IScan, Inst::IStore])
                     }
                 },
-                _ => Err(CompileError::RequireScannable(format!(
+                _ => Err(CompileErrorVar::RequireScannable(format!(
                     "{:?}",
                     &*typ.borrow()
                 )))?,
@@ -1341,7 +1351,7 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
                         // ! For now we assume all ref types are strings. To be changed. Maybe.
                         inst.push(Inst::SPrint)
                     }
-                    _ => Err(CompileError::RequirePrintable(format!("{:?}", typ)))?,
+                    _ => Err(CompileErrorVar::RequirePrintable(format!("{:?}", typ)))?,
                 }
             }
 
@@ -1359,10 +1369,11 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
         if let Some(e) = ret_expr {
             // TODO: Check if every branch returns
             if self.ret_type.borrow().is_unit() {
-                return Err(CompileError::ReturnTypeMismatch(format!(
+                return Err(CompileErrorVar::ReturnTypeMismatch(format!(
                     "{:?}",
                     self.ret_type.borrow()
-                )));
+                ))
+                .into());
             }
             // * Non-void return:
             let mut bb = bb.borrow_mut();
@@ -1378,10 +1389,11 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
         } else {
             // * void return
             if !self.ret_type.borrow().is_unit() {
-                return Err(CompileError::ReturnTypeMismatch(format!(
+                return Err(CompileErrorVar::ReturnTypeMismatch(format!(
                     "{:?}",
                     self.ret_type.borrow()
-                )));
+                ))
+                .into());
             }
             let mut bb = bb.borrow_mut();
             bb.inst.push(Inst::Ret);
@@ -1438,13 +1450,13 @@ impl ast::OpVar {
                 Pos => (),
 
                 Inv | Bin | Ref | Der | And | Or | Xor | Ban | Bor => {
-                    Err(CompileError::UnsupportedOp)?
+                    Err(CompileErrorVar::UnsupportedOp)?
                 }
-                _Asn | _Csn => Err(CompileError::InternalError(
+                _Asn | _Csn => Err(CompileErrorVar::InternalError(
                     "Assign operators should be spotted early".into(),
                 ))?,
 
-                Ina | Inb | Dea | Deb | _ => Err(CompileError::UnsupportedOp)?,
+                Ina | Inb | Dea | Deb | _ => Err(CompileErrorVar::UnsupportedOp)?,
             }
         } else {
             // Double instructions
@@ -1466,13 +1478,13 @@ impl ast::OpVar {
                 Pos => (),
 
                 Inv | Bin | Ref | Der | And | Or | Xor | Ban | Bor => {
-                    Err(CompileError::UnsupportedOp)?
+                    Err(CompileErrorVar::UnsupportedOp)?
                 }
-                _Asn | _Csn => Err(CompileError::InternalError(
+                _Asn | _Csn => Err(CompileErrorVar::InternalError(
                     "Assign operators should be spotted early".into(),
                 ))?,
 
-                Ina | Inb | Dea | Deb | _ => Err(CompileError::UnsupportedOp)?,
+                Ina | Inb | Dea | Deb | _ => Err(CompileErrorVar::UnsupportedOp)?,
             }
         }
         Ok(())

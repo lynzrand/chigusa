@@ -12,6 +12,12 @@ int fib(int n) {
 }
 
 int main() {
-  pi < 3;
+  int a = 0;
+  int max;
+  scan(max);
+  while (a < max) {
+    print(fib(a));
+    a = a + 1;
+  }
   return 0;
 }

@@ -1,13 +1,8 @@
-use super::ast::Literal;
 use super::ast::*;
 use super::err::*;
 use super::lexer::*;
 use crate::prelude::*;
-use bimap::BiMap;
 use std::iter::Iterator;
-use std::iter::Peekable;
-
-use either::Either;
 
 pub trait IntoParser<T>
 where
@@ -213,6 +208,7 @@ where
             blk: Block {
                 scope: root_scope,
                 stmts,
+                span: None,
             },
         })
     }
@@ -239,7 +235,7 @@ where
                     let expr =
                         self.p_base_expr(&[TokenType::Semicolon, TokenType::RCurlyBrace], scope)?;
                     let span = expr.borrow().span();
-                    self.expect_report(&TokenType::Semicolon);
+                    self.expect_report(&TokenType::Semicolon)?;
                     Ok(Stmt {
                         var: StmtVariant::Return(Some(expr)),
                         span,
@@ -327,7 +323,14 @@ where
         self.expect_report(&TokenType::RCurlyBrace)?;
 
         log::debug!("Block ends");
-        Ok((Block { scope, stmts }, l_span + r_span))
+        Ok((
+            Block {
+                scope,
+                stmts,
+                span: Some(l_span + r_span),
+            },
+            l_span + r_span,
+        ))
     }
 
     fn p_type_name(&mut self, scope: Ptr<Scope>) -> ParseResult<Ptr<TypeDef>> {
@@ -374,6 +377,7 @@ where
         decl_token: Token,
         scope: Ptr<Scope>,
     ) -> ParseResult<Stmt> {
+        let left_span = self.cur.span;
         self.expect_report(&TokenType::LParenthesis)?;
         // The expressions in function call
         let mut expr_vec = Vec::new();
@@ -451,7 +455,7 @@ where
 
         Ok(Stmt {
             var: StmtVariant::Empty,
-            span: Span::zero(),
+            span: left_span + right_span + body_span,
         })
     }
 

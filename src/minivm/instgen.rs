@@ -25,7 +25,7 @@ pub(super) fn flatten_ty(
     use TypeDef::*;
 
     if *a.borrow() == Unit || *b.borrow() == Unit {
-        return Err(CompileError::AssignVoid);
+        return Err(CompileErrorVar::AssignVoid.into());
     }
 
     if let Primitive(p) = &*a.borrow() {
@@ -64,7 +64,7 @@ pub(super) fn conv(from: Type, to: Type, sink: &mut InstSink) -> CompileResult<T
             pop(from, sink)?;
             Ok(to.cp())
         }
-        Unknown | TypeErr => Err(CompileError::ErrorType),
+        Unknown | TypeErr => Err(CompileErrorVar::ErrorType.into()),
         Primitive(t) => match &*from.borrow() {
             Primitive(f) => {
                 use ast::PrimitiveTypeVar::*;
@@ -79,8 +79,8 @@ pub(super) fn conv(from: Type, to: Type, sink: &mut InstSink) -> CompileResult<T
 
                 Ok(to.cp())
             }
-            Ref(..) => Err(CompileError::MakePrimitiveFromRef),
-            _ => Err(CompileError::UnsupportedType),
+            Ref(..) => Err(CompileErrorVar::MakePrimitiveFromRef.into()),
+            _ => Err(CompileErrorVar::UnsupportedType.into()),
         },
         Ref(r) => match &*from.borrow() {
             Ref(r1) => {
@@ -91,12 +91,13 @@ pub(super) fn conv(from: Type, to: Type, sink: &mut InstSink) -> CompileResult<T
                     Ok(to.cp())
                 }
             }
-            _ => Err(CompileError::MakeRefFromPrimitive),
+            _ => Err(CompileErrorVar::MakeRefFromPrimitive.into()),
         },
-        ast::TypeDef::NamedType(..) => Err(CompileError::InternalError(
+        ast::TypeDef::NamedType(..) => Err(CompileErrorVar::InternalError(
             "Named types shouldn't appear in type calculation".into(),
-        )),
-        _ => Err(CompileError::UnsupportedType),
+        )
+        .into()),
+        _ => Err(CompileErrorVar::UnsupportedType.into()),
     }
 }
 
@@ -104,7 +105,7 @@ pub(super) fn pop(ty: Type, sink: &mut InstSink) -> CompileResult<()> {
     let slots = ty
         .borrow()
         .occupy_slots()
-        .ok_or(CompileError::RequireSized(format!("{:?}", ty.cp())))?;
+        .ok_or(CompileErrorVar::RequireSized(format!("{:?}", ty.cp())))?;
     match slots {
         0 => (),
         1 => sink.push(Inst::Pop1),
@@ -118,12 +119,12 @@ pub(super) fn ret(ty: Type, sink: &mut InstSink) -> CompileResult<()> {
     let slots = ty
         .borrow()
         .occupy_slots()
-        .ok_or(CompileError::RequireSized(format!("{:?}", ty.cp())))?;
+        .ok_or(CompileErrorVar::RequireSized(format!("{:?}", ty.cp())))?;
     match slots {
         0 => sink.push(Inst::Ret),
         1 => sink.push(Inst::IRet),
         2 => sink.push(Inst::DRet),
-        _n @ _ => Err(CompileError::UnsupportedType)?,
+        _n @ _ => Err(CompileErrorVar::UnsupportedType)?,
     }
     Ok(())
 }
@@ -132,12 +133,12 @@ pub(super) fn load(ty: Type, sink: &mut InstSink) -> CompileResult<()> {
     let slots = ty
         .borrow()
         .occupy_slots()
-        .ok_or(CompileError::RequireSized(format!("{:?}", ty.cp())))?;
+        .ok_or(CompileErrorVar::RequireSized(format!("{:?}", ty.cp())))?;
     match slots {
         0 => (),
         1 => sink.push(Inst::ILoad),
         2 => sink.push(Inst::DLoad),
-        _n @ _ => Err(CompileError::UnsupportedType)?,
+        _n @ _ => Err(CompileErrorVar::UnsupportedType)?,
     }
     Ok(())
 }
@@ -146,12 +147,12 @@ pub(super) fn store(ty: Type, sink: &mut InstSink) -> CompileResult<()> {
     let slots = ty
         .borrow()
         .occupy_slots()
-        .ok_or(CompileError::RequireSized(format!("{:?}", ty.cp())))?;
+        .ok_or(CompileErrorVar::RequireSized(format!("{:?}", ty.cp())))?;
     match slots {
         0 => (),
         1 => sink.push(Inst::IStore),
         2 => sink.push(Inst::DStore),
-        _n @ _ => Err(CompileError::UnsupportedType)?,
+        _n @ _ => Err(CompileErrorVar::UnsupportedType)?,
     }
     Ok(())
 }

@@ -4,12 +4,75 @@ use failure::*;
 use std::fmt;
 
 #[derive(Fail, Debug)]
-pub enum CompileError {
+pub struct CompileError {
+    pub var: CompileErrorVar,
+    pub span: Option<Span>,
+    pub backtrace: Backtrace,
+}
+
+pub fn compile_err_n(v: CompileErrorVar) -> CompileError {
+    CompileError {
+        var: v,
+        span: None,
+        backtrace: Backtrace::new(),
+    }
+}
+pub fn compile_err(v: CompileErrorVar, span: Option<Span>) -> CompileError {
+    CompileError {
+        var: v,
+        span,
+        backtrace: Backtrace::new(),
+    }
+}
+
+impl fmt::Display for CompileError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+impl From<CompileErrorVar> for CompileError {
+    fn from(e: CompileErrorVar) -> CompileError {
+        CompileError {
+            var: e,
+            span: None,
+            backtrace: Backtrace::new(),
+        }
+    }
+}
+
+pub trait WithSpan<E> {
+    fn with_span(self, span: Span) -> E;
+}
+
+impl WithSpan<Self> for CompileError {
+    fn with_span(mut self, span: Span) -> Self {
+        if self.span.is_none() {
+            self.span = Some(span);
+        }
+        self
+    }
+}
+
+impl<T> WithSpan<Self> for CompileResult<T> {
+    fn with_span(self, span: Span) -> Self {
+        self.map_err(|e| e.with_span(span))
+    }
+}
+
+impl<T> WithSpan<CompileResult<T>> for Result<T, CompileErrorVar> {
+    fn with_span(self, span: Span) -> CompileResult<T> {
+        self.map_err(|e| compile_err(e, Some(span)))
+    }
+}
+
+#[derive(Debug)]
+pub enum CompileErrorVar {
     Unknown,
     AssignVoid,
     UnsupportedType,
     UnsupportedOp,
-    NoExternFunction,
+    NoExternFunction(String),
 
     ErrorType,
     MakeRefFromPrimitive,
@@ -26,8 +89,8 @@ pub enum CompileError {
 
     ControlReachesEndOfNonVoidFunction,
     NoTargetToBreak,
-    FunctionMissingBody,
-    NestedFunctions,
+    FunctionMissingBody(String),
+    NestedFunctions(String),
 
     NotLValue(String),
     NotImplemented(String),
@@ -36,7 +99,7 @@ pub enum CompileError {
     InternalError(String),
 }
 
-impl fmt::Display for CompileError {
+impl fmt::Display for CompileErrorVar {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{:?}", self)
     }

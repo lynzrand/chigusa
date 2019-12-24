@@ -48,9 +48,9 @@ fn main() {
         Ok(t) => t,
         Err(e) => {
             let mut input_lines = input.lines();
-            let err_des = format!("{}", &e.var);
+            let err_des = format!("Parsing error: {}", &e.var);
             let span = e.span;
-            err_disp::print_error(&mut input_lines, span, &err_des);
+            err_disp::pretty_print_error(&mut input_lines, span, &err_des);
             return;
         }
     };
@@ -64,7 +64,14 @@ fn main() {
     let s0 = match s0 {
         Ok(t) => t,
         Err(e) => {
-            log::error!("Compile error: {:?}", e);
+            let mut input_lines = input.lines();
+            let err_des = format!("Compile error: {}", &e.var);
+
+            if let Some(span) = e.span {
+                err_disp::pretty_print_error(&mut input_lines, span, &err_des);
+            } else {
+                log::error!("{}", err_des);
+            }
             return;
         }
     };

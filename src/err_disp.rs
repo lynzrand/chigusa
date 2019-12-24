@@ -7,7 +7,7 @@ use std::path::PathBuf;
 /// Lines to display around error line
 const ERR_CONTEXT_LINES: usize = 3;
 
-pub fn print_error(
+pub fn pretty_print_error(
     lines: &mut impl Iterator<Item = impl Into<String>>,
     span: Span,
     err_desc: &str,
