@@ -5,18 +5,14 @@ DecimalInteger: "0" | [1-9] [0-9]+
 DecimalFractionalPart: "." [0-9]+
 DecimalExponentPart: [Ee] [+-]? [0-9]+
 HexadecimalNumber: "0x" [0-9a-fA-F]+
-// IntegerLiteral: (DecimalInteger | HexadecimalNumber) 
-// FloatLiteral: 
-//     DecimalInteger DecimalFractionalPart DecimalExponentPart?
-//     | DecimalInteger DecimalExponentPart
+IntegerLiteral: (DecimalInteger | HexadecimalNumber) 
+FloatLiteral: 
+    DecimalInteger DecimalFractionalPart DecimalExponentPart?
+    | DecimalInteger DecimalExponentPart
 
-NumberLiteral: DecimalInteger (
-    DecimalFractionalPart DecimalExponentPart?
-    | DecimalExponentPart 
-)?
 
-EscapedChar: "\" ([ntr\\'"] | "x" HexadecimalNumber{2} | "u" [0-9a-fA-F]{4} )
-Char: [^\\'"] | EscapedChar
+EscapedChar: "\" ([ntr\\'"] | "x" [0-9a-fA-F]{2} | "u" [0-9a-fA-F]{4} )
+Char: [^\\'"\n\r] | EscapedChar
 
 CharLiteral: "'" Char "'"
 StringLiteral: "\"" Char* "\""
@@ -54,31 +50,28 @@ kwDefault: "default"
 
 // The latter `;` is used only for function pointers,
 // e.g. `Fn<int, double; bool>` for `(int, double) -> bool`
-//GenericTypeAnnotation: "<" TypeDeclaration ("," TypeDeclaration)* (";" TypeDeclaration)? ">"
+// GenericTypeAnnotation: "<" TypeDeclaration ("," TypeDeclaration)* (";" TypeDeclaration)? ">"
 
 // Generic type, e.g. `Struct<T>`
-//GenericTypeDeclaration: Identifier GenericTypeAnnotation?
+// GenericTypeDeclaration: Identifier GenericTypeAnnotation?
 
 BasicTypeDeclaration: Identifier 
 
 // Array type, e.g. `[int]`, `[long, 4]`
-ArrayTypeDeclaration: "[" TypeDeclaration (";" IntegerLiteral)? "]"
+// ArrayTypeDeclaration: "[" TypeDeclaration (";" IntegerLiteral)? "]"
 
 // Reference type, e.g. `&int`, `&Fn<int, double; void>`
-ReferenceTypeDeclaration: "&" TypeDeclaration
+// ReferenceTypeDeclaration: "&" TypeDeclaration
 
 // Note:
-// C0 has 7 types built in:
-// - bool (u0)
+// C0 has 4 types built in:
 // - char (u8)
 // - int (i32)
-// - long (i64)
-// - float (f32)
 // - double (f64)
-// - void 
+// - void （unit)
 // 
 // Please note that functions are yet to be first-class types.
-TypeDeclaration: ReferenceTypeDeclaration | ArrayTypeDeclaration | BasicTypeDeclaration
+TypeDeclaration: BasicTypeDeclaration
 
 // # Expressions
 //
@@ -87,17 +80,17 @@ LiteralExpr: Literal
 
 IdentifierExpr: Identifier<Variable>
 
-IndexOperator: "[" Expr "]"
-StructChildOperator: "." Identifier<StructChild>
+// IndexOperator: "[" Expr "]"
+// StructChildOperator: "." Identifier<StructChild>
 
 // Subject to change. For now, functions are only accessible as identifiers.
 FnCallExpr: Identifier<Function> "(" Expr ("," Expr)* ")"
 
-StructConstructExpr: Identifier<Type+StructName> "{" (Identifier ":" Expr)* "}"
+// StructConstructExpr: Identifier<Type+StructName> "{" (Identifier ":" Expr)* "}"
 
 // Unary operators are applied according to their order of appearance.
 PrecedingUnaryOperator: "+" | "-" | "*" | "&" | "!" | "~" | "++" | "--"
-ProcedingUnaryOperator: "++" | "--" | IndexOperator | StructChildOperator
+ProcedingUnaryOperator: "++" | "--"
 
 // Binary operators are applied according to precedence rules defined elsewhere.
 // Operators with the same precedence value are left associative, except for assignment ops.
@@ -105,14 +98,15 @@ ProcedingUnaryOperator: "++" | "--" | IndexOperator | StructChildOperator
 BinaryOperator: "+" | "-" | "*" | "/" | "%" | "^" | "="
     | "&" | "|" | "&&" | "||" | ">>" | "<<" | "<" | "<=" | "==" | "!=" | ">=" | ">"
 
-Item: StructConstructExpr | LiteralExpr | FnCallExpr | IdentifierExpr
+Item: LiteralExpr | FnCallExpr | IdentifierExpr
 
 ProceedingUnaryOperation: Expr ProceedingUnaryOperator
 
-PreceedingUnaryOperation: PreceedingUnaryOperator ProceedingUnaryOperation
-BinaryOperation: PreceedingUnaryOperation (BinaryOperator PreceedingUnaryOperation)*
+PrecedingUnaryOperation: PrecedingUnaryOperator ProceedingUnaryOperation
 
-TypeCastExpr: Expr "as" TypeDefinition
+BinaryOperation: PrecedingUnaryOperation (BinaryOperator PrecedingUnaryOperation)*
+
+TypeCastExpr: "(" TypeDefinition ")" Expr
 
 // Design stolen from https://github.com/rust-lang/rust/blob/b5f265eeed23ac87ec6b4a7e6bc7cb4ea3e67c31/src/librustc_parse/parser/expr.rs#L778
 BottomExpr: BinaryOperation | "(" BinaryOperation ")"

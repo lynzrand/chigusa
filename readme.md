@@ -8,7 +8,7 @@ Chigusa is an unfinished C0 compiler written in Rust. This compiler is a homewor
 
 - [x] Tokenizer
 - [x] Parser
-- [ ] Code generator
+- [x] Code generator
 - [x] CLI
 
 ## About C0
