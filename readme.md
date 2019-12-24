@@ -18,11 +18,13 @@ C0 is a subset of C programming language. A description of the grammar used in t
 ## Usage
 
 ```sh
-# Parse and compile a file to a.out
+# Parse and compile a c0 source file to `out` as c0 binary
 $ chigusa <file> -o <output_file>
 
-# Compile and run immediately.
-$ chigusa <file> --jit
+# Compile the file as c0 assembly
+$ chigusa <file> -s -o <output_file>
+# or
+$ chigusa <file> --emit s0 -o <output_file>
 ```
 
 ## Chigusa's implementation
@@ -44,6 +46,6 @@ For more documentation and Chinese readme, see [docs](./docs).
 
 ## Naming
 
-Chigusa (Fukazawa Chigusa) and Kurumi (Kawai Kurumi) are characters from the anime _Iroduku: The World In Colors_. ~~Finally an anime boy gets on the list!~~
+Chigusa (Fukazawa Chigusa) is a character from the anime _Iroduku: The World In Colors_. ~~Finally an anime boy gets on the list!~~
 
 [c0_grammar_info]: docs/c0_grammar_1.txt
