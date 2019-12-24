@@ -395,7 +395,7 @@ where
         while self
             .iter
             .peek()
-            .map_or(false, |ch_ind| (*ch_ind).1.is_digit(10))
+            .map_or(false, |ch_ind| (*ch_ind).1.is_digit(radix))
         {
             number.push(self.iter.next().unwrap().1);
         }
@@ -448,7 +448,7 @@ where
             exponent += exp;
         }
 
-        let number = match ramp::Int::from_str_radix(&number, radix) {
+        let number = match ramp::Int::from_str_radix(&number, radix as u8) {
             Ok(i) => i,
             Err(e) => return self.skip_error(format!("Error parsing number: {}", e)),
         };

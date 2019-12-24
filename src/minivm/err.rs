@@ -26,6 +26,8 @@ pub enum CompileError {
 
     ControlReachesEndOfNonVoidFunction,
     NoTargetToBreak,
+    FunctionMissingBody,
+    NestedFunctions,
 
     NotLValue(String),
     NotImplemented(String),

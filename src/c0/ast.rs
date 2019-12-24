@@ -20,18 +20,14 @@ pub type TypeIdent = u64;
 
 #[derive(Eq, PartialEq)]
 pub struct Program {
-    pub scope: Ptr<Scope>,
-    pub stmts: Vec<Stmt>,
+    pub blk: Block,
     // pub vars: Vec<VarDef>,
     // pub types: Vec<TypeDef>
 }
 
 impl fmt::Debug for Program {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Program")
-            .field("scope", &*self.scope.borrow())
-            .field("stmts", &self.stmts)
-            .finish()
+        f.debug_struct("Program").field("blk", &self.blk).finish()
     }
 }
 
@@ -235,6 +231,20 @@ impl TypeDef {
     pub fn is_unit(&self) -> bool {
         match self {
             TypeDef::Unit => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_fn(&self) -> bool {
+        match self {
+            TypeDef::Function(..) => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_primitive(&self) -> bool {
+        match self {
+            TypeDef::Primitive(..) => true,
             _ => false,
         }
     }

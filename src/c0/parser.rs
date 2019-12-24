@@ -210,8 +210,10 @@ where
         }
         log::info!("Finished parsing program");
         Ok(Program {
-            scope: root_scope,
-            stmts,
+            blk: Block {
+                scope: root_scope,
+                stmts,
+            },
         })
     }
 
