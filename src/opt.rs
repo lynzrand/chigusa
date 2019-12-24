@@ -40,14 +40,13 @@ pub struct ParserConfig {
     #[structopt(short, long, default_value = "warn", parse(try_from_str = parse_verbosity))]
     pub verbosity: log::LevelFilter,
 
-    /// Write result to stdout. Overwrites `output-file`.
+    /// Write result to stdout. Overwrites `output-file`. Only for `token`, `ast` and `s0` targets.
     #[structopt(long)]
     pub stdout: bool,
 
-    /// Use JIT compilation and run immediately.
-    #[structopt(long)]
-    pub jit: bool,
-
+    // /// Use JIT compilation and run immediately.
+    // #[structopt(long)]
+    // pub jit: bool,
     /// The type of code to emit. Allowed are: token, ast, s0, o0
     ///
     /// Emit result explanation:

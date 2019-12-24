@@ -19,8 +19,15 @@ int main(){ if (c > 0) print("aaa", x); else {int z = 2; print(z);} }
 "#;
 
 fn main() {
-    let opt: ParserConfig = ParserConfig::from_args();
+    let mut opt: ParserConfig = ParserConfig::from_args();
     cute_log::init_with_max_level(opt.verbosity).unwrap();
+
+    if opt.output_assembly {
+        opt.emit = EmitOption::S0;
+    }
+    if opt.output_binary {
+        opt.emit = EmitOption::O0;
+    }
 
     let mut input = String::new();
     if let Some(f) = &opt.input_file {
