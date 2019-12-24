@@ -648,7 +648,13 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
     }
 
     pub fn finish_with_loc(mut self) -> CompileResult<(InstSink, LocalVars)> {
-        let inst = self.finish()?;
+        let inst = self.finish().map_err(|e| {
+            if let Some(span) = self.f.span {
+                e.with_span(span)
+            } else {
+                e
+            }
+        })?;
         let loc = self.loc;
         Ok((inst, loc))
     }
@@ -798,14 +804,18 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
             ast::SymbolDef::Typ { .. } => Ok(()),
 
             // Variable decl
-            ast::SymbolDef::Var { typ, is_const } => {
+            ast::SymbolDef::Var {
+                typ,
+                is_const,
+                decl_span,
+            } => {
                 // if id != 0 {
                 // Who cares about constants?
                 // * This function does not care about where this variable is declared
                 let var_name = format!("{}`{}", name, id);
 
                 let typ = resolve_ty(&*typ.borrow(), scope);
-                if !typ.is_fn() {
+                if !typ.is_fn() && !typ.is_unit() {
                     let occupy_slots = typ
                         .occupy_slots()
                         .ok_or(CompileErrorVar::RequireSized(format!("{:?}", typ)))?;
@@ -814,8 +824,16 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
                         .add_var(&var_name, occupy_slots, *is_const, Ptr::new(typ))?;
 
                     Ok(())
-                } else if self.f.scope.borrow().id != 0 {
-                    Err(compile_err_n(CompileErrorVar::NestedFunctions(name.into())))
+                } else if typ.is_unit() {
+                    Err(compile_err(
+                        CompileErrorVar::VoidVariable(name.into()),
+                        Some(*decl_span),
+                    ))
+                } else if typ.is_fn() && self.f.scope.borrow().id != 0 {
+                    Err(compile_err(
+                        CompileErrorVar::NestedFunctions(name.into()),
+                        Some(*decl_span),
+                    ))
                 } else {
                     Ok(())
                 }
@@ -912,15 +930,14 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
         Ok(bb)
     }
 
-    fn gen_ident_address(
+    fn gen_ident_address_and_const(
         &mut self,
         i: &ast::Identifier,
         inst: &mut InstSink,
         scope: Ptr<ast::Scope>,
-    ) -> CompileResult<Type> {
+    ) -> CompileResult<(Type, bool)> {
         let def = scope.borrow().find_def_depth(&i.name).unwrap();
 
-        log::debug!("Getting address of ident {}, depth {}", &i.name, def.1);
         // Global var in global scope is also local var
         let global_scope = self.f.scope.borrow().id == 0;
         let is_local_var = def.1 != 0 || global_scope;
@@ -933,7 +950,7 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
             let typ = loc.typ.cp();
             let offset = loc.offset as i32;
             inst.push(Inst::LoadA(0, offset));
-            Ok(typ)
+            Ok((typ, loc.is_const))
         } else {
             // Global variable
             let glob = self
@@ -947,14 +964,13 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
             let typ = glob.typ.cp();
             let offset = glob.offset as i32;
             inst.push(Inst::LoadA(1, offset));
-            Ok(typ)
+            Ok((typ, glob.is_const))
         }
     }
 
     fn gen_l_value_address(
         &mut self,
         expr: Ptr<ast::Expr>,
-        is_const_storage: bool,
         inst: &mut InstSink,
         scope: Ptr<ast::Scope>,
     ) -> CompileResult<Type> {
@@ -962,7 +978,22 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
         let expr = &*expr;
 
         match &expr.var {
-            ast::ExprVariant::Ident(i) => self.gen_ident_address(i, inst, scope),
+            ast::ExprVariant::Ident(i) => Ok(self.gen_ident_address_and_const(i, inst, scope)?.0),
+            _ => Err(CompileErrorVar::NotLValue(format!("{}", expr))).with_span(expr.span),
+        }
+    }
+
+    fn gen_l_value_address_and_const(
+        &mut self,
+        expr: Ptr<ast::Expr>,
+        inst: &mut InstSink,
+        scope: Ptr<ast::Scope>,
+    ) -> CompileResult<(Type, bool)> {
+        let expr = expr.borrow();
+        let expr = &*expr;
+
+        match &expr.var {
+            ast::ExprVariant::Ident(i) => self.gen_ident_address_and_const(i, inst, scope),
             _ => Err(CompileErrorVar::NotLValue(format!("{}", expr))).with_span(expr.span),
         }
     }
@@ -975,8 +1006,12 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
     ) -> CompileResult<Type> {
         if b.op == ast::OpVar::_Asn || b.op == ast::OpVar::_Csn {
             // * This generates address for lhs.
-            let lhs =
-                self.gen_l_value_address(b.lhs.cp(), b.op == ast::OpVar::_Csn, inst, scope.cp())?;
+            let (lhs, constance) =
+                self.gen_l_value_address_and_const(b.lhs.cp(), inst, scope.cp())?;
+
+            if constance && b.op != ast::OpVar::_Csn {
+                return Err(compile_err_n(CompileErrorVar::AssignConst));
+            }
 
             let rhs = self.gen_expr(b.rhs.cp(), inst, scope.cp())?;
 
@@ -1040,7 +1075,7 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
         inst: &mut InstSink,
         scope: Ptr<ast::Scope>,
     ) -> CompileResult<Type> {
-        let typ = self.gen_ident_address(i, inst, scope)?;
+        let typ = self.gen_ident_address_and_const(i, inst, scope)?.0;
         load(typ.cp(), inst)?;
         Ok(typ)
     }
@@ -1290,7 +1325,7 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
     ) -> CompileResult<BB> {
         {
             let inst = &mut bb.borrow_mut().inst;
-            let typ = self.gen_ident_address(scan, inst, scope.cp())?;
+            let typ = self.gen_ident_address_and_const(scan, inst, scope.cp())?.0;
             let typ_borrow = typ.borrow();
             match &*typ_borrow {
                 ast::TypeDef::Primitive(p) => match p.var {

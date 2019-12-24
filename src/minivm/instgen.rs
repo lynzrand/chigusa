@@ -70,9 +70,7 @@ pub(super) fn conv(from: Type, to: Type, sink: &mut InstSink) -> CompileResult<T
                 use ast::PrimitiveTypeVar::*;
                 match (f.var, t.var) {
                     (Float, UnsignedInt) | (Float, SignedInt) => sink.push(Inst::D2I),
-
                     (UnsignedInt, Float) | (SignedInt, Float) => sink.push(Inst::I2D),
-
                     (SignedInt, UnsignedInt) if t.occupy_bytes == 1 => sink.push(Inst::I2C),
                     _ => (),
                 };
@@ -80,6 +78,7 @@ pub(super) fn conv(from: Type, to: Type, sink: &mut InstSink) -> CompileResult<T
                 Ok(to.cp())
             }
             Ref(..) => Err(CompileErrorVar::MakePrimitiveFromRef.into()),
+            Unit => Err(CompileErrorVar::AssignVoid.into()),
             _ => Err(CompileErrorVar::UnsupportedType.into()),
         },
         Ref(r) => match &*from.borrow() {
@@ -91,6 +90,7 @@ pub(super) fn conv(from: Type, to: Type, sink: &mut InstSink) -> CompileResult<T
                     Ok(to.cp())
                 }
             }
+            Unit => Err(CompileErrorVar::AssignVoid.into()),
             _ => Err(CompileErrorVar::MakeRefFromPrimitive.into()),
         },
         ast::TypeDef::NamedType(..) => Err(CompileErrorVar::InternalError(
@@ -135,7 +135,7 @@ pub(super) fn load(ty: Type, sink: &mut InstSink) -> CompileResult<()> {
         .occupy_slots()
         .ok_or(CompileErrorVar::RequireSized(format!("{:?}", ty.cp())))?;
     match slots {
-        0 => (),
+        0 => Err(CompileErrorVar::AssignVoid)?,
         1 => sink.push(Inst::ILoad),
         2 => sink.push(Inst::DLoad),
         _n @ _ => Err(CompileErrorVar::UnsupportedType)?,
@@ -149,7 +149,7 @@ pub(super) fn store(ty: Type, sink: &mut InstSink) -> CompileResult<()> {
         .occupy_slots()
         .ok_or(CompileErrorVar::RequireSized(format!("{:?}", ty.cp())))?;
     match slots {
-        0 => (),
+        0 => Err(CompileErrorVar::AssignVoid)?,
         1 => sink.push(Inst::IStore),
         2 => sink.push(Inst::DStore),
         _n @ _ => Err(CompileErrorVar::UnsupportedType)?,

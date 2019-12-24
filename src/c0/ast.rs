@@ -33,15 +33,21 @@ impl fmt::Debug for Program {
 
 #[derive(Eq, PartialEq)]
 pub enum SymbolDef {
-    Typ { def: Ptr<TypeDef> },
-    Var { typ: Ptr<TypeDef>, is_const: bool },
+    Typ {
+        def: Ptr<TypeDef>,
+    },
+    Var {
+        typ: Ptr<TypeDef>,
+        is_const: bool,
+        decl_span: Span,
+    },
 }
 
 impl fmt::Debug for SymbolDef {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             SymbolDef::Typ { def } => f.debug_tuple("Type").field(&*def.borrow()).finish(),
-            SymbolDef::Var { typ, is_const } => f
+            SymbolDef::Var { typ, is_const, .. } => f
                 .debug_tuple("Var")
                 .field(&*typ.borrow())
                 .field(is_const)
@@ -62,7 +68,7 @@ impl SymbolDef {
     /// Return the symbol variant of self
     pub fn get_sym(&self) -> Option<(Ptr<TypeDef>, bool)> {
         match self {
-            SymbolDef::Var { typ, is_const } => Some((typ.cp(), *is_const)),
+            SymbolDef::Var { typ, is_const, .. } => Some((typ.cp(), *is_const)),
             _ => None,
         }
     }

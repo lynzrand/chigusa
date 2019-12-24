@@ -70,6 +70,8 @@ impl<T> WithSpan<CompileResult<T>> for Result<T, CompileErrorVar> {
 pub enum CompileErrorVar {
     Unknown,
     AssignVoid,
+    AssignConst,
+    VoidVariable(String),
     UnsupportedType,
     UnsupportedOp,
     NoExternFunction(String),

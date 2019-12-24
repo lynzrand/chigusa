@@ -393,6 +393,7 @@ where
                 SymbolDef::Var {
                     typ: param_type.cp(),
                     is_const: false,
+                    decl_span: ident.span,
                 },
             )?;
             expr_vec.push((param_type, ident_str.to_owned()));
@@ -406,6 +407,7 @@ where
                     SymbolDef::Var {
                         typ: param_type.cp(),
                         is_const: false,
+                        decl_span: ident.span,
                     },
                 )?;
                 expr_vec.push((param_type, ident_str.to_owned()));
@@ -422,6 +424,7 @@ where
 
         let right_span = self.cur.span;
         self.expect_report(&TokenType::RParenthesis)?;
+        let span = left_span + right_span;
 
         // Insert function declaration
         scope.borrow_mut().insert_def(
@@ -434,6 +437,7 @@ where
                     is_extern: false,
                 })),
                 is_const: false,
+                decl_span: span,
             },
         )?;
 
@@ -450,6 +454,7 @@ where
                     is_extern: false,
                 })),
                 is_const: false,
+                decl_span: span,
             },
         )?;
 
@@ -470,6 +475,7 @@ where
 
         while has_next {
             self.check_report(&TokenType::Identifier(String::new()))?;
+            let mut span = self.cur.span;
             let ident = self.bump();
 
             if self.check(&TokenType::LParenthesis) {
@@ -481,7 +487,10 @@ where
             }
 
             let init_val = if self.expect(&TokenType::Assign) {
-                Some(self.p_base_expr(&[TokenType::Comma, TokenType::Semicolon], scope.cp())?)
+                let expr =
+                    self.p_base_expr(&[TokenType::Comma, TokenType::Semicolon], scope.cp())?;
+                span = span + expr.borrow().span;
+                Some(expr)
             } else {
                 None
             };
@@ -498,6 +507,7 @@ where
                 SymbolDef::Var {
                     typ: type_decl.cp(),
                     is_const,
+                    decl_span: span,
                 },
             )?;
 
