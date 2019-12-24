@@ -1,4 +1,5 @@
 use std::io::{Read, Write};
+pub mod out;
 
 trait Readable {
     fn read_from(&self, w: &mut impl Read) -> std::io::Result<()>;

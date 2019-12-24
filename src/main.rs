@@ -8,15 +8,6 @@ use std::io::{Read, Write};
 use std::path::PathBuf;
 use structopt;
 use structopt::StructOpt;
-// use crossterm::{cursor, Color, Colored};
-
-const __INPUT_CODE: &'static str = r#"
-int x = 1, y = x + 1;
-double c = 12.34666666666666666666666666666666e+50;
-int z;
-const int k = 3 * y + x * 5 - 8 * &x++;
-int main(){ if (c > 0) print("aaa", x); else {int z = 2; print(z);} }
-"#;
 
 fn main() {
     let mut opt: ParserConfig = ParserConfig::from_args();
@@ -84,7 +75,8 @@ fn main() {
     };
 
     if opt.emit == EmitOption::S0 {
-        write_output(&opt, s0);
+        let mut f = File::create(&opt.output_file).expect("Failed to create output file");
+        write!(f, "{}", s0).expect("Failed to write");
     } else {
         // Emit O0
         let mut f = File::create(&opt.output_file).expect("Failed to create output file");
