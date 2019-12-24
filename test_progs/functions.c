@@ -6,12 +6,14 @@ int fib(int a) {
   }
 }
 
-void main() {
+int main() {
   int a = 0;
+  scan(a);
   while (a < 15) {
     print(fib(a));
     a = a + 1;
     if (a == 10)
       break;
   }
+  return 0;
 }

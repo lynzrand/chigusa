@@ -13,9 +13,13 @@ int main() {
 	int f;
 	scan(max);
 	pi = pi * 3;
+	print(max);
+	print(pi);
+	print(pi < max);
 	if (pi < max) {
 		max = pi;
 	}
+	print(max);
 	while(i < max) {
 		f = fib(i);
 		if (f < N) {
