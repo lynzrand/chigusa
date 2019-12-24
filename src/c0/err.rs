@@ -87,16 +87,6 @@ pub enum ParseErrVariant {
 }
 
 impl ParseErrVariant {
-    pub fn get_err_code(&self) -> usize {
-        use self::ParseErrVariant::*;
-        match self {
-            ExpectToken(..) => 1,
-            NoConstFns => 2,
-            InternalErr(_) => 1023,
-            _ => 1024,
-        }
-    }
-
     pub fn get_err_desc(&self) -> String {
         use self::ParseErrVariant::*;
         match self {
@@ -153,7 +143,7 @@ impl ParseErrVariant {
 
 impl Display for ParseErrVariant {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "E{:4}: {}", self.get_err_code(), self.get_err_desc())
+        write!(f, "{}", self.get_err_desc())
     }
 }
 

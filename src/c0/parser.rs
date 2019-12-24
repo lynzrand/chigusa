@@ -201,7 +201,7 @@ where
         Self::inject_std(root_scope.cp());
         let mut stmts = Vec::new();
         while self.cur.var != TokenType::EndOfFile {
-            stmts.push(self.p_stmt(root_scope.cp())?)
+            stmts.push(self.p_decl_stmt(root_scope.cp())?)
         }
         log::info!("Finished parsing program");
         Ok(Program {
@@ -877,7 +877,32 @@ where
         if self.check(&TokenType::LParenthesis) {
             self.p_fn_call(&cur, scope)
         } else {
-            //* No parenthesis -> simple identifier!
+            // * No parenthesis -> simple identifier!
+            let ident = scope
+                .borrow()
+                .find_def(cur.get_ident().unwrap())
+                .ok_or(parse_err(
+                    ParseErrVariant::CannotFindIdent(cur.get_ident().unwrap().to_owned()),
+                    cur.span,
+                ))?;
+            let ident = &*ident.borrow();
+            match ident {
+                SymbolDef::Typ { .. } => Err(parse_err(
+                    ParseErrVariant::ExpectToBeVar(cur.get_ident().unwrap().into()),
+                    cur.span,
+                )),
+                SymbolDef::Var { typ, .. } => {
+                    let typ = typ.borrow();
+                    match &*typ {
+                        TypeDef::Function(..) => Err(parse_err(
+                            ParseErrVariant::ExpectToBeVar(cur.get_ident().unwrap().into()),
+                            cur.span,
+                        )),
+                        _ => Ok(()),
+                    }
+                }
+            }?;
+
             Ok(Ptr::new(Expr {
                 var: ExprVariant::Ident(Identifier {
                     name: cur.get_ident().unwrap().to_owned(),
@@ -897,6 +922,25 @@ where
                 ParseErrVariant::CannotFindFn(fn_tok.get_ident().unwrap().to_owned()),
                 fn_tok.span,
             ))?;
+
+        // * Check if this is really a function
+        let func = &*func.borrow();
+        match func {
+            SymbolDef::Typ { .. } => Err(parse_err(
+                ParseErrVariant::ExpectToBeFn(fn_tok.get_ident().unwrap().into()),
+                fn_tok.span,
+            )),
+            SymbolDef::Var { typ, .. } => {
+                let typ = typ.borrow();
+                match &*typ {
+                    TypeDef::Function(..) => Ok(()),
+                    _ => Err(parse_err(
+                        ParseErrVariant::ExpectToBeFn(fn_tok.get_ident().unwrap().into()),
+                        fn_tok.span,
+                    )),
+                }
+            }
+        }?;
 
         // The expressions in function call
         let mut expr_vec = Vec::new();

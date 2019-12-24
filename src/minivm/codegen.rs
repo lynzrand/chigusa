@@ -1219,6 +1219,7 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
     ) -> CompileResult<Type> {
         let expr = i.expr.cp();
         let ty = i.to.cp();
+        let ty = Ptr::new(resolve_ty(&*ty.borrow(), scope.cp()));
 
         let expr_ty = self.gen_expr(expr, inst, scope)?;
 
