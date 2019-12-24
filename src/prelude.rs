@@ -203,23 +203,6 @@ impl std::ops::Add for Span {
         }
     }
 }
-/*
-    // Subtracting spans make no sense for now
-
-    impl std::ops::Sub for Span{
-        type Output = Span;
-        fn sub(self, rhs: Span)->Self::Output{
-            if self.start==rhs.start{
-                Span{
-                    start: rhs.end,
-                    end: self.end
-                }
-            } else {
-
-            }
-        }
-    }
-*/
 
 #[derive(Eq, PartialEq)]
 pub struct Ptr<T>(Rc<RefCell<T>>);
@@ -291,94 +274,6 @@ pub trait AstNode {
 pub fn variant_eq<T>(a: &T, b: &T) -> bool {
     std::mem::discriminant(a) == std::mem::discriminant(b)
 }
-
-// pub enum LoopCtrl<T> {
-//     Stop(T),
-//     Continue,
-// }
-
-// use LoopCtrl::*;
-
-// impl<T> LoopCtrl<T> {
-//     pub fn unwrap(self) -> T {
-//         match self {
-//             LoopCtrl::Stop(x) => x,
-//             _ => panic!("Cannot unwrap a LoopCtrl with Continue statement"),
-//         }
-//     }
-
-//     pub fn is_continue(&self) -> bool {
-//         match self {
-//             LoopCtrl::Continue => true,
-//             _ => false,
-//         }
-//     }
-// }
-
-// impl<T> From<Option<T>> for LoopCtrl<T> {
-//     fn from(other: Option<T>) -> LoopCtrl<T> {
-//         match other {
-//             Some(v) => Stop(v),
-//             None => Continue,
-//         }
-//     }
-// }
-
-// impl<T> From<Result<(), T>> for LoopCtrl<T> {
-//     fn from(other: Result<(), T>) -> LoopCtrl<T> {
-//         match other {
-//             Ok(_) => Continue,
-//             Err(e) => Stop(e),
-//         }
-//     }
-// }
-
-// impl<T> Into<Result<(), T>> for LoopCtrl<T> {
-//     fn into(self) -> Result<(), T> {
-//         match self {
-//             Continue => Ok(()),
-//             Stop(x) => Err(x),
-//         }
-//     }
-// }
-
-// impl<T> Try for LoopCtrl<T> {
-//     type Ok = ();
-//     type Error = T;
-//     fn into_result(self) -> Result<Self::Ok, Self::Error> {
-//         self.into()
-//     }
-//     fn from_error(v: Self::Error) -> Self {
-//         Stop(v)
-//     }
-//     fn from_ok(v: Self::Ok) -> Self {
-//         Continue
-//     }
-// }
-
-// #[inline]
-// pub fn loop_while<F, T>(mut f: F) -> T
-// where
-//     F: FnMut() -> LoopCtrl<T>,
-// {
-//     let mut x: LoopCtrl<T> = Continue;
-//     while x.is_continue() {
-//         x = f();
-//     }
-//     // the following unwrap CANNOT panic because x is garanteed to be Some.
-//     x.unwrap()
-// }
-
-// pub fn loop_while_check<F, T, E>(mut body: F) -> Result<T, E>
-// where
-//     F: FnMut() -> Result<LoopCtrl<T>, E>,
-// {
-//     let mut x: LoopCtrl<T> = body()?;
-//     while x.is_continue() {
-//         x = body()?;
-//     }
-//     Ok(x.unwrap())
-// }
 
 #[macro_export]
 macro_rules! set {

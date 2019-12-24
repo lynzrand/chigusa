@@ -44,7 +44,7 @@ pub struct ParseError {
 
 impl Display for ParseError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:#?} at {}", self.var, self.span)
+        write!(f, "{} at {}", self.var, self.span)
     }
 }
 
@@ -100,9 +100,52 @@ impl ParseErrVariant {
     pub fn get_err_desc(&self) -> String {
         use self::ParseErrVariant::*;
         match self {
-            ExpectToken(token, found) => format!("Expected {}, found {}", token, found),
-            NoConstFns => "Functions cannot be marked as constant".to_string(),
-            InternalErr(msg) => format!("The compiler encountered an internal error: {}", msg),
+            InvalidToken(tok) => format!("{} is an invalid token", tok),
+            BadEscaping { cause } => format!("Bad escaping sequence: {}", cause),
+
+            ExpectToken(expected, found) => format!("Expected {}, found {}", expected, found),
+            ExpectTokenOneOf(expected, found) => {
+                format!("Expected to be one of {:?}, found {}", expected, found)
+            }
+            UnexpectedToken(found) => format!("Unexpected token {}", found),
+            UnexpectedTokenMsg { typ, msg } => format!("Unexpected token {}: {}", typ, msg),
+            NoConstFns => format!("Functions cannot be constant"),
+            ConstTypeNeedExplicitInitialization => {
+                format!("Constant values need explicit initialization")
+            }
+
+            CannotFindIdent(ident) => format!("Unable to find identifier: {}", ident),
+            CannotFindType(ty) => format!("Unable to find type: {}", ty),
+            CannotFindVar(var) => format!("Unable to find variable: {}", var),
+            CannotFindFn(func) => format!("Unable to find function: {}", func),
+
+            ExpectToBeType(ident) => format!("Expected identifier '{}' to be a type", ident),
+            ExpectToBeVar(ident) => format!("Expected identifier '{}' to be a variable", ident),
+            ExpectToBeFn(ident) => format!("Expected identifier '{}' to be a function", ident),
+
+            UnsupportedToken(typ) => format!(
+                "Token type '{}' is not supported in this version of compiler",
+                typ
+            ),
+
+            DuplicateDeclaration(ident) => format!("Identifier '{}' is declared before", ident),
+            BadIdentifier(ident) => format!("Identifier '{}' is invalid", ident),
+            ConflictingDeclaration(ident) => {
+                format!("Identifier '{}' has conflicting declarations", ident)
+            }
+            EarlyEof => format!("The file unexpectedly ends"),
+
+            MissingOperandUnary => format!("Unary operator is missing its operand"),
+            MissingOperandL => format!("Binary operator is missing its left operand"),
+            MissingOperandR => format!("Binary operator is missing its right operand"),
+
+            NotMatchFnArguments(expected, found) => format!(
+                "Function arguments mismatch. Expected: {}, found: {}",
+                expected, found
+            ),
+
+            CustomErr(err) => format!("{}", err),
+            InternalErr(internal) => format!("Internal error inside compiler: {}", internal),
             _ => "Unknown Error".to_string(),
         }
     }

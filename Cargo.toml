@@ -35,7 +35,7 @@ log = "0.4.8"
 clap = "2.33"
 structopt = "0.3"
 arrayvec = "0.5"
-
+chigusa-minivm = { path = "crates/minivm" }
 
 [features]
 # llvm_jit = ["inkwell"]

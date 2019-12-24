@@ -17,3 +17,6 @@ pub mod cranelift;
 
 /// Essencial stuff
 pub mod prelude;
+
+/// Stuff for binary program
+pub(crate) mod opt;
