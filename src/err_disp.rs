@@ -27,6 +27,7 @@ pub fn pretty_print_error(
 
         println!("{}{:>5} | {}", err_sign, ln + 1, line);
         if is_err_line {
+            print!("{:>6} | ", ' ');
             if ln == span.start.ln {
                 if ln == span.end.ln {
                     let sign_len = span.end.pos - span.start.pos;
@@ -34,7 +35,7 @@ pub fn pretty_print_error(
                         "{:prec_space$}{:^^sign_len$}",
                         ' ',
                         '^',
-                        prec_space = span.start.pos + prec_space,
+                        prec_space = span.start.pos,
                         sign_len = sign_len
                     );
                 } else {
@@ -43,27 +44,15 @@ pub fn pretty_print_error(
                         "{:prec_space$}{:^^sign_len$}",
                         ' ',
                         '^',
-                        prec_space = span.start.pos + prec_space,
+                        prec_space = span.start.pos,
                         sign_len = sign_len
                     );
                 }
             } else if ln == span.end.ln {
                 let sign_len = span.end.pos;
-                println!(
-                    "{:prec_space$}{:^^sign_len$}",
-                    ' ',
-                    '^',
-                    prec_space = prec_space,
-                    sign_len = sign_len
-                );
+                println!("{:^^sign_len$}", '^', sign_len = sign_len);
             } else {
-                println!(
-                    "{:prec_space$}{:^^sign_len$}",
-                    ' ',
-                    '^',
-                    prec_space = prec_space,
-                    sign_len = line.len()
-                );
+                println!("{:^^sign_len$}", '^', sign_len = line.len());
             }
         }
     }
