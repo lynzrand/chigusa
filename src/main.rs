@@ -49,7 +49,7 @@ fn main() {
             let err_des = format!("Parsing error: {}", &e.var);
             let span = e.span;
             err_disp::pretty_print_error(&mut input_lines, span, &err_des);
-            return;
+            std::process::exit(1);
         }
     };
 
@@ -70,7 +70,7 @@ fn main() {
             } else {
                 log::error!("{}", err_des);
             }
-            return;
+            std::process::exit(1);
         }
     };
 
