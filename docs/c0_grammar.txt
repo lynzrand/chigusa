@@ -11,7 +11,7 @@ FloatLiteral:
     | DecimalInteger DecimalExponentPart
 
 
-EscapedChar: "\" ([ntr\\'"] | "x" [0-9a-fA-F]{2} | "u" [0-9a-fA-F]{4} )
+EscapedChar: "\" ([ntr\\'"] | "x" [0-9a-fA-F]{2} | "u" ( [0-9a-fA-F]{4} | '{' [0-9a-fA-F]+ '}' ) )
 Char: [^\\'"\n\r] | EscapedChar
 
 CharLiteral: "'" Char "'"

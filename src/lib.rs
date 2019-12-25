@@ -20,3 +20,6 @@ pub mod prelude;
 
 /// Stuff for binary program
 pub(crate) mod opt;
+
+#[cfg(test)]
+mod tests;

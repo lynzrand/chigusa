@@ -464,9 +464,6 @@ where
 
             let end_pos = self.iter.peek().unwrap().0;
 
-            let start = start_pos.index;
-            let end = end_pos.index;
-
             Token {
                 var: TokenType::Literal(Literal::Float(ramp::rational::Rational::new(
                     number,
@@ -477,9 +474,6 @@ where
             }
         } else {
             let end_pos = self.iter.peek().unwrap().0;
-
-            let start = start_pos.index;
-            let end = end_pos.index;
 
             Token {
                 var: TokenType::Literal(Literal::Integer(number)),
@@ -563,11 +557,9 @@ where
     fn lex_identifier(&mut self) -> Token {
         let start = self.iter.peek().expect("This value should be valid").0;
         let mut ident = String::new();
-        while self
-            .iter
-            .peek()
-            .map_or(false, |ch_ind| (*ch_ind).1.is_alphanumeric())
-        {
+        while self.iter.peek().map_or(false, |ch_ind| {
+            ch_ind.1.is_alphanumeric() || ch_ind.1 == '_'
+        }) {
             ident.push(self.iter.next().unwrap().1);
         }
         let end = self.iter.peek().unwrap().0;
@@ -766,8 +758,9 @@ where
                 x as char
             }
 
-            'u' => match iter.next().expect("Bad escape value").1 {
+            'u' => match iter.peek().expect("Bad escape value").1 {
                 '{' => {
+                    iter.next();
                     let x: String = iter.take_while(|x| x.1 != '}').map(|x| x.1).collect();
                     let x = u32::from_str_radix(&x, 16).expect("Bad escaping");
                     x.try_into().expect("Bad escaped value")
@@ -777,7 +770,7 @@ where
                     let x = u32::from_str_radix(&x, 16).expect("Bad escaping");
                     x.try_into().expect("Bad escaped value")
                 }
-                _ => panic!("Bad escaping"),
+                _ => panic!("Bad escaping: need '{' or hex digit"),
             },
 
             ch @ _ => panic!("Bad escape: {}", ch),
