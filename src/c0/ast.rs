@@ -525,6 +525,7 @@ impl fmt::Display for Identifier {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum Literal {
+    Char { val: char },
     Integer { val: ramp::Int },
     Float { val: ramp::rational::Rational },
     Struct { typ: TypeDef, fields: Vec<Expr> },
@@ -535,6 +536,7 @@ pub enum Literal {
 impl fmt::Display for Literal {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Literal::Char { val } => write!(f, "'{}'", val),
             Literal::Integer { val } => write!(f, "{}", val),
             Literal::Float { val } => write!(f, "{}", val),
             Literal::Struct { typ, fields } => write!(f, "{:?}{{{:?}}}", typ, fields),
@@ -552,9 +554,7 @@ impl From<super::lexer::Literal> for Literal {
             Float(i) => Literal::Float { val: i },
             String(s) => Literal::String { val: s },
             Boolean(b) => Literal::Boolean { val: b },
-            Char(c) => Literal::Integer {
-                val: (c as u32).into(),
-            },
+            Char(c) => Literal::Char { val: c },
             _Dummy => panic!("Dummy literal cannot be used!"),
         }
     }

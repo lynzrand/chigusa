@@ -1154,7 +1154,7 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
         match lit {
             ast::Literal::Boolean { val } => {
                 inst.push(Inst::IPush(*val as i32));
-                let typ = Self::uint_type(1);
+                let typ = Self::int_type(1);
                 Ok(typ)
             }
 
@@ -1163,6 +1163,14 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
                 inst.push(Inst::IPush(val));
 
                 let typ = Self::int_type(4);
+                Ok(typ)
+            }
+
+            ast::Literal::Char { val } => {
+                let val: i32 = *val as u32 as i32;
+                inst.push(Inst::IPush(val));
+
+                let typ = Self::uint_type(1);
                 Ok(typ)
             }
 
