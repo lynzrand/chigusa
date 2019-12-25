@@ -153,7 +153,7 @@ fn test_lex_ops() {
 }
 
 #[test]
-fn test_lex_err_tokens() {
+fn test_lex_err_chars() {
     let src = r#"@
 #
 $
@@ -163,6 +163,34 @@ $
 \
 :
 ?"#;
+
+    let lines = src.lines();
+    for line in lines {
+        let chars = line.chars();
+        let result = std::panic::catch_unwind(|| {
+            Lexer::new(chars)
+                .for_each(|x| assert!(variant_eq(&x.var, &TokenType::Error(String::new()))))
+        });
+
+        assert!(
+            result.is_err(),
+            format!("token {:?} in '{}' does not result in error!", result, line)
+        );
+    }
+}
+
+#[test]
+fn test_lex_err_strings() {
+    let src = r#""\u"
+    "\u123"
+    "\x"
+    "\xa"
+    "\xz"
+    "\xab"
+    "\xzx"
+    "\w"
+    "\z"
+"#;
 
     let lines = src.lines();
     for line in lines {
