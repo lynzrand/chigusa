@@ -366,7 +366,10 @@ where
                     },
                 }
             }
-            _ => unreachable!(),
+            _ => Err(parse_err(
+                ParseErrVariant::UnexpectedToken(tok.var),
+                tok.span,
+            )),
         }
     }
 

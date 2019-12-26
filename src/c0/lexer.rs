@@ -1,3 +1,4 @@
+use super::err::*;
 use crate::prelude::*;
 use once_cell::sync::*;
 use ramp;
@@ -71,7 +72,7 @@ pub enum TokenType {
     // Special
     EndOfFile,
     Dummy,
-    Error(String),
+    Error(LexError),
 }
 
 impl Display for TokenType {
@@ -125,7 +126,7 @@ impl Display for TokenType {
 
             EndOfFile => write!(f, "#EOF"),
             Dummy => write!(f, "<dummy>"),
-            Error(reason) => write!(f, "<Error token>(Reason: {})", reason),
+            Error(reason) => write!(f, "<Error token>(Reason: {:?})", reason),
             // _ => write!(f, "???"),
         }
     }
@@ -311,14 +312,14 @@ where
     pub fn get_next_token(&mut self) -> Option<Token> {
         Self::skip_spaces(&mut self.iter);
         // the first character of next token
-        let c = match self.iter.peek() {
+        let (pos, c) = match self.iter.peek() {
             Some((_, '\0')) => return None,
-            Some((_, c)) => c,
+            Some((pos, c)) => (*pos, *c),
             // spaces may occur at the end of file
             None => return None,
         };
 
-        Some(match c {
+        let tok = match c {
             '0'..='9' => self.lex_number(),
             'a'..='z' | 'A'..='Z' | '_' => self.lex_identifier(),
             '\"' => self.lex_string_literal(),
@@ -326,11 +327,24 @@ where
             '+' | '-' | '*' | '/' | '<' | '>' | '=' | '!' | '|' | '&' | '^' | '(' | ')' | '['
             | ']' | '{' | '}' | ',' | ';' => self.lex_operator(),
             // TODO: Add to errors and skip this line
-            _ => panic!("Unexpected character '{}'", c),
-        })
+            c @ _ => Err(LexError::UnexpectedCharacter(c)),
+        };
+
+        let tok = match tok {
+            Ok(t) => t,
+            Err(e) => {
+                let end_pos = self.skip_error();
+                Token {
+                    var: TokenType::Error(e),
+                    span: Span::from(pos, end_pos),
+                }
+            }
+        };
+
+        Some(tok)
     }
 
-    fn skip_error(&mut self, reason: String) -> Token {
+    fn skip_error(&mut self) -> Pos {
         let start_pos = self
             .iter
             .peek()
@@ -341,10 +355,7 @@ where
             self.iter.next();
             end_pos = end_pos.inc();
         }
-        Token {
-            var: TokenType::Error(reason.into()),
-            span: Span::from(start_pos, end_pos),
-        }
+        end_pos
     }
 
     fn lex_int(&mut self, base: u8) -> Result<ramp::Int, ramp::int::ParseIntError> {
@@ -362,7 +373,7 @@ where
     }
 
     /// Lex a number
-    fn lex_number(&mut self) -> Token {
+    fn lex_number(&mut self) -> LexResult<Token> {
         let start_pos = self.iter.peek().expect("This value should be valid").0;
 
         // radix check.
@@ -442,7 +453,7 @@ where
 
             let exp = match i32::from_str(&exp) {
                 Ok(i) => i,
-                Err(e) => return self.skip_error(format!("Error parsing number: {}", e)),
+                Err(e) => Err(LexError::BadInteger)?,
             };
 
             exponent += exp;
@@ -450,7 +461,7 @@ where
 
         let number = match ramp::Int::from_str_radix(&number, radix as u8) {
             Ok(i) => i,
-            Err(e) => return self.skip_error(format!("Error parsing number: {}", e)),
+            Err(e) => Err(LexError::BadInteger)?,
         };
 
         if is_float {
@@ -464,26 +475,26 @@ where
 
             let end_pos = self.iter.peek().unwrap().0;
 
-            Token {
+            Ok(Token {
                 var: TokenType::Literal(Literal::Float(ramp::rational::Rational::new(
                     number,
                     denominator,
                 ))),
                 // src: &self.src[start..end],
                 span: Span::from(start_pos, end_pos),
-            }
+            })
         } else {
             let end_pos = self.iter.peek().unwrap().0;
 
-            Token {
+            Ok(Token {
                 var: TokenType::Literal(Literal::Integer(number)),
                 // src: &self.src[start..end],
                 span: Span::from(start_pos, end_pos),
-            }
+            })
         }
     }
 
-    fn lex_char_literal(&mut self) -> Token {
+    fn lex_char_literal(&mut self) -> LexResult<Token> {
         let (start, start_quote) = self.iter.next().expect("Should be valid");
         if start_quote != '\'' {
             panic!(
@@ -499,8 +510,8 @@ where
             .1
         {
             '\\' => Self::unescape_character(&mut self.iter),
-            ch @ _ => ch,
-        };
+            ch @ _ => Ok(ch),
+        }?;
 
         let (end, end_quote) = self.iter.next().expect("Should be valid");
         if end_quote != '\'' {
@@ -510,51 +521,47 @@ where
             );
         }
 
-        Token {
+        Ok(Token {
             var: TokenType::Literal(Literal::Char(ch)),
             span: Span::from(start, end),
-        }
+        })
     }
 
     /// Lex a string literal.
-    fn lex_string_literal(&mut self) -> Token {
+    fn lex_string_literal(&mut self) -> LexResult<Token> {
         let (start, start_quotation_mark) = self.iter.next().expect("This value should be valid");
 
         if start_quotation_mark != '"' {
-            panic!(
-                "A string literal must start with a quotation mark! found at {}",
-                start
-            );
+            return Err(LexError::MalformedString);
         }
 
         let end: Pos;
         let mut tgt_string = String::new();
 
         loop {
-            let (this_index, this_char) =
-                self.iter.next().expect("Unexpected EOF in string literal");
+            let (this_index, this_char) = self.iter.next().ok_or(LexError::UnexpectedEOF)?;
             match this_char {
-                '\\' => tgt_string.push(Self::unescape_character(&mut self.iter)),
+                '\\' => tgt_string.push(Self::unescape_character(&mut self.iter)?),
 
                 '"' => {
                     end = this_index.map_inc(-1, 0, -1);
                     break;
                 }
 
-                '\n' | '\r' => panic!("Unexpected EOL in string literal"),
+                '\n' | '\r' => Err(LexError::UnexpectedEOL)?,
 
                 _ => tgt_string.push(this_char),
             }
         }
 
-        Token {
+        Ok(Token {
             var: TokenType::Literal(Literal::String(tgt_string)),
             span: Span::from(start, end),
-        }
+        })
     }
 
     /// Lex an identifier.
-    fn lex_identifier(&mut self) -> Token {
+    fn lex_identifier(&mut self) -> LexResult<Token> {
         let start = self.iter.peek().expect("This value should be valid").0;
         let mut ident = String::new();
         while self.iter.peek().map_or(false, |ch_ind| {
@@ -578,20 +585,20 @@ where
             "false" => TokenType::Literal(Literal::Boolean(false)),
 
             "struct" | "switch" | "case" | "default" | "for" | "do" => {
-                TokenType::Error(format!("Reserved word: {}", ident))
+                Err(LexError::ReservedWord(ident))?
             }
 
             _ => TokenType::Identifier(ident),
         };
 
-        Token {
+        Ok(Token {
             var: variation,
             span: Span::from(start, end),
-        }
+        })
     }
 
     /// Lex an operator.
-    fn lex_operator(&mut self) -> Token {
+    fn lex_operator(&mut self) -> LexResult<Token> {
         let (start, first_char) = self.iter.next().expect("This value should be valid");
         let mut end = start.inc();
         let second_char: Option<char> =
@@ -672,10 +679,10 @@ where
             _ => panic!("Unexpected character \'{}\' at {}", first_char, start),
         };
 
-        Token {
+        Ok(Token {
             var: variation,
             span: Span::from(start, end),
-        }
+        })
     }
 
     fn lex_comments(&mut self, multiline: bool) -> TokenType {
@@ -685,7 +692,10 @@ where
                 let c = self.iter.next();
                 match c {
                     Some((_, '*')) => match self.iter.peek() {
-                        Some((_, '/')) => break,
+                        Some((_, '/')) => {
+                            self.iter.next();
+                            break;
+                        }
                         _ => comment_data.push('*'),
                     },
                     None => panic!("Incomplete comment at EOF"),
@@ -696,8 +706,11 @@ where
             loop {
                 let c = self.iter.next();
                 match c {
-                    Some((_, '\r')) | Some((_, '\n')) => break,
-                    None => panic!("Incomplete comment at EOF"),
+                    Some((_, '\r')) | Some((_, '\n')) | Some((_, '\0')) => {
+                        self.iter.next();
+                        break;
+                    }
+                    None => break,
                     Some((_, c)) => comment_data.push(c),
                 }
             }
@@ -742,9 +755,9 @@ where
     /// | `\xNN`   | Character of value `0xNN` |
     /// | `\uNNNN` | Unicode character of value `0xNNNN` |
     /// | `\u{NN...N} | Unicode character of value `0xNN...N` |
-    fn unescape_character(iter: &mut Peekable<StringPosIter<T>>) -> char {
+    fn unescape_character(iter: &mut Peekable<StringPosIter<T>>) -> LexResult<char> {
         // TODO: Return a result so we can continue to parse
-        match iter.next().expect("Bad escaped value").1 {
+        Ok(match iter.next().expect("Bad escaped value").1 {
             'n' => '\n',
             't' => '\t',
             'r' => '\r',
@@ -754,7 +767,7 @@ where
 
             'x' => {
                 let x: String = iter.take(2).map(|x| x.1).collect();
-                let x = u8::from_str_radix(&x, 16).expect("Bad escaping");
+                let x = u8::from_str_radix(&x, 16).map_err(|_| LexError::BadEscaping)?;
                 x as char
             }
 
@@ -762,19 +775,19 @@ where
                 '{' => {
                     iter.next();
                     let x: String = iter.take_while(|x| x.1 != '}').map(|x| x.1).collect();
-                    let x = u32::from_str_radix(&x, 16).expect("Bad escaping");
-                    x.try_into().expect("Bad escaped value")
+                    let x = u32::from_str_radix(&x, 16).map_err(|_| LexError::BadEscaping)?;
+                    x.try_into().map_err(|_| LexError::BadEscaping)?
                 }
                 '0'..='9' | 'a'..='f' | 'A'..='F' => {
                     let x: String = iter.take(4).map(|x| x.1).collect();
-                    let x = u32::from_str_radix(&x, 16).expect("Bad escaping");
-                    x.try_into().expect("Bad escaped value")
+                    let x = u32::from_str_radix(&x, 16).map_err(|_| LexError::BadEscaping)?;
+                    x.try_into().map_err(|_| LexError::BadEscaping)?
                 }
-                _ => panic!("Bad escaping: need '{' or hex digit"),
+                _ => Err(LexError::BadEscaping)?,
             },
 
-            ch @ _ => panic!("Bad escape: {}", ch),
-        }
+            ch @ _ => Err(LexError::BadEscaping)?,
+        })
     }
 }
 

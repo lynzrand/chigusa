@@ -48,6 +48,19 @@ impl Display for ParseError {
     }
 }
 
+pub type LexResult<T> = Result<T, LexError>;
+
+#[derive(Debug, Eq, PartialEq, Clone, Hash)]
+pub enum LexError {
+    BadEscaping,
+    UnexpectedCharacter(char),
+    BadInteger,
+    MalformedString,
+    UnexpectedEOL,
+    UnexpectedEOF,
+    ReservedWord(String),
+}
+
 #[derive(Debug)]
 pub enum ParseErrVariant {
     InvalidToken(String),
@@ -81,7 +94,7 @@ pub enum ParseErrVariant {
     MissingOperandR,
 
     NotMatchFnArguments(usize, usize),
-
+    LexerErr(LexError),
     CustomErr(String),
     InternalErr(String),
 }
@@ -133,7 +146,7 @@ impl ParseErrVariant {
                 "Function arguments mismatch. Expected: {}, found: {}",
                 expected, found
             ),
-
+            LexerErr(l) => format!("{:?}", l),
             CustomErr(err) => format!("{}", err),
             InternalErr(internal) => format!("Internal error inside compiler: {}", internal),
             _ => "Unknown Error".to_string(),
