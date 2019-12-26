@@ -23,7 +23,6 @@ pub fn pretty_print_error(
         let line: String = line.into();
         let is_err_line = ln >= span.start.ln && ln <= span.end.ln;
         let err_sign = if is_err_line { '>' } else { ' ' };
-        let prec_space = 9;
 
         println!("{}{:>5} | {}", err_sign, ln + 1, line);
         if is_err_line {

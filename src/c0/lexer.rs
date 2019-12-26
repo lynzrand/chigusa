@@ -187,6 +187,13 @@ impl Token {
             span: Span::zero(),
         }
     }
+
+    pub fn is_err(&self) -> bool {
+        match self.var {
+            TokenType::Error(_) => true,
+            _ => false,
+        }
+    }
 }
 
 impl Display for Token {
@@ -360,7 +367,7 @@ where
             .unwrap()
             .0;
         let mut end_pos = start_pos;
-        while self.iter.peek().map_or(false, |x| x.1.is_whitespace()) {
+        while self.iter.peek().map_or(false, |x| !x.1.is_whitespace()) {
             self.iter.next();
             end_pos = end_pos.inc();
         }
@@ -518,16 +525,13 @@ where
             .expect("A character literal should have a character")
             .1
         {
-            '\\' => Self::unescape_character(&mut self.iter),
-            ch @ _ => Ok(ch),
-        }?;
+            '\\' => Self::unescape_character(&mut self.iter)?,
+            ch @ _ => ch,
+        };
 
         let (end, end_quote) = self.iter.next().expect("Should be valid");
         if end_quote != '\'' {
-            panic!(
-                "A character literal must end with a quotation mark! found at {}",
-                start
-            );
+            return Err(LexError::UnexpectedCharacter(end_quote));
         }
 
         Ok(Token {
@@ -731,6 +735,7 @@ where
     fn skip_spaces(iter: &mut Peekable<StringPosIter<T>>) {
         while match iter.peek() {
             None => false,
+            Some((_, '\0')) => false,
             Some((_, ch)) => ch.is_whitespace(),
         } {
             iter.next();
@@ -766,7 +771,7 @@ where
     /// | `\u{NN...N} | Unicode character of value `0xNN...N` |
     fn unescape_character(iter: &mut Peekable<StringPosIter<T>>) -> LexResult<char> {
         // TODO: Return a result so we can continue to parse
-        Ok(match iter.next().expect("Bad escaped value").1 {
+        Ok(match iter.next().ok_or(LexError::BadEscaping)?.1 {
             'n' => '\n',
             't' => '\t',
             'r' => '\r',
@@ -780,7 +785,7 @@ where
                 x as char
             }
 
-            'u' => match iter.peek().expect("Bad escape value").1 {
+            'u' => match iter.peek().ok_or(LexError::BadEscaping)?.1 {
                 '{' => {
                     iter.next();
                     let x: String = iter.take_while(|x| x.1 != '}').map(|x| x.1).collect();

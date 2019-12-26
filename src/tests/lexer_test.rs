@@ -167,10 +167,7 @@ $
     let lines = src.lines();
     for line in lines {
         let chars = line.chars();
-        let result = std::panic::catch_unwind(|| {
-            Lexer::new(chars)
-                .for_each(|x| assert!(variant_eq(&x.var, &TokenType::Error(String::new()))))
-        });
+        let result = Lexer::new(chars).next().unwrap();
 
         assert!(
             result.is_err(),
@@ -186,7 +183,7 @@ fn test_lex_err_strings() {
     "\x"
     "\xa"
     "\xz"
-    "\xab"
+    "\xaz"
     "\xzx"
     "\w"
     "\z"
@@ -195,10 +192,7 @@ fn test_lex_err_strings() {
     let lines = src.lines();
     for line in lines {
         let chars = line.chars();
-        let result = std::panic::catch_unwind(|| {
-            Lexer::new(chars)
-                .for_each(|x| assert!(variant_eq(&x.var, &TokenType::Error(String::new()))))
-        });
+        let result = Lexer::new(chars).next().unwrap();
 
         assert!(
             result.is_err(),
