@@ -3,6 +3,8 @@ int N = 0xffffffff;
 int max;
 
 int main() {
+  "Sting w";
+  /*
   print(1 + 2 * (3 + 4 * 5 - 6 + 8));
   return 0;
 }

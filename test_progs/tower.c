@@ -1,4 +1,4 @@
-
+void a(int a, int b, int c) {}
 int main() {
   int i = 0, n;
   scan(n);
