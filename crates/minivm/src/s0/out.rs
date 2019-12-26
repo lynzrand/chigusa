@@ -23,13 +23,14 @@ impl Display for O0 {
             write!(f, "{}", self.start_code)?;
         }
         {
+            writeln!(f, ".functions:")?;
             let iter = self.functions.iter().zip(0..);
             for c in iter {
                 writeln!(f, "{} {} {} {}", c.1, c.0.name_idx, c.0.param_siz, c.0.lvl)?;
             }
             let iter = self.functions.iter().zip(0..);
             for c in iter {
-                writeln!(f, "F{}:", c.1)?;
+                writeln!(f, ".F{}:", c.1)?;
                 fmt_insts(f, &c.0.ins[..])?;
             }
         }
