@@ -348,10 +348,19 @@ where
         let start_pos = self
             .iter
             .peek()
-            .expect("Errors should start with valid chars")
+            .map(|x| *x)
+            .or(Some((
+                Pos {
+                    ln: usize::max_value(),
+                    pos: usize::max_value(),
+                    index: usize::max_value(),
+                },
+                '\0',
+            )))
+            .unwrap()
             .0;
         let mut end_pos = start_pos;
-        while self.iter.peek().map_or(true, |x| x.1.is_whitespace()) {
+        while self.iter.peek().map_or(false, |x| x.1.is_whitespace()) {
             self.iter.next();
             end_pos = end_pos.inc();
         }
@@ -632,8 +641,8 @@ where
             '*' => TokenType::Multiply,
             '/' => match second_char {
                 None => TokenType::Divide,
-                Some('*') => self.lex_comments(true),
-                Some('/') => self.lex_comments(false),
+                Some('*') => self.lex_comments(true)?,
+                Some('/') => self.lex_comments(false)?,
                 _ => unreachable!(),
             },
             '=' => match second_char {
@@ -685,7 +694,7 @@ where
         })
     }
 
-    fn lex_comments(&mut self, multiline: bool) -> TokenType {
+    fn lex_comments(&mut self, multiline: bool) -> LexResult<TokenType> {
         let mut comment_data = String::new();
         if multiline {
             loop {
@@ -698,7 +707,7 @@ where
                         }
                         _ => comment_data.push('*'),
                     },
-                    None => panic!("Incomplete comment at EOF"),
+                    None => Err(LexError::UnexpectedEOF)?,
                     Some((_, c)) => comment_data.push(c),
                 }
             }
@@ -715,7 +724,7 @@ where
                 }
             }
         }
-        TokenType::Comment(comment_data)
+        Ok(TokenType::Comment(comment_data))
     }
 
     /// Skip spaces and stop before the next non-space character.

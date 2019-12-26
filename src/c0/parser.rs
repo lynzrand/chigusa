@@ -862,6 +862,7 @@ where
                         vec![
                             TokenType::Literal(super::lexer::Literal::_Dummy),
                             TokenType::Identifier(String::new()),
+                            TokenType::LParenthesis,
                         ],
                         self.cur.var.clone(),
                     ),

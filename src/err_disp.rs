@@ -13,7 +13,7 @@ pub fn pretty_print_error(
     err_desc: &str,
 ) {
     let start_line = span.start.ln.saturating_sub(ERR_CONTEXT_LINES);
-    let end_line = span.end.ln + ERR_CONTEXT_LINES;
+    let end_line = span.end.ln.saturating_add(ERR_CONTEXT_LINES);
     let take = end_line - start_line;
 
     let lines = lines.zip(0..).skip(start_line).take(take);
