@@ -9,7 +9,7 @@ jobs:
     steps:
       - uses: actions/checkout@v1
       - name: update submodules
-        run: git submodule update --recursive
+        run: git submodule init && git submodule update --recursive
       - name: Add rust nightly
         run: rustup update nightly; rustup default nightly;
       - name: Build
