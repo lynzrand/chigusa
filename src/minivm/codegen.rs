@@ -1211,11 +1211,9 @@ impl<'a, 'b> FnCodegen<'a, 'b> {
                 inst.push(Inst::LoadC(offset));
                 let typ = Self::ref_type(Self::uint_type(8));
                 Ok(typ)
-            }
-
-            ast::Literal::Struct { .. } => {
-                Err(CompileErrorVar::InternalError("Structs are not yet supported!".into()).into())
-            }
+            } // ast::Literal::Struct { .. } => {
+              //     Err(CompileErrorVar::InternalError("Structs are not yet supported!".into()).into())
+              // }
         }
     }
 

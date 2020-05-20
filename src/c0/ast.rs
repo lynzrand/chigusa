@@ -462,7 +462,7 @@ pub enum ExprVariant {
     UnaryOp(UnaryOp),
     BinaryOp(BinaryOp),
     FunctionCall(FunctionCall),
-    StructChild(StructChild),
+    // StructChild(StructChild),
     ArrayChild(ArrayChild),
     // /// If conditional.
     // ///
@@ -491,7 +491,7 @@ impl fmt::Display for ExprVariant {
             ExprVariant::UnaryOp(i) => write!(f, "{}", i),
             ExprVariant::BinaryOp(i) => write!(f, "{}", i),
             ExprVariant::FunctionCall(i) => write!(f, "{}", i),
-            ExprVariant::StructChild(i) => write!(f, "{}", i),
+            // ExprVariant::StructChild(i) => write!(f, "{}", i),
             ExprVariant::ArrayChild(i) => write!(f, "{}", i),
         }
     }
@@ -506,7 +506,7 @@ impl fmt::Debug for ExprVariant {
             ExprVariant::UnaryOp(i) => write!(f, "{}", i),
             ExprVariant::BinaryOp(i) => write!(f, "{}", i),
             ExprVariant::FunctionCall(i) => write!(f, "{}", i),
-            ExprVariant::StructChild(i) => write!(f, "{}", i),
+            // ExprVariant::StructChild(i) => write!(f, "{}", i),
             ExprVariant::ArrayChild(i) => write!(f, "{}", i),
         }
     }
@@ -528,7 +528,7 @@ pub enum Literal {
     Char { val: char },
     Integer { val: ramp::Int },
     Float { val: ramp::rational::Rational },
-    Struct { typ: TypeDef, fields: Vec<Expr> },
+    // Struct { typ: TypeDef, fields: Vec<Expr> },
     Boolean { val: bool },
     String { val: String },
 }
@@ -539,7 +539,7 @@ impl fmt::Display for Literal {
             Literal::Char { val } => write!(f, "'{}'", val),
             Literal::Integer { val } => write!(f, "{}", val),
             Literal::Float { val } => write!(f, "{}", val),
-            Literal::Struct { typ, fields } => write!(f, "{:?}{{{:?}}}", typ, fields),
+            // Literal::Struct { typ, fields } => write!(f, "{:?}{{{:?}}}", typ, fields),
             Literal::Boolean { val } => write!(f, "{}", val),
             Literal::String { val } => write!(f, "\"{}\"", val),
         }

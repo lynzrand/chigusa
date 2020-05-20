@@ -7,19 +7,15 @@ pub mod c0;
 
 pub mod minivm;
 
-/// Kurumi is a simple virtual machine for this project.
-// #[cfg(kurumi)]
-// pub mod kurumi;
-
-#[cfg(cranelift_codegen)]
-/// x86 codegen using Cranelift
-pub mod cranelift;
-
-/// Essencial stuff
+/// Essential stuff
 pub mod prelude;
 
 /// Stuff for binary program
 pub(crate) mod opt;
 
-#[cfg(test)]
-mod tests;
+pub mod arm;
+
+pub mod mir;
+
+// #[cfg(test)]
+// mod tests;
