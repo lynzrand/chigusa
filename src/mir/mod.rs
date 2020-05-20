@@ -6,6 +6,8 @@
 use crate::prelude::*;
 use std::collections::HashMap;
 
+mod codegen;
+
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum VarTy {
     Global,
@@ -17,6 +19,7 @@ pub struct VarRef(VarTy, usize);
 pub type TyRef = usize;
 pub type BBId = usize;
 
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub enum Value {
     Imm(u64),
     Var(VarRef),
@@ -69,19 +72,23 @@ pub struct MirCode {
     tgt: VarRef,
 }
 
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub enum JumpInst {
     Jump(BBId),
     Conditional(BBId, BBId),
     Return(Option<VarRef>),
-    Dead,
+    Unreachable,
+    Unknown,
 }
 
+#[derive(Debug, Clone)]
 pub struct BasicBlk {
-    id: BBId,
-    inst: Vec<MirCode>,
-    end: JumpInst,
+    pub id: BBId,
+    pub inst: Vec<MirCode>,
+    pub end: JumpInst,
 }
 
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub enum BasicTy {
     I32,
     F64,
@@ -98,19 +105,34 @@ pub enum Ty {
     RestParams,
 }
 
-pub struct Func {
-    // this: VarRef,
-    ty: TyRef,
-    /// Variable Table
-    ///
-    /// %0 is return value;  
-    /// %1..=ty is parameter.
-    var_table: HashMap<usize, TyRef>,
-    bb: Vec<BasicBlk>,
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum VarKind {
+    Param,
+    Ret,
+    Local,
+    Temp,
+    Dummy,
 }
 
+#[derive(Debug, Clone)]
+pub struct Var {
+    pub ty: TyRef,
+    pub kind: VarKind,
+}
+
+#[derive(Debug, Clone)]
+pub struct Func {
+    // this: VarRef,
+    pub ty: TyRef,
+
+    /// Variable Table
+    pub var_table: HashMap<usize, Var>,
+    pub bb: Vec<BasicBlk>,
+}
+
+#[derive(Debug, Clone)]
 pub struct MirPackage {
-    global_var_table: HashMap<usize, TyRef>,
-    ty_table: HashMap<TyRef, Ty>,
-    func_table: HashMap<usize, Func>,
+    pub global_var_table: HashMap<usize, TyRef>,
+    pub ty_table: HashMap<TyRef, Ty>,
+    pub func_table: HashMap<usize, Func>,
 }

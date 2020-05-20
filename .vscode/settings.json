@@ -1,9 +1,4 @@
 {
   "editor.tabSize": 4,
-  "cSpell.words": [
-    "Deque",
-    "Itertools",
-    "kurumi"
-    "Chigusa"
-  ]
+  "cSpell.words": ["Deque", "Itertools", "kurumi", "Chigusa"]
 }
