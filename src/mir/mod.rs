@@ -4,7 +4,7 @@
 //! like LLVM-IR.
 
 use crate::prelude::*;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 mod codegen;
 
@@ -13,20 +13,30 @@ pub enum VarTy {
     Global,
     Local,
 }
-#[derive(Debug, Eq, PartialEq, Copy, Clone)]
-pub struct VarRef(VarTy, usize);
-// #[derive(Debug, Eq, PartialEq, Copy, Clone)]
+
 pub type TyRef = usize;
 pub type BBId = usize;
+pub type VarId = usize;
 
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub enum Value {
-    Imm(u64),
-    Var(VarRef),
+#[derive(Debug, PartialEq, Copy, Clone)]
+pub struct VarRef(VarTy, VarId);
+// #[derive(Debug, Eq, PartialEq, Copy, Clone)]
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ValueKind {
+    IntImm(u64),
+    FloatImm(f64),
+    Var(usize),
     Reg(u8),
 }
 
-#[derive(Clone, Eq, PartialEq, Debug)]
+#[derive(Debug, Clone, PartialEq)]
+pub struct Value {
+    pub ty: Ty,
+    pub kind: ValueKind,
+}
+
+#[derive(Clone, PartialEq, Debug)]
 pub enum Ins {
     /// Type Conversion
     TyCon(Value),
@@ -72,7 +82,7 @@ pub struct MirCode {
     tgt: VarRef,
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum JumpInst {
     Jump(BBId),
     Conditional(BBId, BBId),
@@ -81,11 +91,40 @@ pub enum JumpInst {
     Unknown,
 }
 
+impl Default for JumpInst {
+    fn default() -> Self {
+        JumpInst::Unknown
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct BasicBlk {
-    pub id: BBId,
+    /// Basic blocks that jump into this block.
+    pub jump_in: HashSet<BBId>,
+    pub uses_var: HashSet<VarId>,
+    // pub id: BBId,
     pub inst: Vec<MirCode>,
+    /// How this basic block terminates. Defaults to Unknown.
     pub end: JumpInst,
+}
+
+impl BasicBlk {
+    pub fn new<'s, I>(jump_in: I) -> BasicBlk
+    where
+        I: IntoIterator<Item = &'s usize>,
+    {
+        let mut jump_in_set = HashSet::new();
+        for item in jump_in {
+            jump_in_set.insert(*item);
+        }
+
+        BasicBlk {
+            jump_in: jump_in_set,
+            uses_var: HashSet::new(),
+            inst: Vec::new(),
+            end: Default::default(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -107,6 +146,7 @@ pub enum Ty {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum VarKind {
+    Imm,
     Param,
     Ret,
     Local,
