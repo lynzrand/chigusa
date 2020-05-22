@@ -31,6 +31,13 @@ pub enum Value {
     FloatImm(f64),
     Var(VarRef),
     Reg(u8),
+    Void,
+}
+
+impl Value {
+    pub fn is_assignable(&self) -> bool {
+        matches!(self, Value::Void)
+    }
 }
 
 // #[derive(Debug, Clone, PartialEq)]
@@ -250,6 +257,20 @@ impl Ty {
     pub fn get_array_of(&self) -> Option<(Ref<Ty>, Option<usize>)> {
         if let Ty::Array(t, size) = self {
             Some((t.borrow(), size.to_owned()))
+        } else {
+            None
+        }
+    }
+    pub fn get_fn_params(&self) -> Option<&Vec<Ty>> {
+        if let Ty::Fn(_, param) = self {
+            Some(param)
+        } else {
+            None
+        }
+    }
+    pub fn get_fn_ret(&self) -> Option<Ptr<Ty>> {
+        if let Ty::Fn(ret, _) = self {
+            Some(ret.clone())
         } else {
             None
         }

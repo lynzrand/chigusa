@@ -78,7 +78,7 @@ pub enum CompileErrorVar {
 
     NoTypeInformation,
     OperatorDoesNotSupportedType,
-
+    TypeMismatch,
     ErrorType,
     MakeRefFromPrimitive,
     MakePrimitiveFromRef,

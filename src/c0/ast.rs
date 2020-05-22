@@ -512,6 +512,19 @@ impl fmt::Debug for ExprVariant {
     }
 }
 
+impl ExprVariant {
+    pub fn is_lvalue(&self) -> bool {
+        // TODO: support array child
+        matches!(self, ExprVariant::Ident(_))
+    }
+}
+
+impl Expr {
+    pub fn is_lvalue(&self) -> bool {
+        self.var.is_lvalue()
+    }
+}
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Identifier {
     pub name: String,

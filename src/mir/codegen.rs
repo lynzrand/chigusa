@@ -454,6 +454,15 @@ impl<'src> FnCodegen<'src> {
         self.add_bb(span.end, mir::BasicBlk::new(&[]))
     }
 
+    fn get_var_name(&self, name: &str, scope: Ptr<ast::Scope>) -> CompileResult<String> {
+        let (_, depth) = scope
+            .borrow()
+            .find_def_depth(name)
+            .ok_or_else(|| compile_err_n(CompileErrorVar::NonExistVar(name.to_owned())))?;
+        let name = format_ident(&name, depth);
+        Ok(name)
+    }
+
     fn get_var_name_and_ty(
         &self,
         name: &str,
@@ -463,6 +472,7 @@ impl<'src> FnCodegen<'src> {
             .borrow()
             .find_def_depth(name)
             .ok_or_else(|| compile_err_n(CompileErrorVar::NonExistVar(name.to_owned())))?;
+
         let name = format_ident(&name, depth);
         let ty = def
             .borrow()
@@ -575,6 +585,7 @@ impl<'src> FnCodegen<'src> {
             },
             // TODO: Support register values?
             mir::Value::Reg(_) => None,
+            mir::Value::Void => Some(mir::Ty::Void),
         }
     }
 
@@ -606,19 +617,21 @@ impl<'src> FnCodegen<'src> {
         scope: Ptr<ast::Scope>,
     ) -> CompileResult<mir::Value> {
         match &expr.var {
-            ast::ExprVariant::Ident(ident) => self.gen_ident_expr(ident, expr.span, bb, scope),
+            ast::ExprVariant::Ident(ident) => {
+                self.gen_rvalue_ident_expr(ident, expr.span, bb, scope)
+            }
             ast::ExprVariant::Literal(lit) => self.gen_literal_expr(lit, expr.span, bb, scope),
             ast::ExprVariant::TypeConversion(ty_conv) => {
                 self.gen_type_conversion(ty_conv, expr.span, bb, scope)
             }
             ast::ExprVariant::UnaryOp(op) => self.gen_unary_op(op, expr.span, bb, scope),
-            ast::ExprVariant::BinaryOp(op) => self.gen_binary_op(op, expr.span, bb, scope),
+            ast::ExprVariant::BinaryOp(op) => self.gen_regular_binary_op(op, expr.span, bb, scope),
             ast::ExprVariant::FunctionCall(op) => self.gen_fn_call(op, expr.span, bb, scope),
-            ast::ExprVariant::ArrayChild(_) => todo!(),
+            ast::ExprVariant::ArrayChild(_) => unimplemented!("Array child is not implemented"),
         }
     }
 
-    fn gen_ident_expr(
+    fn gen_rvalue_ident_expr(
         &mut self,
         ident: &ast::Identifier,
         span: Span,
@@ -750,7 +763,127 @@ impl<'src> FnCodegen<'src> {
         bb: mir::BBId,
         scope: Ptr<ast::Scope>,
     ) -> CompileResult<mir::Value> {
-        todo!()
+        match op.op {
+            ast::OpVar::_Asn => self.gen_assignment(op, span, bb, scope),
+            _ => self.gen_regular_binary_op(op, span, bb, scope),
+        }
+    }
+
+    fn gen_lvalue(
+        &mut self,
+        lval: &ast::Expr,
+        bb: mir::BBId,
+        scope: Ptr<ast::Scope>,
+    ) -> CompileResult<mir::VarRef> {
+        if !lval.is_lvalue() {
+            return Err(CompileErrorVar::NotLValue(lval.to_string())).with_span(lval.span);
+        }
+
+        match &lval.var {
+            ast::ExprVariant::Ident(ident) => {
+                // get the definition of this variable.
+                // Typing stuff is finished in the 1st pass so we don't need to
+                // typecheck again here. Just return the variable reference
+                // and typings can be retrieved from variable info
+                let (_, depth) = scope.borrow().find_def_depth(&ident.name).ok_or_else(|| {
+                    compile_err(
+                        CompileErrorVar::NonExistVar(ident.name.clone()),
+                        Some(lval.span),
+                    )
+                })?;
+                let lval_name = format_ident(&ident.name, depth);
+                if depth == 0 {
+                    // global value
+                    todo!("Resolve global variable")
+                } else {
+                    let (pos, v_ref) = self
+                        .var_pos_table
+                        .get(&lval_name)
+                        .unwrap()
+                        .range(lval.span.end..)
+                        .next()
+                        .unwrap();
+                    Ok(mir::VarRef(mir::VarTy::Local, *v_ref))
+                }
+            }
+            _ => Err(CompileErrorVar::NotLValue(format!("{}", lval))).with_span(lval.span),
+        }
+    }
+
+    fn gen_assignment(
+        &mut self,
+        op: &ast::BinaryOp,
+        span: Span,
+        bb: mir::BBId,
+        scope: Ptr<ast::Scope>,
+    ) -> CompileResult<mir::Value> {
+        let lval = &*op.lhs.borrow();
+        let var = self.gen_lvalue(lval, bb, scope.clone())?;
+        let rval = self.gen_expr(&*op.rhs.borrow(), bb, scope.clone())?;
+
+        let lval_ty = if var.0 == mir::VarTy::Local {
+            &self.var_table.get(&var.1).expect("Variable must exist").ty
+        } else {
+            todo!("Global variable")
+        };
+        let rval_ty = self.val_ty(&rval).expect("Right value must have type");
+
+        if *lval_ty != rval_ty {
+            return Err(CompileErrorVar::TypeMismatch).with_span(span);
+        } else if !rval_ty.is_assignable() {
+            return Err(CompileErrorVar::AssignVoid).with_span(span);
+        }
+
+        self.insert_ins(
+            bb,
+            mir::MirCode {
+                ins: mir::Ins::Asn(rval),
+                tgt: var,
+            },
+        )?;
+
+        Ok(mir::Value::Void)
+    }
+
+    fn gen_regular_binary_op(
+        &mut self,
+        op: &ast::BinaryOp,
+        span: Span,
+        bb: mir::BBId,
+        scope: Ptr<ast::Scope>,
+    ) -> CompileResult<mir::Value> {
+        let lhs_val = self.gen_expr(&*op.lhs.borrow(), bb, scope.clone())?;
+        let lhs_ty = self
+            .val_ty(&lhs_val)
+            .ok_or_else(|| compile_err(CompileErrorVar::NoTypeInformation, Some(span)))?;
+
+        let rhs_val = self.gen_expr(&*op.rhs.borrow(), bb, scope.clone())?;
+        let rhs_ty = self
+            .val_ty(&rhs_val)
+            .ok_or_else(|| compile_err(CompileErrorVar::NoTypeInformation, Some(span)))?;
+
+        // TODO: Check for special binary operators
+        if lhs_ty != rhs_ty {
+            return Err(CompileErrorVar::TypeMismatch).with_span(span);
+        } else if !lhs_ty.is_assignable() {
+            return Err(CompileErrorVar::AssignVoid).with_span(span);
+        }
+
+        let op_ty = op.op.res_ty(&lhs_ty).ok_or_else(|| {
+            compile_err(CompileErrorVar::OperatorDoesNotSupportedType, Some(span))
+        })?;
+
+        let temp_var = self.add_assign_entry(None, op_ty, mir::VarKind::Temp, span.end, bb);
+
+        self.insert_ins(
+            bb,
+            mir::MirCode {
+                ins: mir::Ins::Bin(op.op.into(), lhs_val, rhs_val),
+                tgt: temp_var,
+            },
+        )?;
+
+        Ok(mir::Value::Var(temp_var))
     }
 
     fn gen_fn_call(
@@ -760,7 +893,44 @@ impl<'src> FnCodegen<'src> {
         bb: mir::BBId,
         scope: Ptr<ast::Scope>,
     ) -> CompileResult<mir::Value> {
-        todo!()
+        let mut params = Vec::new();
+        let func_ref = scope
+            .borrow()
+            .find_def(&op.func)
+            .ok_or_else(|| CompileErrorVar::NonExistFunc(op.func.to_owned()))
+            .with_span(span)?;
+
+        let func_ty = self.resolve_ty(
+            &*func_ref.borrow().get_typ().unwrap().borrow(),
+            scope.clone(),
+        )?;
+
+        for (param, param_ty) in op.params.iter().zip(func_ty.get_fn_params().unwrap()) {
+            let val = self.gen_expr(&*param.borrow(), bb, scope.clone())?;
+            let val_ty = self.val_ty(&val).expect("Value must have type");
+
+            if val_ty != *param_ty {
+                return Err(CompileErrorVar::TypeMismatch).with_span(span);
+            }
+        }
+
+        let temp_var = self.add_assign_entry(
+            None,
+            func_ty.get_fn_ret().unwrap().borrow().clone(),
+            mir::VarKind::Temp,
+            span.end,
+            bb,
+        );
+
+        self.insert_ins(
+            bb,
+            mir::MirCode {
+                ins: mir::Ins::Call(todo!("function reference?"), params),
+                tgt: temp_var,
+            },
+        )?;
+
+        Ok(mir::Value::Var(temp_var))
     }
 
     fn gen_if_stmt(
