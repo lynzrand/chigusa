@@ -76,6 +76,9 @@ pub enum CompileErrorVar {
     UnsupportedOp,
     NoExternFunction(String),
 
+    NoTypeInformation,
+    OperatorDoesNotSupportedType,
+
     ErrorType,
     MakeRefFromPrimitive,
     MakePrimitiveFromRef,

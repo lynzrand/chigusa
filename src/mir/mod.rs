@@ -4,7 +4,10 @@
 //! like LLVM-IR.
 
 use crate::prelude::*;
-use std::collections::{HashMap, HashSet};
+use std::{
+    cell::Ref,
+    collections::{HashMap, HashSet},
+};
 
 mod codegen;
 
@@ -23,18 +26,18 @@ pub struct VarRef(VarTy, VarId);
 // #[derive(Debug, Eq, PartialEq, Copy, Clone)]
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum ValueKind {
-    IntImm(u64),
+pub enum Value {
+    IntImm(i32),
     FloatImm(f64),
-    Var(usize),
+    Var(VarRef),
     Reg(u8),
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct Value {
-    pub ty: Ty,
-    pub kind: ValueKind,
-}
+// #[derive(Debug, Clone, PartialEq)]
+// pub struct Value {
+//     // pub ty: Ty,
+//     pub kind: ValueKind,
+// }
 
 #[derive(Clone, PartialEq, Debug)]
 pub enum Ins {
@@ -70,15 +73,57 @@ pub enum BinOp {
     Gte,
 }
 
+impl From<crate::c0::ast::OpVar> for BinOp {
+    fn from(op: crate::c0::ast::OpVar) -> Self {
+        match op {
+            crate::c0::ast::OpVar::Add => BinOp::Add,
+            crate::c0::ast::OpVar::Sub => BinOp::Sub,
+            crate::c0::ast::OpVar::Mul => BinOp::Mul,
+            crate::c0::ast::OpVar::Div => BinOp::Div,
+            crate::c0::ast::OpVar::And => BinOp::And,
+            crate::c0::ast::OpVar::Or => BinOp::Or,
+            crate::c0::ast::OpVar::Xor => unimplemented!("Unsupported operator {}", op),
+            crate::c0::ast::OpVar::Ban => unimplemented!("Unsupported operator {}", op),
+            crate::c0::ast::OpVar::Bor => unimplemented!("Unsupported operator {}", op),
+            crate::c0::ast::OpVar::Gt => BinOp::Gt,
+            crate::c0::ast::OpVar::Lt => BinOp::Lt,
+            crate::c0::ast::OpVar::Eq => BinOp::Eq,
+            crate::c0::ast::OpVar::Gte => BinOp::Gte,
+            crate::c0::ast::OpVar::Lte => BinOp::Lte,
+            crate::c0::ast::OpVar::Neq => BinOp::Neq,
+            _ => panic!("Not a binary operator: {}!", op),
+        }
+    }
+}
+
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub enum UnaOp {
+    Pos,
     Neg,
+}
+
+impl From<crate::c0::ast::OpVar> for UnaOp {
+    fn from(op: crate::c0::ast::OpVar) -> Self {
+        match op {
+            crate::c0::ast::OpVar::Neg => UnaOp::Neg,
+            crate::c0::ast::OpVar::Pos => UnaOp::Pos,
+            crate::c0::ast::OpVar::Inv => unimplemented!("Unsupported operator {}", op),
+            crate::c0::ast::OpVar::Bin => unimplemented!("Unsupported operator {}", op),
+            crate::c0::ast::OpVar::Ref => unimplemented!("Unsupported operator {}", op),
+            crate::c0::ast::OpVar::Der => unimplemented!("Unsupported operator {}", op),
+            crate::c0::ast::OpVar::Ina => unimplemented!("Unsupported operator {}", op),
+            crate::c0::ast::OpVar::Inb => unimplemented!("Unsupported operator {}", op),
+            crate::c0::ast::OpVar::Dea => unimplemented!("Unsupported operator {}", op),
+            crate::c0::ast::OpVar::Deb => unimplemented!("Unsupported operator {}", op),
+            _ => panic!("Not an unary operator: {}!", op),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
 pub struct MirCode {
     ins: Ins,
-    ty: TyRef,
+    // ty: Ty,
     tgt: VarRef,
 }
 
@@ -139,14 +184,80 @@ pub enum Ty {
     Void,
     Basic(BasicTy),
     Ptr(Ptr<Ty>),
-    Array(Ptr<Ty>),
+    Array(Ptr<Ty>, Option<usize>),
     Fn(Ptr<Ty>, Vec<Ty>),
     RestParams,
 }
 
+impl Ty {
+    pub fn int() -> Ty {
+        Ty::Basic(BasicTy::I32)
+    }
+    pub fn double() -> Ty {
+        Ty::Basic(BasicTy::F64)
+    }
+    pub fn bool() -> Ty {
+        Ty::Basic(BasicTy::B32)
+    }
+    pub fn ptr_of(ty: Ty) -> Ty {
+        Ty::Ptr(Ptr::new(ty))
+    }
+    pub fn array_of(ty: Ty, size: Option<usize>) -> Ty {
+        Ty::Array(Ptr::new(ty), size)
+    }
+    pub fn is_assignable(&self) -> bool {
+        !matches!(self, Ty::Void)
+    }
+    pub fn is_int(&self) -> bool {
+        matches!(self, Ty::Basic(BasicTy::I32))
+    }
+    pub fn is_double(&self) -> bool {
+        matches!(self, Ty::Basic(BasicTy::F64))
+    }
+    pub fn is_numeric(&self) -> bool {
+        matches!(self, Ty::Basic(BasicTy::I32) | Ty::Basic(BasicTy::F64))
+    }
+    pub fn is_bool(&self) -> bool {
+        matches!(self, Ty::Basic(BasicTy::B32))
+    }
+    pub fn is_ptr(&self) -> bool {
+        matches!(self, Ty::Ptr(_))
+    }
+    pub fn is_ptr_of(&self, ty: &Ty) -> bool {
+        if let Ty::Ptr(t) = self {
+            &*t.borrow() == ty
+        } else {
+            false
+        }
+    }
+    pub fn get_ptr_of(&self) -> Option<Ref<Ty>> {
+        if let Ty::Ptr(t) = self {
+            Some(t.borrow())
+        } else {
+            None
+        }
+    }
+    pub fn is_array(&self) -> bool {
+        matches!(self, Ty::Array(..))
+    }
+    pub fn is_array_of(&self, ty: &Ty) -> bool {
+        if let Ty::Array(t, _) = self {
+            &*t.borrow() == ty
+        } else {
+            false
+        }
+    }
+    pub fn get_array_of(&self) -> Option<(Ref<Ty>, Option<usize>)> {
+        if let Ty::Array(t, size) = self {
+            Some((t.borrow(), size.to_owned()))
+        } else {
+            None
+        }
+    }
+}
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum VarKind {
-    Imm,
     Param,
     Ret,
     Local,
@@ -156,14 +267,14 @@ pub enum VarKind {
 
 #[derive(Debug, Clone)]
 pub struct Var {
-    pub ty: TyRef,
+    pub ty: Ty,
     pub kind: VarKind,
 }
 
 #[derive(Debug, Clone)]
 pub struct Func {
     // this: VarRef,
-    pub ty: TyRef,
+    pub ty: Ty,
 
     /// Variable Table
     pub var_table: HashMap<usize, Var>,
