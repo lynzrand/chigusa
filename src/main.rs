@@ -90,7 +90,7 @@ fn main() {
         }
     };
 
-    dbg!(mir);
+    eprintln!("{:#?}", mir);
 
     // if opt.emit == EmitOption::S0 {
     //     let mut f = File::create(&opt.output_file).expect("Failed to create output file");

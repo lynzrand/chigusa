@@ -5,6 +5,7 @@ use crate::minivm::{
 use crate::mir;
 use crate::prelude::*;
 use either::Either;
+use log::*;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 #[derive(Debug)]
@@ -349,17 +350,6 @@ impl<'src> FnCodegen<'src> {
         pkg: &'src mut mir::MirPackage,
         global_names: &'src HashMap<String, usize>,
     ) -> FnCodegen<'src> {
-        let init_bb_id = 0;
-        let init_bb = mir::BasicBlk {
-            jump_in: HashSet::new(),
-            uses_var: HashSet::new(),
-            // id: init_bb_id,
-            inst: vec![],
-            end: mir::JumpInst::Unknown,
-        };
-        let mut bbs = HashMap::new();
-        bbs.insert(init_bb_id, init_bb);
-
         FnCodegen {
             name,
             src,
@@ -370,7 +360,7 @@ impl<'src> FnCodegen<'src> {
             var_pos_table: HashMap::new(),
             bb_pos_table: BTreeMap::new(),
             break_target: Vec::new(),
-            bbs,
+            bbs: HashMap::new(),
             root_scope,
             pkg,
             global_names,
@@ -378,6 +368,16 @@ impl<'src> FnCodegen<'src> {
     }
 
     fn gen(mut self) -> CompileResult<mir::Func> {
+        {
+            let init_bb = mir::BasicBlk {
+                jump_in: HashSet::new(),
+                uses_var: HashSet::new(),
+                // id: init_bb_id,
+                inst: vec![],
+                end: mir::JumpInst::Unknown,
+            };
+            self.add_bb(self.src.body.as_ref().unwrap().span.unwrap().start, init_bb)?;
+        }
         {
             // TODO: Return variable?
             // variable table #0 is inserted with dummy variable. Return stuff
@@ -394,15 +394,21 @@ impl<'src> FnCodegen<'src> {
         let mut params_ty = Vec::new();
         {
             // param variables
-            for param_ty in &self.src.params {
+            let param_scope = self.src.body.as_ref().unwrap().scope.borrow();
+            for (param_ty, (name, _)) in self
+                .src
+                .params
+                .iter()
+                .zip(param_scope.defs.iter().take(self.src.params.len()))
+            {
                 let param_ty = resolve_ty(&param_ty.borrow(), &self.root_scope.borrow())?;
                 params_ty.push(param_ty.clone());
-                self.var_table.insert(
-                    self.var_id_counter,
-                    mir::Var {
-                        ty: param_ty,
-                        kind: mir::VarKind::Param,
-                    },
+                self.add_assign_entry(
+                    Some(name),
+                    param_ty,
+                    mir::VarKind::Param,
+                    self.src.body.as_ref().unwrap().span.unwrap().start,
+                    0,
                 );
             }
         }
@@ -464,12 +470,17 @@ impl<'src> FnCodegen<'src> {
         pos: Pos,
         bb: mir::BBId,
     ) -> mir::VarRef {
-        let var = self.var_id_counter;
         self.var_id_counter += 1;
+        let var = self.var_id_counter;
 
         let assignment = assignment
             .map(|x| x.to_owned())
             .unwrap_or_else(|| format!("${}", var));
+
+        debug!(
+            "Add assign entry: {} (${}) {:?}: {:?} @{}, bb{}",
+            &assignment, var, kind, &ty, pos, bb
+        );
 
         if !self.var_bb_table.contains_key(&assignment) {
             self.var_bb_table.insert(assignment.clone(), HashMap::new());
@@ -656,6 +667,7 @@ impl<'src> FnCodegen<'src> {
     ) -> CompileResult<()> {
         let name = &scan.name;
         let (name, ty) = self.get_var_name_and_ty(name, scope.clone())?;
+        debug!("Scan statement: name {} type {:?}", &name, &ty);
         self.add_assign_entry(Some(&name), ty, mir::VarKind::Local, span.end, bb);
 
         Ok(())
@@ -784,8 +796,10 @@ impl<'src> FnCodegen<'src> {
         pos: Pos,
         bb: mir::BBId,
     ) -> Option<Either<mir::VarId, HashSet<(mir::BBId, mir::VarId)>>> {
+        debug!("Try to find variable {} at {}, bb {}", ident, pos, bb);
+
         let var_pos = self.var_pos_table.get(ident)?;
-        let last_def = var_pos.range(..pos).last();
+        let last_def = var_pos.range(..=pos).last();
         match last_def {
             None => {
                 let mut res = HashSet::new();
@@ -793,25 +807,33 @@ impl<'src> FnCodegen<'src> {
                 self.resolve_ident_binding_bb_unique(ident, bb, &mut vis, &mut res);
 
                 if res.len() > 0 {
+                    debug!("Found phi (1): {:?}", &res);
                     Some(Either::Right(res))
                 } else {
+                    debug!("Found none (1)");
                     None
                 }
             }
             Some((pos, id)) => {
-                let same_bb = self
-                    .bb_pos_table
-                    .range(..pos)
-                    .last()
-                    .map_or(false, |(_, last_id)| *last_id == bb);
+                let last_bb = self.bb_pos_table.range(..=pos).last();
+                debug!("bb: expected: {}, found {:?}", bb, last_bb);
+
+                let same_bb = last_bb.map_or(false, |(_, last_id)| *last_id == bb);
+
                 if same_bb {
+                    debug!("found one: ${}", *id);
                     Some(either::Left(*id))
                 } else {
                     let mut res = HashSet::new();
                     let mut vis = HashSet::new();
                     self.resolve_ident_binding_bb_unique(ident, bb, &mut vis, &mut res);
-
-                    Some(Either::Right(res))
+                    if res.len() > 0 {
+                        debug!("Found phi (2): {:?}", &res);
+                        Some(Either::Right(res))
+                    } else {
+                        debug!("Found none (2)");
+                        None
+                    }
                 }
             }
         }
@@ -920,12 +942,12 @@ impl<'src> FnCodegen<'src> {
         let (def, depth) = scope.borrow().find_def_depth(&ident.name).ok_or_else(|| {
             compile_err(CompileErrorVar::NonExistVar(ident.name.clone()), Some(span))
         })?;
-        let ident_fmt = format_ident(&ident.name, depth);
         if depth == 0 {
             // global value
             let global_id = self.global_names.get(&ident.name).unwrap();
             Ok(mir::Value::Var(mir::VarRef(mir::VarTy::Global, *global_id)))
         } else {
+            let ident_fmt = format_ident(&ident.name, depth);
             let ident = self.resolve_ident_binding(&ident_fmt, span.start, bb);
             let ty = resolve_ty(
                 &def.borrow().get_sym().expect("is symbol").0.borrow(),
@@ -1267,7 +1289,7 @@ impl<'src> FnCodegen<'src> {
         let false_start = stmt.else_block.as_ref().map(|blk| blk.borrow().span.start);
         let false_bb = false_start
             .clone()
-            .map(|id| *self.bb_pos_table.get(&id).unwrap());
+            .map(|false_start| *self.bb_pos_table.get(&false_start).unwrap());
 
         let end_start = stmt
             .else_block
@@ -1342,7 +1364,7 @@ impl<'src> FnCodegen<'src> {
             mir::JumpInst::Conditional(start_cond_val, while_bb, next_bb);
 
         let while_end = self.gen_stmt(&while_blk, while_bb, scope.clone())?;
-        let while_cond_val = self.gen_expr(&cond, bb, scope.clone())?;
+        let while_cond_val = self.gen_expr(&cond, while_end, scope.clone())?;
         self.bbs.get_mut(&while_end).unwrap().end =
             mir::JumpInst::Conditional(while_cond_val, while_bb, next_bb);
 
@@ -1377,14 +1399,43 @@ impl<'src> FnCodegen<'src> {
         scope: Ptr<ast::Scope>,
     ) -> CompileResult<mir::BBId> {
         let varref = self.gen_lvalue_ident(ident, span, bb, scope)?;
-        // self.insert_ins(
-        //     bb,
-        //     mir::MirCode {
-        //         ins: mir,
-        //         tgt: varref,
-        //     },
-        // )
-        todo!("Scan")
+        let ty = if varref.0 == mir::VarTy::Local {
+            self.get_ty(varref.1)
+        } else {
+            self.get_global_ty(varref.1)
+        }
+        .ok_or_else(|| CompileErrorVar::NonExistVar(ident.to_owned()))
+        .with_span(span)?;
+
+        if ty.is_int() {
+            let scan_int = *self
+                .global_names
+                .get(crate::stdlib::STDLIB_SCAN_INT)
+                .unwrap();
+            self.insert_ins(
+                bb,
+                mir::MirCode {
+                    ins: mir::Ins::Call(mir::VarRef(mir::VarTy::Global, scan_int), vec![]),
+                    tgt: varref,
+                },
+            )?;
+            Ok(bb)
+        } else if ty.is_double() {
+            let scan_double = *self
+                .global_names
+                .get(crate::stdlib::STDLIB_SCAN_DOUBLE)
+                .unwrap();
+            self.insert_ins(
+                bb,
+                mir::MirCode {
+                    ins: mir::Ins::Call(mir::VarRef(mir::VarTy::Global, scan_double), vec![]),
+                    tgt: varref,
+                },
+            )?;
+            Ok(bb)
+        } else {
+            Err(CompileErrorVar::RequireScannable(ident.to_owned())).with_span(span)
+        }
     }
 
     fn gen_print(
@@ -1394,44 +1445,92 @@ impl<'src> FnCodegen<'src> {
         bb: mir::BBId,
         scope: Ptr<ast::Scope>,
     ) -> CompileResult<mir::BBId> {
-        todo!("Print")
-    }
-}
+        let mut is_first_expr = true;
+        let put_char = *self
+            .global_names
+            .get(crate::stdlib::STDLIB_PUT_CHAR)
+            .unwrap();
+        for expr in exprs {
+            let expr = expr.borrow();
 
-pub mod stdlib {
-    use crate::mir;
-    use mir::Ty;
-    // Standard library function names
+            let expr_val = self.gen_expr(&expr, bb, scope.clone())?;
+            let expr_val_ty = self.val_ty(&expr_val).unwrap();
 
-    const STDLIB_SCAN_CHAR: &'static str = "__std_scan_char";
-    const STDLIB_SCAN_INT: &'static str = "__std_scan_int";
-    const STDLIB_SCAN_DOUBLE: &'static str = "__std_scan_double";
+            if is_first_expr {
+                is_first_expr = false;
+            } else {
+                let temp_var = self.add_assign_entry(
+                    None,
+                    mir::Ty::Void,
+                    mir::VarKind::Dummy,
+                    expr.span.end,
+                    bb,
+                );
+                self.insert_ins(
+                    bb,
+                    mir::MirCode {
+                        ins: mir::Ins::Call(
+                            mir::VarRef(mir::VarTy::Global, put_char),
+                            vec![mir::Value::IntImm(b' ' as i32)],
+                        ),
+                        tgt: temp_var,
+                    },
+                )?;
+            }
 
-    const STDLIB_PUT_CHAR: &'static str = "__std_put_char";
-    const STDLIB_PUT_INT: &'static str = "__std_put_int";
-    const STDLIB_PUT_DOUBLE: &'static str = "__std_put_double";
-    const STDLIB_PUT_STR: &'static str = "__std_put_str";
+            let temp_var =
+                self.add_assign_entry(None, mir::Ty::Void, mir::VarKind::Dummy, expr.span.end, bb);
+            if expr_val_ty.is_int() {
+                let put_int = *self
+                    .global_names
+                    .get(crate::stdlib::STDLIB_PUT_INT)
+                    .unwrap();
 
-    // Standard library function types
-    pub fn scan_char_ty() -> Ty {
-        Ty::function_of(Ty::int(), [], true)
-    }
-    pub fn scan_int_ty() -> Ty {
-        Ty::function_of(Ty::int(), [], true)
-    }
-    pub fn scan_double_ty() -> Ty {
-        Ty::function_of(Ty::double(), [], true)
-    }
-    pub fn put_char_ty() -> Ty {
-        Ty::function_of(Ty::Void, [Ty::int()], true)
-    }
-    pub fn put_int_ty() -> Ty {
-        Ty::function_of(Ty::Void, [Ty::int()], true)
-    }
-    pub fn put_double_ty() -> Ty {
-        Ty::function_of(Ty::Void, [Ty::double()], true)
-    }
-    pub fn put_str_ty() -> Ty {
-        Ty::function_of(Ty::Void, [Ty::ptr_of(Ty::byte()), Ty::int()], true)
+                self.insert_ins(
+                    bb,
+                    mir::MirCode {
+                        ins: mir::Ins::Call(
+                            mir::VarRef(mir::VarTy::Global, put_int),
+                            vec![expr_val],
+                        ),
+                        tgt: temp_var,
+                    },
+                )?;
+            } else if expr_val_ty.is_double() {
+                let put_double = *self
+                    .global_names
+                    .get(crate::stdlib::STDLIB_PUT_DOUBLE)
+                    .unwrap();
+
+                self.insert_ins(
+                    bb,
+                    mir::MirCode {
+                        ins: mir::Ins::Call(
+                            mir::VarRef(mir::VarTy::Global, put_double),
+                            vec![expr_val],
+                        ),
+                        tgt: temp_var,
+                    },
+                )?;
+            } else if expr_val_ty.is_array_of(&mir::Ty::byte()) {
+                todo!("std::put_str")
+                // let put_str = *self
+                //     .global_names
+                //     .get(crate::stdlib::STDLIB_PUT_DOUBLE)
+                //     .unwrap();
+
+                // self.insert_ins(
+                //     bb,
+                //     mir::MirCode {
+                //         ins: mir::Ins::Call(
+                //             mir::VarRef(mir::VarTy::Global, put_str),
+                //             vec![expr_val],
+                //         ),
+                //         tgt: temp_var,
+                //     },
+                // )?;
+            }
+        }
+        Ok(bb)
     }
 }

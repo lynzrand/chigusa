@@ -4,9 +4,11 @@
 //! like LLVM-IR.
 
 use crate::prelude::*;
+use ryu::{Buffer, Float};
 use std::{
     cell::Ref,
     collections::{HashMap, HashSet},
+    fmt::{Debug, Display},
 };
 
 pub mod codegen;
@@ -21,11 +23,27 @@ pub type TyRef = usize;
 pub type BBId = usize;
 pub type VarId = usize;
 
-#[derive(Debug, PartialEq, Copy, Clone)]
+#[derive(PartialEq, Copy, Clone)]
 pub struct VarRef(VarTy, VarId);
+
+impl Display for VarRef {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.0 {
+            VarTy::Global => write!(f, "@{}", self.1),
+            VarTy::Local => write!(f, "${}", self.1),
+        }
+    }
+}
+
+impl Debug for VarRef {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self)
+    }
+}
+
 // #[derive(Debug, Eq, PartialEq, Copy, Clone)]
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub enum Value {
     IntImm(i32),
     FloatImm(f64),
@@ -40,12 +58,29 @@ impl Value {
     }
 }
 
+impl Display for Value {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Value::IntImm(i) => write!(f, "int {}", *i),
+            Value::FloatImm(x) => write!(f, "float {}", Buffer::new().format(*x)),
+            Value::Var(varref) => write!(f, "{}", varref),
+            Value::Reg(reg_id) => write!(f, "r{}", reg_id),
+            Value::Void => write!(f, "void"),
+        }
+    }
+}
+
+impl Debug for Value {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self)
+    }
+}
+
 // #[derive(Debug, Clone, PartialEq)]
 // pub struct Value {
 //     // pub ty: Ty,
 //     pub kind: ValueKind,
 // }
-
 #[derive(Clone, PartialEq, Debug)]
 pub enum Ins {
     /// Type Conversion
@@ -62,6 +97,23 @@ pub enum Ins {
     Phi(Vec<(BBId, Value)>),
     /// Read va_arg
     RestRead(usize),
+}
+
+impl Display for Ins {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Ins::TyCon(val) => write!(f, "conv {}", val),
+            Ins::Asn(val) => write!(f, "{}", val),
+            Ins::Bin(op, l, r) => write!(f, "{} {:?} {}", l, op, r),
+            Ins::Una(op, e) => write!(f, "{:?} {}", op, e),
+            Ins::Call(func, v) => {
+                write!(f, "call {} ", func)?;
+                f.debug_list().entries(v).finish()
+            }
+            Ins::Phi(phi) => write!(f, "phi {:?}", phi),
+            Ins::RestRead(..) => write!(f, "..rest"),
+        }
+    }
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
@@ -127,11 +179,23 @@ impl From<crate::c0::ast::OpVar> for UnaOp {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct MirCode {
     ins: Ins,
     // ty: Ty,
     tgt: VarRef,
+}
+
+impl Debug for MirCode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self)
+    }
+}
+
+impl Display for MirCode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} = {};", &self.tgt, &self.ins)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

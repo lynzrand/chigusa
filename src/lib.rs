@@ -16,6 +16,6 @@ pub(crate) mod opt;
 pub mod arm;
 
 pub mod mir;
-
+pub mod stdlib;
 // #[cfg(test)]
 // mod tests;

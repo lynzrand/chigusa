@@ -1,7 +1,7 @@
 use super::ast::*;
 use super::err::*;
 use super::lexer::*;
-use crate::prelude::*;
+use crate::{prelude::*, stdlib};
 use std::iter::Iterator;
 
 pub trait IntoParser<T>
@@ -193,6 +193,75 @@ where
                 },
             )
             .expect("Failed to inject primitive type `char`");
+
+        scope
+            .insert_def(
+                stdlib::STDLIB_SCAN_CHAR,
+                SymbolDef::Var {
+                    typ: Ptr::new(stdlib::c0::scan_char_ty()),
+                    is_const: false,
+                    decl_span: Span::zero(),
+                },
+            )
+            .unwrap();
+        scope
+            .insert_def(
+                stdlib::STDLIB_SCAN_INT,
+                SymbolDef::Var {
+                    typ: Ptr::new(stdlib::c0::scan_int_ty()),
+                    is_const: false,
+                    decl_span: Span::zero(),
+                },
+            )
+            .unwrap();
+        scope
+            .insert_def(
+                stdlib::STDLIB_SCAN_DOUBLE,
+                SymbolDef::Typ {
+                    def: Ptr::new(stdlib::c0::scan_double_ty()),
+                },
+            )
+            .unwrap();
+        scope
+            .insert_def(
+                stdlib::STDLIB_PUT_INT,
+                SymbolDef::Var {
+                    typ: Ptr::new(stdlib::c0::put_int_ty()),
+                    is_const: false,
+                    decl_span: Span::zero(),
+                },
+            )
+            .unwrap();
+        scope
+            .insert_def(
+                stdlib::STDLIB_PUT_CHAR,
+                SymbolDef::Var {
+                    typ: Ptr::new(stdlib::c0::put_char_ty()),
+                    is_const: false,
+                    decl_span: Span::zero(),
+                },
+            )
+            .unwrap();
+        scope
+            .insert_def(
+                stdlib::STDLIB_PUT_DOUBLE,
+                SymbolDef::Var {
+                    typ: Ptr::new(stdlib::c0::put_double_ty()),
+                    is_const: false,
+                    decl_span: Span::zero(),
+                },
+            )
+            .unwrap();
+        scope
+            .insert_def(
+                stdlib::STDLIB_PUT_STR,
+                SymbolDef::Var {
+                    typ: Ptr::new(stdlib::c0::put_str_ty()),
+                    is_const: false,
+                    decl_span: Span::zero(),
+                },
+            )
+            .unwrap();
     }
 
     fn p_program(&mut self) -> ParseResult<Program> {
