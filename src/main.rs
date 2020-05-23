@@ -58,8 +58,24 @@ fn main() {
         return;
     }
 
-    let s0 = chigusa::minivm::Codegen::new(&tree).compile();
-    let s0 = match s0 {
+    // let s0 = chigusa::minivm::Codegen::new(&tree).compile();
+    // let s0 = match s0 {
+    //     Ok(t) => t,
+    //     Err(e) => {
+    //         let mut input_lines = input.lines();
+    //         let err_des = format!("Compile error: {}", &e.var);
+
+    //         if let Some(span) = e.span {
+    //             err_disp::pretty_print_error(&mut input_lines, span, &err_des);
+    //         } else {
+    //             log::error!("{}", err_des);
+    //         }
+    //         std::process::exit(1);
+    //     }
+    // };
+    let mir = chigusa::mir::codegen::Codegen::new(&tree).gen();
+
+    let mir = match mir {
         Ok(t) => t,
         Err(e) => {
             let mut input_lines = input.lines();
@@ -74,14 +90,16 @@ fn main() {
         }
     };
 
-    if opt.emit == EmitOption::S0 {
-        let mut f = File::create(&opt.output_file).expect("Failed to create output file");
-        write!(f, "{}", s0).expect("Failed to write");
-    } else {
-        // Emit O0
-        let mut f = File::create(&opt.output_file).expect("Failed to create output file");
-        s0.write_binary(&mut f).expect("Failed to write");
-    }
+    dbg!(mir);
+
+    // if opt.emit == EmitOption::S0 {
+    //     let mut f = File::create(&opt.output_file).expect("Failed to create output file");
+    //     write!(f, "{}", s0).expect("Failed to write");
+    // } else {
+    //     // Emit O0
+    //     let mut f = File::create(&opt.output_file).expect("Failed to create output file");
+    //     s0.write_binary(&mut f).expect("Failed to write");
+    // }
 }
 
 fn write_output<T>(opt: &ParserConfig, val: T)

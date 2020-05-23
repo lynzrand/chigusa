@@ -12,15 +12,142 @@ pub struct Codegen<'src> {
     src: &'src ast::Program,
     pkg: mir::MirPackage,
     global_var_counter: usize,
-    global_var_table: HashMap<usize, mir::Var>,
-    ty_counter: usize,
-    ty_table: HashMap<usize, mir::Ty>,
+    global_var_names: HashMap<String, usize>,
+    // ty_counter: usize,
+    // ty_table: HashMap<usize, mir::Ty>,
 }
 
 impl<'src> Codegen<'src> {
-    fn gen_fn(&mut self, func: &ast::FunctionType) -> CompileResult<mir::Func> {
-        let fn_codegen: FnCodegen = todo!("Initialize function code-generator");
-        // fn_codegen.
+    pub fn new(src: &'src ast::Program) -> Codegen<'src> {
+        Codegen {
+            src,
+            pkg: mir::MirPackage {
+                entry_point: usize::max_value(),
+                global_var_table: HashMap::new(),
+                func_table: HashMap::new(),
+            },
+            global_var_counter: 0,
+            global_var_names: HashMap::new(),
+        }
+    }
+
+    pub fn gen(mut self) -> CompileResult<mir::MirPackage> {
+        let decls = self.src.blk.scope.borrow();
+
+        for (name, symbol) in decls.defs.iter() {
+            let symbol = symbol.borrow();
+            match &*symbol {
+                ast::SymbolDef::Var {
+                    typ,
+                    is_const,
+                    decl_span,
+                } => {
+                    let typ = typ.borrow();
+                    self.add_global_var(name, &typ, *is_const, *decl_span)?;
+                }
+                ast::SymbolDef::Typ { .. } => {}
+            }
+        }
+
+        for (name, symbol) in decls.defs.iter() {
+            let symbol = symbol.borrow();
+            match &*symbol {
+                ast::SymbolDef::Var { typ, .. } => {
+                    let typ = typ.borrow();
+                    if let ast::TypeDef::Function(f) = &*typ {
+                        self.gen_fn(name, f)?;
+                    }
+                }
+                ast::SymbolDef::Typ { .. } => {}
+            }
+        }
+
+        Ok(self.pkg)
+    }
+
+    fn add_global_var(
+        &mut self,
+        name: &str,
+        typ: &ast::TypeDef,
+        is_const: bool,
+        decl_span: Span,
+    ) -> CompileResult<()> {
+        let var_id = self.global_var_counter;
+        self.global_var_counter += 1;
+
+        let var_ty = resolve_ty(typ, &self.src.blk.scope.borrow())?;
+        self.global_var_names.insert(name.to_owned(), var_id);
+        self.pkg.global_var_table.insert(
+            var_id,
+            mir::GlobalVar {
+                ty: var_ty,
+                name: name.to_owned().into(),
+            },
+        );
+        Ok(())
+    }
+
+    fn gen_start_fn(&mut self, blk: &ast::Block) -> CompileResult<()> {
+        let entry_point_id = self.global_var_counter;
+        self.global_var_counter += 1;
+
+        let entry_point_ty = mir::Ty::function_of(mir::Ty::Void, [], false);
+
+        let entry_point_fn = ast::FunctionType {
+            params: [].into(),
+            return_type: Ptr::new(ast::TypeDef::Unit),
+            // TODO: reduce clone
+            body: Some(blk.clone()),
+            is_extern: false,
+        };
+
+        let entry_point = self.gen_non_extern_fn("_start", &entry_point_fn)?;
+
+        self.pkg.global_var_table.insert(
+            entry_point_id,
+            mir::GlobalVar {
+                ty: entry_point_ty,
+                name: "_start".to_owned().into(),
+            },
+        );
+        self.pkg.func_table.insert(entry_point_id, entry_point);
+        self.pkg.entry_point = entry_point_id;
+
+        Ok(())
+    }
+
+    fn gen_fn(&mut self, name: &str, func: &ast::FunctionType) -> CompileResult<()> {
+        if func.is_extern {
+            assert!(func.body.is_none());
+            self.gen_extern_fn(name, func)
+        } else {
+            assert!(func.body.is_some());
+            let f = self.gen_non_extern_fn(name, func)?;
+            self.pkg
+                .func_table
+                .insert(*self.global_var_names.get(name).unwrap(), f);
+            Ok(())
+        }
+    }
+
+    fn gen_extern_fn(&mut self, name: &str, func: &ast::FunctionType) -> CompileResult<()> {
+        // TODO: noop?
+        Ok(())
+    }
+
+    fn gen_non_extern_fn(
+        &mut self,
+        name: &str,
+        func: &ast::FunctionType,
+    ) -> CompileResult<mir::Func> {
+        let fn_codegen: FnCodegen = FnCodegen::new(
+            name,
+            func,
+            self.src.blk.scope.clone(),
+            &mut self.pkg,
+            &self.global_var_names,
+        );
+        fn_codegen.gen()
     }
 }
 
@@ -175,11 +302,11 @@ fn resolve_ty(ty: &ast::TypeDef, scope: &ast::Scope) -> CompileResult<mir::Ty> {
 /// information provided in the first pass.
 #[derive(Debug)]
 pub struct FnCodegen<'src> {
+    name: &'src str,
     src: &'src ast::FunctionType,
     root_scope: Ptr<ast::Scope>,
     pkg: &'src mut mir::MirPackage,
     global_names: &'src HashMap<String, usize>,
-    global_vars: &'src HashMap<usize, mir::Var>,
 
     /*
      * Note:
@@ -216,10 +343,10 @@ pub struct FnCodegen<'src> {
 
 impl<'src> FnCodegen<'src> {
     fn new(
+        name: &'src str,
         src: &'src ast::FunctionType,
         root_scope: Ptr<ast::Scope>,
         pkg: &'src mut mir::MirPackage,
-        global_vars: &'src HashMap<usize, mir::Var>,
         global_names: &'src HashMap<String, usize>,
     ) -> FnCodegen<'src> {
         let init_bb_id = 0;
@@ -234,6 +361,7 @@ impl<'src> FnCodegen<'src> {
         bbs.insert(init_bb_id, init_bb);
 
         FnCodegen {
+            name,
             src,
             var_id_counter: 0,
             bb_counter: 0,
@@ -245,7 +373,6 @@ impl<'src> FnCodegen<'src> {
             bbs,
             root_scope,
             pkg,
-            global_vars,
             global_names,
         }
     }
@@ -293,6 +420,7 @@ impl<'src> FnCodegen<'src> {
         };
         // result
         Ok(mir::Func {
+            name: self.name.to_owned(),
             ty: self_ty,
             var_table: self.var_table,
             bb: self.bbs,
@@ -601,9 +729,9 @@ impl<'src> FnCodegen<'src> {
             .ok_or_else(|| compile_err_n(CompileErrorVar::NonExistVar(name.to_owned())))?;
 
         let name = format_ident(&name, depth);
-        let ty = def
+        let (ty, _) = def
             .borrow()
-            .get_typ()
+            .get_sym()
             .ok_or_else(|| CompileErrorVar::NoTypeInformation)?;
         let ty = ty.borrow();
         let ty = resolve_ty(&*ty, &scope.borrow())?;
@@ -616,7 +744,9 @@ impl<'src> FnCodegen<'src> {
         scope: Ptr<ast::Scope>,
     ) -> CompileResult<(String, mir::Ty)> {
         match &expr.var {
-            ast::ExprVariant::Ident(i) => self.get_var_name_and_ty(&i.name, scope),
+            ast::ExprVariant::Ident(i) => self
+                .get_var_name_and_ty(&i.name, scope)
+                .with_span(expr.span),
             _ => Err(CompileErrorVar::NotLValue(format!("{}", expr))).with_span(expr.span),
         }
     }
@@ -702,14 +832,19 @@ impl<'src> FnCodegen<'src> {
         self.var_table.get(&var).map(|var| &var.ty)
     }
 
+    fn get_global_ty(&self, var: usize) -> Option<&mir::Ty> {
+        self.pkg.global_var_table.get(&var).map(|var| &var.ty)
+    }
+
     fn val_ty(&self, val: &mir::Value) -> Option<mir::Ty> {
         match val {
             mir::Value::IntImm(_) => Some(mir::Ty::int()),
             mir::Value::FloatImm(_) => Some(mir::Ty::double()),
             mir::Value::Var(v) => match v.0 {
-                mir::VarTy::Local => self.get_ty(v.1).map(|ty| ty.clone()),
-                mir::VarTy::Global => todo!("Implement global values"),
-            },
+                mir::VarTy::Local => self.get_ty(v.1),
+                mir::VarTy::Global => self.get_global_ty(v.1),
+            }
+            .map(|ty| ty.clone()),
             // TODO: Support register values?
             mir::Value::Reg(_) => None,
             mir::Value::Void => Some(mir::Ty::Void),
@@ -769,7 +904,7 @@ impl<'src> FnCodegen<'src> {
                 self.gen_type_conversion(ty_conv, expr.span, bb, scope)
             }
             ast::ExprVariant::UnaryOp(op) => self.gen_unary_op(op, expr.span, bb, scope),
-            ast::ExprVariant::BinaryOp(op) => self.gen_regular_binary_op(op, expr.span, bb, scope),
+            ast::ExprVariant::BinaryOp(op) => self.gen_binary_op(op, expr.span, bb, scope),
             ast::ExprVariant::FunctionCall(op) => self.gen_fn_call(op, expr.span, bb, scope),
             ast::ExprVariant::ArrayChild(_) => unimplemented!("Array child is not implemented"),
         }
@@ -788,7 +923,8 @@ impl<'src> FnCodegen<'src> {
         let ident_fmt = format_ident(&ident.name, depth);
         if depth == 0 {
             // global value
-            todo!("Resolve global variable")
+            let global_id = self.global_names.get(&ident.name).unwrap();
+            Ok(mir::Value::Var(mir::VarRef(mir::VarTy::Global, *global_id)))
         } else {
             let ident = self.resolve_ident_binding(&ident_fmt, span.start, bb);
             let ty = resolve_ty(
@@ -937,9 +1073,14 @@ impl<'src> FnCodegen<'src> {
         let lval_name = format_ident(&lval, depth);
         if depth == 0 {
             // global value
-            todo!("Resolve global variable")
+            let global_id = self
+                .global_names
+                .get(lval)
+                .ok_or_else(|| CompileErrorVar::NonExistVar(lval.to_owned()))
+                .with_span(span)?;
+            Ok(mir::VarRef(mir::VarTy::Global, *global_id))
         } else {
-            let (pos, v_ref) = self
+            let (_, v_ref) = self
                 .var_pos_table
                 .get(&lval_name)
                 .unwrap()
@@ -982,7 +1123,12 @@ impl<'src> FnCodegen<'src> {
         let lval_ty = if var.0 == mir::VarTy::Local {
             &self.var_table.get(&var.1).expect("Variable must exist").ty
         } else {
-            todo!("Global variable")
+            &self
+                .pkg
+                .global_var_table
+                .get(&var.1)
+                .expect("Variable must exist")
+                .ty
         };
         let rval_ty = self.val_ty(&rval).expect("Right value must have type");
 
@@ -1058,7 +1204,9 @@ impl<'src> FnCodegen<'src> {
             .get(&op.func)
             .ok_or_else(|| CompileErrorVar::NonExistFunc(op.func.to_owned()))
             .with_span(span)?;
-        let func_ty = &self.global_vars.get(&func_id).unwrap().ty;
+
+        // TODO: reduce clone
+        let func_ty = self.pkg.global_var_table.get(&func_id).unwrap().ty.clone();
 
         for (param, param_ty) in op.params.iter().zip(func_ty.get_fn_params().unwrap()) {
             let val = self.gen_expr(&*param.borrow(), bb, scope.clone())?;

@@ -9,7 +9,7 @@ use std::{
     collections::{HashMap, HashSet},
 };
 
-mod codegen;
+pub mod codegen;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum VarTy {
@@ -305,6 +305,7 @@ pub struct Var {
 pub struct Func {
     // this: VarRef,
     pub ty: Ty,
+    pub name: String,
 
     /// Variable Table
     pub var_table: HashMap<usize, Var>,
@@ -312,8 +313,15 @@ pub struct Func {
 }
 
 #[derive(Debug, Clone)]
+pub struct GlobalVar {
+    pub ty: Ty,
+    pub name: Option<String>,
+}
+
+#[derive(Debug, Clone)]
 pub struct MirPackage {
-    pub global_var_table: HashMap<usize, TyRef>,
-    pub ty_table: HashMap<TyRef, Ty>,
+    pub entry_point: usize,
+    pub global_var_table: HashMap<usize, GlobalVar>,
+    // pub ty_table: HashMap<TyRef, Ty>,
     pub func_table: HashMap<usize, Func>,
 }
