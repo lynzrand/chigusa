@@ -91,6 +91,7 @@ pub enum CompileErrorVar {
     ReturnTypeMismatch(String),
     NonExistFunc(String),
     NonExistVar(String),
+    NonExistType(String),
 
     ControlReachesEndOfNonVoidFunction,
     NoTargetToBreak,

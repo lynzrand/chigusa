@@ -137,8 +137,8 @@ pub struct MirCode {
 #[derive(Debug, Clone, PartialEq)]
 pub enum JumpInst {
     Jump(BBId),
-    Conditional(BBId, BBId),
-    Return(Option<VarRef>),
+    Conditional(Value, BBId, BBId),
+    Return(Option<Value>),
     Unreachable,
     Unknown,
 }
@@ -192,7 +192,7 @@ pub enum Ty {
     Basic(BasicTy),
     Ptr(Ptr<Ty>),
     Array(Ptr<Ty>, Option<usize>),
-    Fn(Ptr<Ty>, Vec<Ty>),
+    Fn(Ptr<Ty>, Vec<Ty>, bool),
     RestParams,
 }
 
@@ -262,14 +262,14 @@ impl Ty {
         }
     }
     pub fn get_fn_params(&self) -> Option<&Vec<Ty>> {
-        if let Ty::Fn(_, param) = self {
+        if let Ty::Fn(_, param, _) = self {
             Some(param)
         } else {
             None
         }
     }
     pub fn get_fn_ret(&self) -> Option<Ptr<Ty>> {
-        if let Ty::Fn(ret, _) = self {
+        if let Ty::Fn(ret, _, _) = self {
             Some(ret.clone())
         } else {
             None

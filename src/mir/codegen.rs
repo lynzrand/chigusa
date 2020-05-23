@@ -86,6 +86,68 @@ impl ast::OpVar {
     }
 }
 
+fn resolve_named_ty(ty_name: &str, scope: Ptr<ast::Scope>) -> CompileResult<mir::Ty> {
+    let def = scope
+        .borrow()
+        .find_def(ty_name)
+        .ok_or_else(|| CompileErrorVar::NonExistType(ty_name.to_owned()))?;
+    let ty_def = def.borrow();
+    match &*ty_def {
+        ast::SymbolDef::Typ { def } => resolve_ty(&*def.borrow(), scope.clone()),
+        ast::SymbolDef::Var { .. } => Err(compile_err_n(CompileErrorVar::NonExistType(
+            ty_name.to_owned(),
+        ))),
+    }
+}
+
+/// A simple type resolver to resolve `ast::TypeDef` down to `mir::Ty`.
+/// Does not support circular types, or types where the source type name cannot
+/// be accessed from target site.
+fn resolve_ty(ty: &ast::TypeDef, scope: Ptr<ast::Scope>) -> CompileResult<mir::Ty> {
+    match ty {
+        ast::TypeDef::Primitive(p) => {
+            if p.var == ast::PrimitiveTypeVar::SignedInt && p.occupy_bytes == 4 {
+                Ok(mir::Ty::Basic(mir::BasicTy::I32))
+            } else if p.var == ast::PrimitiveTypeVar::Float && p.occupy_bytes == 8 {
+                Ok(mir::Ty::Basic(mir::BasicTy::F64))
+            } else if p.var == ast::PrimitiveTypeVar::UnsignedInt && p.occupy_bytes == 1 {
+                Ok(mir::Ty::Basic(mir::BasicTy::B32))
+            } else {
+                Err(compile_err_n(CompileErrorVar::NonExistType("".into())))
+            }
+        }
+        ast::TypeDef::Struct(_) => panic!("Unsupported: struct type"),
+        ast::TypeDef::Function(f) => {
+            let ret_ty = resolve_ty(&f.return_type.borrow(), scope.clone())?;
+            let mut params_ty = Vec::new();
+            for param in f.params.iter() {
+                params_ty.push(resolve_ty(&param.borrow(), scope.clone())?);
+            }
+            Ok(mir::Ty::Fn(Ptr::new(ret_ty), params_ty, f.is_extern))
+        }
+        ast::TypeDef::Ref(ty) => {
+            let ty = &ty.target;
+            let ptr_to = resolve_ty(&ty.borrow(), scope)?;
+            Ok(mir::Ty::ptr_of(ptr_to))
+        }
+        ast::TypeDef::Array(arr) => {
+            let ty = &arr.target;
+            let ptr_to = resolve_ty(&ty.borrow(), scope)?;
+            Ok(mir::Ty::Array(Ptr::new(ptr_to), arr.length))
+        }
+        ast::TypeDef::VariableArgs(va_args) => {
+            if let Some(opt) = va_args {
+                todo!("Resolve variable args")
+            } else {
+                Ok(mir::Ty::RestParams)
+            }
+        }
+        ast::TypeDef::Unit => Ok(mir::Ty::Void),
+        ast::TypeDef::Unknown => panic!("Unknown type"),
+        ast::TypeDef::NamedType(name) => resolve_named_ty(name, scope),
+        ast::TypeDef::TypeErr => panic!("Error type"),
+    }
+}
 /// Generates MIR code for a single function.
 ///
 /// # Notes
@@ -107,6 +169,8 @@ impl ast::OpVar {
 pub struct FnCodegen<'src> {
     src: &'src ast::FunctionType,
     pkg: &'src mut mir::MirPackage,
+    global_names: &'src HashMap<String, usize>,
+    global_vars: &'src HashMap<usize, mir::Var>,
 
     /*
      * Note:
@@ -142,7 +206,12 @@ pub struct FnCodegen<'src> {
 }
 
 impl<'src> FnCodegen<'src> {
-    fn new(src: &'src ast::FunctionType, pkg: &'src mut mir::MirPackage) -> FnCodegen<'src> {
+    fn new(
+        src: &'src ast::FunctionType,
+        pkg: &'src mut mir::MirPackage,
+        global_vars: &'src HashMap<usize, mir::Var>,
+        global_names: &'src HashMap<String, usize>,
+    ) -> FnCodegen<'src> {
         let init_bb_id = 0;
         let init_bb = mir::BasicBlk {
             jump_in: HashSet::new(),
@@ -165,15 +234,13 @@ impl<'src> FnCodegen<'src> {
             break_target: Vec::new(),
             bbs,
             pkg,
+            global_vars,
+            global_names,
         }
     }
 
     fn gen(&mut self) -> CompileResult<mir::Func> {
         todo!("Generate code for function")
-    }
-
-    fn resolve_ty(&self, ty: &ast::TypeDef, scope: Ptr<ast::Scope>) -> CompileResult<mir::Ty> {
-        todo!("Resolve type information")
     }
 
     /// Get a new basic block
@@ -418,7 +485,9 @@ impl<'src> FnCodegen<'src> {
     ) -> CompileResult<mir::BBId> {
         // * The rest is a dangling basic block, but we have to assume it's
         // * somewhat present for a uniform code style.
-        self.add_bb(span.end, mir::BasicBlk::new(&[]))
+        let new_bb = self.add_bb(span.end, mir::BasicBlk::new(&[]))?;
+        self.bbs.get_mut(&new_bb).unwrap().end = mir::JumpInst::Unreachable;
+        Ok(new_bb)
     }
 
     fn scan_break_stmt(
@@ -451,7 +520,9 @@ impl<'src> FnCodegen<'src> {
 
         // * The rest is a dangling basic block, but we have to assume it's
         // * somewhat present for a uniform code style, same as return.
-        self.add_bb(span.end, mir::BasicBlk::new(&[]))
+        let new_bb = self.add_bb(span.end, mir::BasicBlk::new(&[]))?;
+        self.bbs.get_mut(&new_bb).unwrap().end = mir::JumpInst::Unreachable;
+        Ok(new_bb)
     }
 
     fn get_var_name(&self, name: &str, scope: Ptr<ast::Scope>) -> CompileResult<String> {
@@ -479,7 +550,7 @@ impl<'src> FnCodegen<'src> {
             .get_typ()
             .ok_or_else(|| CompileErrorVar::NoTypeInformation)?;
         let ty = ty.borrow();
-        let ty = self.resolve_ty(&*ty, scope.clone())?;
+        let ty = resolve_ty(&*ty, scope.clone())?;
         Ok((name, ty))
     }
 
@@ -598,15 +669,32 @@ impl<'src> FnCodegen<'src> {
     ) -> CompileResult<mir::BBId> {
         match &stmt.var {
             ast::StmtVariant::If(i) => self.gen_if_stmt(i, bb, scope),
-            ast::StmtVariant::While(_) => todo!("Generate code for statement {:#?}", stmt),
-            ast::StmtVariant::Block(_) => todo!("Generate code for statement {:#?}", stmt),
-            ast::StmtVariant::Expr(_) => todo!("Generate code for statement {:#?}", stmt),
-            ast::StmtVariant::Print(_) => todo!("Generate code for statement {:#?}", stmt),
-            ast::StmtVariant::Scan(_) => todo!("Generate code for statement {:#?}", stmt),
-            ast::StmtVariant::ManyExpr(_) => todo!("Generate code for statement {:#?}", stmt),
-            ast::StmtVariant::Return(_) => todo!("Generate code for statement {:#?}", stmt),
-            ast::StmtVariant::Break => todo!("Generate code for statement {:#?}", stmt),
-            ast::StmtVariant::Empty => todo!("Generate code for statement {:#?}", stmt),
+            ast::StmtVariant::While(w) => self.gen_while_stmt(w, bb, scope),
+            ast::StmtVariant::Block(blk) => self.gen_blk(blk, bb, scope),
+            ast::StmtVariant::Expr(e) => {
+                let expr = e.borrow();
+                self.gen_expr(&expr, bb, scope)?;
+                Ok(bb)
+            }
+            ast::StmtVariant::Print(p) => todo!("Generate code for statement {:#?}", stmt),
+            ast::StmtVariant::Scan(s) => todo!("Generate code for statement {:#?}", stmt),
+            ast::StmtVariant::ManyExpr(e) => {
+                for expr in e {
+                    let expr = expr.borrow();
+                    self.gen_expr(&expr, bb, scope.clone())?;
+                }
+                Ok(bb)
+            }
+            ast::StmtVariant::Return(ret_val) => {
+                self.gen_return(ret_val.to_owned(), stmt.span, bb, scope)
+            }
+            ast::StmtVariant::Break => {
+                // Break statement is already dealt with in the 1st pass, so nothing
+                // to do here. Just dump all code into the dangling block.
+                let next_bb = *self.bb_pos_table.get(&stmt.span.end).unwrap();
+                Ok(next_bb)
+            }
+            ast::StmtVariant::Empty => Ok(bb),
         }
     }
 
@@ -647,7 +735,7 @@ impl<'src> FnCodegen<'src> {
             todo!("Resolve global variable")
         } else {
             let ident = self.resolve_ident_binding(&ident_fmt, span.start, bb);
-            let ty = self.resolve_ty(
+            let ty = resolve_ty(
                 &def.borrow().get_sym().expect("is symbol").0.borrow(),
                 scope.clone(),
             )?;
@@ -659,6 +747,13 @@ impl<'src> FnCodegen<'src> {
                 )),
                 Some(Either::Left(id)) => Ok(mir::Value::Var(mir::VarRef(mir::VarTy::Local, id))),
                 Some(Either::Right(ids)) => {
+                    {
+                        let bb = self.bbs.get_mut(&bb).unwrap();
+                        for (_, var_id) in ids.iter() {
+                            bb.uses_var.insert(*var_id);
+                        }
+                    }
+
                     let new_var =
                         self.add_assign_entry(None, ty.clone(), mir::VarKind::Temp, span.start, bb);
                     self.insert_ins(
@@ -716,7 +811,7 @@ impl<'src> FnCodegen<'src> {
         scope: Ptr<ast::Scope>,
     ) -> CompileResult<mir::Value> {
         let expr_val = self.gen_expr(&*ty_conv.expr.borrow(), bb, scope.clone())?;
-        let end_ty = self.resolve_ty(&*ty_conv.to.borrow(), scope.clone())?;
+        let end_ty = resolve_ty(&*ty_conv.to.borrow(), scope.clone())?;
         let tgt = self.add_assign_entry(None, end_ty, mir::VarKind::Temp, span.end, bb);
         self.insert_ins(
             bb,
@@ -894,16 +989,13 @@ impl<'src> FnCodegen<'src> {
         scope: Ptr<ast::Scope>,
     ) -> CompileResult<mir::Value> {
         let mut params = Vec::new();
-        let func_ref = scope
-            .borrow()
-            .find_def(&op.func)
+
+        let func_id = *self
+            .global_names
+            .get(&op.func)
             .ok_or_else(|| CompileErrorVar::NonExistFunc(op.func.to_owned()))
             .with_span(span)?;
-
-        let func_ty = self.resolve_ty(
-            &*func_ref.borrow().get_typ().unwrap().borrow(),
-            scope.clone(),
-        )?;
+        let func_ty = &self.global_vars.get(&func_id).unwrap().ty;
 
         for (param, param_ty) in op.params.iter().zip(func_ty.get_fn_params().unwrap()) {
             let val = self.gen_expr(&*param.borrow(), bb, scope.clone())?;
@@ -912,6 +1004,8 @@ impl<'src> FnCodegen<'src> {
             if val_ty != *param_ty {
                 return Err(CompileErrorVar::TypeMismatch).with_span(span);
             }
+
+            params.push(val);
         }
 
         let temp_var = self.add_assign_entry(
@@ -925,12 +1019,26 @@ impl<'src> FnCodegen<'src> {
         self.insert_ins(
             bb,
             mir::MirCode {
-                ins: mir::Ins::Call(todo!("function reference?"), params),
+                ins: mir::Ins::Call(mir::VarRef(mir::VarTy::Global, func_id), params),
                 tgt: temp_var,
             },
         )?;
 
         Ok(mir::Value::Var(temp_var))
+    }
+
+    fn gen_blk(
+        &mut self,
+        blk: &ast::Block,
+        bb: mir::BBId,
+        _scope: Ptr<ast::Scope>,
+    ) -> CompileResult<mir::BBId> {
+        let blk_scope = blk.scope.clone();
+        let mut cur_bb = bb;
+        for stmt in &blk.stmts {
+            cur_bb = self.gen_stmt(stmt, cur_bb, blk_scope.clone())?;
+        }
+        Ok(cur_bb)
     }
 
     fn gen_if_stmt(
@@ -939,6 +1047,114 @@ impl<'src> FnCodegen<'src> {
         bb: mir::BBId,
         scope: Ptr<ast::Scope>,
     ) -> CompileResult<mir::BBId> {
-        todo!("If conditional")
+        // condition
+        let cond = stmt.cond.borrow();
+
+        let true_start = stmt.if_block.borrow().span.start;
+        let true_bb = *self.bb_pos_table.get(&true_start).unwrap();
+
+        let false_start = stmt.else_block.as_ref().map(|blk| blk.borrow().span.start);
+        let false_bb = false_start
+            .clone()
+            .map(|id| *self.bb_pos_table.get(&id).unwrap());
+
+        let end_start = stmt
+            .else_block
+            .as_ref()
+            .map(|blk| blk.borrow().span.end)
+            .unwrap_or_else(|| stmt.if_block.borrow().span.end);
+        let end_bb = self
+            .bb_pos_table
+            .range(end_start..)
+            .next()
+            .map(|(_, id)| *id)
+            .unwrap();
+
+        let cond_val = self.gen_expr(&cond, bb, scope.clone())?;
+        let cond_val_ty = self.val_ty(&cond_val).unwrap();
+
+        if !cond_val_ty.is_bool() {
+            return Err(CompileErrorVar::TypeMismatch).with_span(cond.span());
+        }
+
+        // [start_bb] -- true --> [true_bb]...[true_end] ---> [end_bb]
+        //         |--- false --> [false_bb]...[false_end] ---^
+        // -or-
+        // [start_bb] -- true --> [true_bb]...[true_end] ---> [end_bb]
+        //         |--- false --------------------------------^
+        self.bbs.get_mut(&bb).unwrap().end =
+            mir::JumpInst::Conditional(cond_val, true_bb, false_bb.unwrap_or(end_bb));
+
+        {
+            // true_bb
+            let true_end = self.gen_stmt(&stmt.if_block.borrow(), true_bb, scope.clone())?;
+
+            self.bbs.get_mut(&true_end).unwrap().end = mir::JumpInst::Jump(end_bb);
+        }
+
+        if let Some(else_blk) = &stmt.else_block {
+            let else_end = self.gen_stmt(&else_blk.borrow(), false_bb.unwrap(), scope.clone())?;
+
+            self.bbs.get_mut(&else_end).unwrap().end = mir::JumpInst::Jump(end_bb);
+        }
+
+        Ok(end_bb)
+    }
+
+    // fn gen_scan_stmt(&mut self,stmt:&ast::)
+
+    fn gen_while_stmt(
+        &mut self,
+        stmt: &ast::WhileConditional,
+        bb: mir::BBId,
+        scope: Ptr<ast::Scope>,
+    ) -> CompileResult<mir::BBId> {
+        let cond = stmt.cond.borrow();
+
+        let while_blk = stmt.block.borrow();
+        let while_blk_span = while_blk.span;
+        let while_bb = *self.bb_pos_table.get(&while_blk_span.start).unwrap();
+
+        let next_bb = *self
+            .bb_pos_table
+            .range(while_blk_span.end..)
+            .next()
+            .unwrap()
+            .1;
+
+        //         v---------------------------- true -- |
+        // [start_bb] -- true --> [while_bb]...[while_end] -- false --> [end_bb]
+        //         |--- false -----------------------------------------^
+
+        let start_cond_val = self.gen_expr(&cond, bb, scope.clone())?;
+        self.bbs.get_mut(&bb).unwrap().end =
+            mir::JumpInst::Conditional(start_cond_val, while_bb, next_bb);
+
+        let while_end = self.gen_stmt(&while_blk, while_bb, scope.clone())?;
+        let while_cond_val = self.gen_expr(&cond, bb, scope.clone())?;
+        self.bbs.get_mut(&while_end).unwrap().end =
+            mir::JumpInst::Conditional(while_cond_val, while_bb, next_bb);
+
+        Ok(next_bb)
+    }
+
+    fn gen_return(
+        &mut self,
+        ret_val: Option<Ptr<ast::Expr>>,
+        span: Span,
+        bb: mir::BBId,
+        scope: Ptr<ast::Scope>,
+    ) -> CompileResult<mir::BBId> {
+        let ret = if let Some(val) = ret_val {
+            let val = self.gen_expr(&val.borrow(), bb, scope)?;
+            Some(val)
+        } else {
+            None
+        };
+        let bb = self.bbs.get_mut(&bb).unwrap();
+        bb.end = mir::JumpInst::Return(ret);
+
+        let next_bb = *self.bb_pos_table.get(&span.end).unwrap();
+        Ok(next_bb)
     }
 }
