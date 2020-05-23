@@ -86,14 +86,13 @@ impl ast::OpVar {
     }
 }
 
-fn resolve_named_ty(ty_name: &str, scope: Ptr<ast::Scope>) -> CompileResult<mir::Ty> {
+fn resolve_named_ty(ty_name: &str, scope: &ast::Scope) -> CompileResult<mir::Ty> {
     let def = scope
-        .borrow()
         .find_def(ty_name)
         .ok_or_else(|| CompileErrorVar::NonExistType(ty_name.to_owned()))?;
     let ty_def = def.borrow();
     match &*ty_def {
-        ast::SymbolDef::Typ { def } => resolve_ty(&*def.borrow(), scope.clone()),
+        ast::SymbolDef::Typ { def } => resolve_ty(&*def.borrow(), scope),
         ast::SymbolDef::Var { .. } => Err(compile_err_n(CompileErrorVar::NonExistType(
             ty_name.to_owned(),
         ))),
@@ -103,15 +102,23 @@ fn resolve_named_ty(ty_name: &str, scope: Ptr<ast::Scope>) -> CompileResult<mir:
 /// A simple type resolver to resolve `ast::TypeDef` down to `mir::Ty`.
 /// Does not support circular types, or types where the source type name cannot
 /// be accessed from target site.
-fn resolve_ty(ty: &ast::TypeDef, scope: Ptr<ast::Scope>) -> CompileResult<mir::Ty> {
+fn resolve_ty(ty: &ast::TypeDef, scope: &ast::Scope) -> CompileResult<mir::Ty> {
     match ty {
         ast::TypeDef::Primitive(p) => {
-            if p.var == ast::PrimitiveTypeVar::SignedInt && p.occupy_bytes == 4 {
-                Ok(mir::Ty::Basic(mir::BasicTy::I32))
-            } else if p.var == ast::PrimitiveTypeVar::Float && p.occupy_bytes == 8 {
-                Ok(mir::Ty::Basic(mir::BasicTy::F64))
+            if p.var == ast::PrimitiveTypeVar::SignedInt
+                || p.var == ast::PrimitiveTypeVar::UnsignedInt
+            {
+                Ok(mir::Ty::Primitive(
+                    mir::PrimitiveTy::Int,
+                    p.occupy_bytes as u8,
+                ))
+            } else if p.var == ast::PrimitiveTypeVar::Float {
+                Ok(mir::Ty::Primitive(
+                    mir::PrimitiveTy::Float,
+                    p.occupy_bytes as u8,
+                ))
             } else if p.var == ast::PrimitiveTypeVar::UnsignedInt && p.occupy_bytes == 1 {
-                Ok(mir::Ty::Basic(mir::BasicTy::B32))
+                Ok(mir::Ty::bool())
             } else {
                 Err(compile_err_n(CompileErrorVar::NonExistType("".into())))
             }
@@ -148,6 +155,7 @@ fn resolve_ty(ty: &ast::TypeDef, scope: Ptr<ast::Scope>) -> CompileResult<mir::T
         ast::TypeDef::TypeErr => panic!("Error type"),
     }
 }
+
 /// Generates MIR code for a single function.
 ///
 /// # Notes
@@ -168,6 +176,7 @@ fn resolve_ty(ty: &ast::TypeDef, scope: Ptr<ast::Scope>) -> CompileResult<mir::T
 #[derive(Debug)]
 pub struct FnCodegen<'src> {
     src: &'src ast::FunctionType,
+    root_scope: Ptr<ast::Scope>,
     pkg: &'src mut mir::MirPackage,
     global_names: &'src HashMap<String, usize>,
     global_vars: &'src HashMap<usize, mir::Var>,
@@ -208,6 +217,7 @@ pub struct FnCodegen<'src> {
 impl<'src> FnCodegen<'src> {
     fn new(
         src: &'src ast::FunctionType,
+        root_scope: Ptr<ast::Scope>,
         pkg: &'src mut mir::MirPackage,
         global_vars: &'src HashMap<usize, mir::Var>,
         global_names: &'src HashMap<String, usize>,
@@ -233,14 +243,60 @@ impl<'src> FnCodegen<'src> {
             bb_pos_table: BTreeMap::new(),
             break_target: Vec::new(),
             bbs,
+            root_scope,
             pkg,
             global_vars,
             global_names,
         }
     }
 
-    fn gen(&mut self) -> CompileResult<mir::Func> {
-        todo!("Generate code for function")
+    fn gen(mut self) -> CompileResult<mir::Func> {
+        {
+            // TODO: Return variable?
+            // variable table #0 is inserted with dummy variable. Return stuff
+            // is dealt in JumpInst::Return.
+            self.var_table.insert(
+                0,
+                mir::Var {
+                    ty: mir::Ty::Void,
+                    kind: mir::VarKind::Ret,
+                },
+            );
+            self.var_id_counter += 1;
+        }
+        let mut params_ty = Vec::new();
+        {
+            // param variables
+            for param_ty in &self.src.params {
+                let param_ty = resolve_ty(&param_ty.borrow(), &self.root_scope.borrow())?;
+                params_ty.push(param_ty.clone());
+                self.var_table.insert(
+                    self.var_id_counter,
+                    mir::Var {
+                        ty: param_ty,
+                        kind: mir::VarKind::Param,
+                    },
+                );
+            }
+        }
+        {
+            // Scan - first pass
+            self.scan_blk(&self.src.body.as_ref().unwrap(), 0, self.root_scope.clone())?;
+        }
+        {
+            // Generate - second pass
+            self.gen_blk(&self.src.body.as_ref().unwrap(), 0, self.root_scope.clone())?;
+        }
+        let self_ty = {
+            let ret_ty = resolve_ty(&self.src.return_type.borrow(), &self.root_scope.borrow())?;
+            mir::Ty::function_of(ret_ty, params_ty, false)
+        };
+        // result
+        Ok(mir::Func {
+            ty: self_ty,
+            var_table: self.var_table,
+            bb: self.bbs,
+        })
     }
 
     /// Get a new basic block
@@ -550,7 +606,7 @@ impl<'src> FnCodegen<'src> {
             .get_typ()
             .ok_or_else(|| CompileErrorVar::NoTypeInformation)?;
         let ty = ty.borrow();
-        let ty = resolve_ty(&*ty, scope.clone())?;
+        let ty = resolve_ty(&*ty, &scope.borrow())?;
         Ok((name, ty))
     }
 
@@ -676,8 +732,8 @@ impl<'src> FnCodegen<'src> {
                 self.gen_expr(&expr, bb, scope)?;
                 Ok(bb)
             }
-            ast::StmtVariant::Print(p) => todo!("Generate code for statement {:#?}", stmt),
-            ast::StmtVariant::Scan(s) => todo!("Generate code for statement {:#?}", stmt),
+            ast::StmtVariant::Print(p) => self.gen_print(p, stmt.span, bb, scope),
+            ast::StmtVariant::Scan(s) => self.gen_scan(&s.name, stmt.span, bb, scope),
             ast::StmtVariant::ManyExpr(e) => {
                 for expr in e {
                     let expr = expr.borrow();
@@ -737,7 +793,7 @@ impl<'src> FnCodegen<'src> {
             let ident = self.resolve_ident_binding(&ident_fmt, span.start, bb);
             let ty = resolve_ty(
                 &def.borrow().get_sym().expect("is symbol").0.borrow(),
-                scope.clone(),
+                &scope.borrow(),
             )?;
 
             match ident {
@@ -811,7 +867,7 @@ impl<'src> FnCodegen<'src> {
         scope: Ptr<ast::Scope>,
     ) -> CompileResult<mir::Value> {
         let expr_val = self.gen_expr(&*ty_conv.expr.borrow(), bb, scope.clone())?;
-        let end_ty = resolve_ty(&*ty_conv.to.borrow(), scope.clone())?;
+        let end_ty = resolve_ty(&*ty_conv.to.borrow(), &scope.borrow())?;
         let tgt = self.add_assign_entry(None, end_ty, mir::VarKind::Temp, span.end, bb);
         self.insert_ins(
             bb,
@@ -864,6 +920,36 @@ impl<'src> FnCodegen<'src> {
         }
     }
 
+    fn gen_lvalue_ident(
+        &mut self,
+        lval: &str,
+        span: Span,
+        bb: mir::BBId,
+        scope: Ptr<ast::Scope>,
+    ) -> CompileResult<mir::VarRef> {
+        // get the definition of this variable.
+        // Typing stuff is finished in the 1st pass so we don't need to
+        // typecheck again here. Just return the variable reference
+        // and typings can be retrieved from variable info
+        let (_, depth) = scope.borrow().find_def_depth(&lval).ok_or_else(|| {
+            compile_err(CompileErrorVar::NonExistVar(lval.to_owned()), Some(span))
+        })?;
+        let lval_name = format_ident(&lval, depth);
+        if depth == 0 {
+            // global value
+            todo!("Resolve global variable")
+        } else {
+            let (pos, v_ref) = self
+                .var_pos_table
+                .get(&lval_name)
+                .unwrap()
+                .range(span.end..)
+                .next()
+                .unwrap();
+            Ok(mir::VarRef(mir::VarTy::Local, *v_ref))
+        }
+    }
+
     fn gen_lvalue(
         &mut self,
         lval: &ast::Expr,
@@ -876,30 +962,7 @@ impl<'src> FnCodegen<'src> {
 
         match &lval.var {
             ast::ExprVariant::Ident(ident) => {
-                // get the definition of this variable.
-                // Typing stuff is finished in the 1st pass so we don't need to
-                // typecheck again here. Just return the variable reference
-                // and typings can be retrieved from variable info
-                let (_, depth) = scope.borrow().find_def_depth(&ident.name).ok_or_else(|| {
-                    compile_err(
-                        CompileErrorVar::NonExistVar(ident.name.clone()),
-                        Some(lval.span),
-                    )
-                })?;
-                let lval_name = format_ident(&ident.name, depth);
-                if depth == 0 {
-                    // global value
-                    todo!("Resolve global variable")
-                } else {
-                    let (pos, v_ref) = self
-                        .var_pos_table
-                        .get(&lval_name)
-                        .unwrap()
-                        .range(lval.span.end..)
-                        .next()
-                        .unwrap();
-                    Ok(mir::VarRef(mir::VarTy::Local, *v_ref))
-                }
+                self.gen_lvalue_ident(&ident.name, lval.span, bb, scope)
             }
             _ => Err(CompileErrorVar::NotLValue(format!("{}", lval))).with_span(lval.span),
         }
@@ -1156,5 +1219,71 @@ impl<'src> FnCodegen<'src> {
 
         let next_bb = *self.bb_pos_table.get(&span.end).unwrap();
         Ok(next_bb)
+    }
+
+    fn gen_scan(
+        &mut self,
+        ident: &str,
+        span: Span,
+        bb: mir::BBId,
+        scope: Ptr<ast::Scope>,
+    ) -> CompileResult<mir::BBId> {
+        let varref = self.gen_lvalue_ident(ident, span, bb, scope)?;
+        // self.insert_ins(
+        //     bb,
+        //     mir::MirCode {
+        //         ins: mir,
+        //         tgt: varref,
+        //     },
+        // )
+        todo!("Scan")
+    }
+
+    fn gen_print(
+        &mut self,
+        exprs: &Vec<Ptr<ast::Expr>>,
+        span: Span,
+        bb: mir::BBId,
+        scope: Ptr<ast::Scope>,
+    ) -> CompileResult<mir::BBId> {
+        todo!("Print")
+    }
+}
+
+pub mod stdlib {
+    use crate::mir;
+    use mir::Ty;
+    // Standard library function names
+
+    const STDLIB_SCAN_CHAR: &'static str = "__std_scan_char";
+    const STDLIB_SCAN_INT: &'static str = "__std_scan_int";
+    const STDLIB_SCAN_DOUBLE: &'static str = "__std_scan_double";
+
+    const STDLIB_PUT_CHAR: &'static str = "__std_put_char";
+    const STDLIB_PUT_INT: &'static str = "__std_put_int";
+    const STDLIB_PUT_DOUBLE: &'static str = "__std_put_double";
+    const STDLIB_PUT_STR: &'static str = "__std_put_str";
+
+    // Standard library function types
+    pub fn scan_char_ty() -> Ty {
+        Ty::function_of(Ty::int(), [], true)
+    }
+    pub fn scan_int_ty() -> Ty {
+        Ty::function_of(Ty::int(), [], true)
+    }
+    pub fn scan_double_ty() -> Ty {
+        Ty::function_of(Ty::double(), [], true)
+    }
+    pub fn put_char_ty() -> Ty {
+        Ty::function_of(Ty::Void, [Ty::int()], true)
+    }
+    pub fn put_int_ty() -> Ty {
+        Ty::function_of(Ty::Void, [Ty::int()], true)
+    }
+    pub fn put_double_ty() -> Ty {
+        Ty::function_of(Ty::Void, [Ty::double()], true)
+    }
+    pub fn put_str_ty() -> Ty {
+        Ty::function_of(Ty::Void, [Ty::ptr_of(Ty::byte()), Ty::int()], true)
     }
 }

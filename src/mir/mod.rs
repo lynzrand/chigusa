@@ -180,16 +180,16 @@ impl BasicBlk {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
-pub enum BasicTy {
-    I32,
-    F64,
-    B32,
+pub enum PrimitiveTy {
+    Int,
+    Float,
+    Bool,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum Ty {
     Void,
-    Basic(BasicTy),
+    Primitive(PrimitiveTy, u8),
     Ptr(Ptr<Ty>),
     Array(Ptr<Ty>, Option<usize>),
     Fn(Ptr<Ty>, Vec<Ty>, bool),
@@ -197,14 +197,17 @@ pub enum Ty {
 }
 
 impl Ty {
+    pub fn byte() -> Ty {
+        Ty::Primitive(PrimitiveTy::Int, 1)
+    }
     pub fn int() -> Ty {
-        Ty::Basic(BasicTy::I32)
+        Ty::Primitive(PrimitiveTy::Int, 4)
     }
     pub fn double() -> Ty {
-        Ty::Basic(BasicTy::F64)
+        Ty::Primitive(PrimitiveTy::Float, 8)
     }
     pub fn bool() -> Ty {
-        Ty::Basic(BasicTy::B32)
+        Ty::Primitive(PrimitiveTy::Bool, 4)
     }
     pub fn ptr_of(ty: Ty) -> Ty {
         Ty::Ptr(Ptr::new(ty))
@@ -212,20 +215,26 @@ impl Ty {
     pub fn array_of(ty: Ty, size: Option<usize>) -> Ty {
         Ty::Array(Ptr::new(ty), size)
     }
+    pub fn function_of<V: Into<Vec<Ty>>>(ret: Ty, params: V, is_extern: bool) -> Ty {
+        Ty::Fn(Ptr::new(ret), params.into(), is_extern)
+    }
     pub fn is_assignable(&self) -> bool {
         !matches!(self, Ty::Void)
     }
     pub fn is_int(&self) -> bool {
-        matches!(self, Ty::Basic(BasicTy::I32))
+        matches!(self, Ty::Primitive(PrimitiveTy::Int, 4))
     }
     pub fn is_double(&self) -> bool {
-        matches!(self, Ty::Basic(BasicTy::F64))
+        matches!(self, Ty::Primitive(PrimitiveTy::Float, 8))
     }
     pub fn is_numeric(&self) -> bool {
-        matches!(self, Ty::Basic(BasicTy::I32) | Ty::Basic(BasicTy::F64))
+        matches!(
+            self,
+            Ty::Primitive(PrimitiveTy::Int,_) | Ty::Primitive(PrimitiveTy::Float,_)
+        )
     }
     pub fn is_bool(&self) -> bool {
-        matches!(self, Ty::Basic(BasicTy::B32))
+        matches!(self, Ty::Primitive(PrimitiveTy::Bool, _))
     }
     pub fn is_ptr(&self) -> bool {
         matches!(self, Ty::Ptr(_))
@@ -299,7 +308,7 @@ pub struct Func {
 
     /// Variable Table
     pub var_table: HashMap<usize, Var>,
-    pub bb: Vec<BasicBlk>,
+    pub bb: HashMap<usize, BasicBlk>,
 }
 
 #[derive(Debug, Clone)]

@@ -1,5 +1,9 @@
 #include <stdio.h>
 
+int __std_scan_char() {
+  return getchar();
+}
+
 int __std_scan_int() {
   int res;
   scanf("%d", &res);
