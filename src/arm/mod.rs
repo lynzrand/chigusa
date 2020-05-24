@@ -1,4 +1,15 @@
+pub mod codegen;
+mod util;
+
 pub type Reg = u8;
+
+pub static VARIABLE_REGISTERS: &'static [u8] = &[4, 5, 6, 7, 8, 10, 11];
+pub static PARAM_REGISTERS: &'static [u8] = &[1, 2, 3, 4];
+pub static RESULT_REGISTERS: &'static [u8] = &[1, 2];
+pub static SCRATCH_REGISTERS: &'static [u8] = &[1, 2, 3, 4, 12];
+pub static SP_REGISTER: u8 = 13;
+pub static LINK_REGISTER: u8 = 14;
+
 pub struct ArmCode {
     op: ArmOp,
 }
