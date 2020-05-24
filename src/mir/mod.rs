@@ -24,7 +24,7 @@ pub type BBId = usize;
 pub type VarId = usize;
 
 #[derive(PartialEq, Copy, Clone)]
-pub struct VarRef(VarTy, VarId);
+pub struct VarRef(pub VarTy, pub VarId);
 
 impl Display for VarRef {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -48,7 +48,7 @@ pub enum Value {
     IntImm(i32),
     FloatImm(f64),
     Var(VarRef),
-    Reg(u8),
+    // Reg(u8),
     Void,
 }
 
@@ -64,7 +64,7 @@ impl Display for Value {
             Value::IntImm(i) => write!(f, "int {}", *i),
             Value::FloatImm(x) => write!(f, "float {}", Buffer::new().format(*x)),
             Value::Var(varref) => write!(f, "{}", varref),
-            Value::Reg(reg_id) => write!(f, "r{}", reg_id),
+            // Value::Reg(reg_id) => write!(f, "r{}", reg_id),
             Value::Void => write!(f, "void"),
         }
     }
@@ -181,9 +181,9 @@ impl From<crate::c0::ast::OpVar> for UnaOp {
 
 #[derive(Clone)]
 pub struct MirCode {
-    ins: Ins,
+    pub ins: Ins,
     // ty: Ty,
-    tgt: VarRef,
+    pub tgt: VarRef,
 }
 
 impl Debug for MirCode {

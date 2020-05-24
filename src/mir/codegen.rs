@@ -920,7 +920,7 @@ impl<'src> FnCodegen<'src> {
             }
             .map(|ty| ty.clone()),
             // TODO: Support register values?
-            mir::Value::Reg(_) => None,
+            // mir::Value::Reg(_) => None,
             mir::Value::Void => Some(mir::Ty::Void),
         }
     }
