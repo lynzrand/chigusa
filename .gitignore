@@ -2,3 +2,5 @@
 **/*.rs.bk
 
 **/*.o0
+out
+out.bak

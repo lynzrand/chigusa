@@ -7,13 +7,13 @@ int main() {
   while (x > 0) {
     // bb1
     if ((x / 2 * 2) != x)
-      // bb2
+      // bb3
       result = result * y;
-    // bb3
+    // bb4
     y = y * y;
     x = x / 2;
   }
-  // bb4
+  // bb2
   print(result);
   return 0;
 }

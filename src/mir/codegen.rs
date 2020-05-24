@@ -26,6 +26,7 @@ impl<'src> Codegen<'src> {
                 entry_point: usize::max_value(),
                 global_var_table: HashMap::new(),
                 func_table: HashMap::new(),
+                static_values: HashMap::new(),
             },
             global_var_counter: 0,
             global_var_names: HashMap::new(),
@@ -62,7 +63,7 @@ impl<'src> Codegen<'src> {
                 ast::SymbolDef::Typ { .. } => {}
             }
         }
-
+        self.gen_start_fn(&self.src.blk)?;
         Ok(self.pkg)
     }
 
@@ -83,6 +84,7 @@ impl<'src> Codegen<'src> {
             mir::GlobalVar {
                 ty: var_ty,
                 name: name.to_owned().into(),
+                binary_value: None,
             },
         );
         Ok(())
@@ -109,6 +111,7 @@ impl<'src> Codegen<'src> {
             mir::GlobalVar {
                 ty: entry_point_ty,
                 name: "_start".to_owned().into(),
+                binary_value: None,
             },
         );
         self.pkg.func_table.insert(entry_point_id, entry_point);
@@ -147,6 +150,7 @@ impl<'src> Codegen<'src> {
             self.src.blk.scope.clone(),
             &mut self.pkg,
             &self.global_var_names,
+            &mut self.global_var_counter,
         );
         fn_codegen.gen()
     }
@@ -308,6 +312,7 @@ pub struct FnCodegen<'src> {
     root_scope: Ptr<ast::Scope>,
     pkg: &'src mut mir::MirPackage,
     global_names: &'src HashMap<String, usize>,
+    global_var_counter: &'src mut usize,
 
     /*
      * Note:
@@ -349,6 +354,7 @@ impl<'src> FnCodegen<'src> {
         root_scope: Ptr<ast::Scope>,
         pkg: &'src mut mir::MirPackage,
         global_names: &'src HashMap<String, usize>,
+        global_var_counter: &'src mut usize,
     ) -> FnCodegen<'src> {
         FnCodegen {
             name,
@@ -364,6 +370,7 @@ impl<'src> FnCodegen<'src> {
             root_scope,
             pkg,
             global_names,
+            global_var_counter,
         }
     }
 
@@ -376,7 +383,16 @@ impl<'src> FnCodegen<'src> {
                 inst: vec![],
                 end: mir::JumpInst::Unknown,
             };
-            self.add_bb(self.src.body.as_ref().unwrap().span.unwrap().start, init_bb)?;
+            self.add_bb(
+                self.src
+                    .body
+                    .as_ref()
+                    .unwrap()
+                    .span
+                    .unwrap_or(Span::zero())
+                    .start,
+                init_bb,
+            )?;
         }
         {
             // TODO: Return variable?
@@ -577,7 +593,7 @@ impl<'src> FnCodegen<'src> {
             next_bb = mir::BasicBlk::new(&[if_end, else_end]);
         } else {
             stmt_end = if_blk.span.end;
-            next_bb = mir::BasicBlk::new(&[if_end]);
+            next_bb = mir::BasicBlk::new(&[if_end, bb]);
         }
         let next_id = self.add_bb(stmt_end, next_bb)?;
         Ok(next_id)
@@ -596,7 +612,7 @@ impl<'src> FnCodegen<'src> {
         let while_id = self.add_bb(while_start, while_bb)?;
 
         let stmt_end = while_blk.span.end;
-        let next_bb = mir::BasicBlk::new(&[]);
+        let next_bb = mir::BasicBlk::new(&[bb]);
         let next_id = self.add_bb(stmt_end, next_bb)?;
 
         self.break_target.push(next_id);
@@ -764,34 +780,58 @@ impl<'src> FnCodegen<'src> {
     }
 
     /// Get the variable bindded to the specific identifier coming from
-    /// different basic blocks
-    fn resolve_ident_binding_bb_unique(
-        &self,
+    /// different basic blocks. Add variable reference to them.
+    ///
+    /// # Path
+    ///
+    /// `path` is the current bb path used in this function. Starts with the bb
+    /// that calls this function.
+    fn resole_ident_binding_add_usage_by_bb(
+        &mut self,
         ident: &str,
         bb: mir::BBId,
         vis: &mut HashSet<mir::BBId>,
+        path: &mut Vec<mir::BBId>,
         res: &mut HashSet<(mir::BBId, mir::VarId)>,
     ) {
+        if vis.contains(&bb) {
+            return;
+        }
+        vis.insert(bb);
+
         let jump_in = &self.bbs.get(&bb).unwrap().jump_in;
         let bindings = jump_in
             .iter()
             .filter(|x| !vis.contains(x))
-            .map(|bb_id| (*bb_id, self.var_bb_table.get(ident).unwrap().get(bb_id)))
+            .map(|bb_id| {
+                (
+                    *bb_id,
+                    self.var_bb_table
+                        .get(ident)
+                        .unwrap()
+                        .get(bb_id)
+                        .map(|id| *id),
+                )
+            })
             .collect::<Vec<_>>();
-        for bb_id in jump_in {
-            vis.insert(*bb_id);
-        }
+
         for (id, val) in bindings {
+            path.push(id);
             if let Some(val) = val {
-                res.insert((id, *val));
+                // path[1] is the direct successor basic block
+                res.insert((path[1], val));
+                for bb_id in path.iter() {
+                    self.bbs.get_mut(bb_id).unwrap().uses_var.insert(val);
+                }
             } else {
-                self.resolve_ident_binding_bb_unique(ident, id, vis, res);
+                self.resole_ident_binding_add_usage_by_bb(ident, id, vis, path, res);
             }
+            path.pop();
         }
     }
 
-    fn resolve_ident_binding(
-        &self,
+    fn resolve_ident_binding_and_add_usage(
+        &mut self,
         ident: &str,
         pos: Pos,
         bb: mir::BBId,
@@ -804,7 +844,13 @@ impl<'src> FnCodegen<'src> {
             None => {
                 let mut res = HashSet::new();
                 let mut vis = HashSet::new();
-                self.resolve_ident_binding_bb_unique(ident, bb, &mut vis, &mut res);
+                self.resole_ident_binding_add_usage_by_bb(
+                    ident,
+                    bb,
+                    &mut vis,
+                    &mut vec![bb],
+                    &mut res,
+                );
 
                 if res.len() > 0 {
                     debug!("Found phi (1): {:?}", &res);
@@ -826,7 +872,13 @@ impl<'src> FnCodegen<'src> {
                 } else {
                     let mut res = HashSet::new();
                     let mut vis = HashSet::new();
-                    self.resolve_ident_binding_bb_unique(ident, bb, &mut vis, &mut res);
+                    self.resole_ident_binding_add_usage_by_bb(
+                        ident,
+                        bb,
+                        &mut vis,
+                        &mut vec![bb],
+                        &mut res,
+                    );
                     if res.len() > 0 {
                         debug!("Found phi (2): {:?}", &res);
                         Some(Either::Right(res))
@@ -948,7 +1000,7 @@ impl<'src> FnCodegen<'src> {
             Ok(mir::Value::Var(mir::VarRef(mir::VarTy::Global, *global_id)))
         } else {
             let ident_fmt = format_ident(&ident.name, depth);
-            let ident = self.resolve_ident_binding(&ident_fmt, span.start, bb);
+            let ident = self.resolve_ident_binding_and_add_usage(&ident_fmt, span.start, bb);
             let ty = resolve_ty(
                 &def.borrow().get_sym().expect("is symbol").0.borrow(),
                 &scope.borrow(),
@@ -961,12 +1013,13 @@ impl<'src> FnCodegen<'src> {
                 )),
                 Some(Either::Left(id)) => Ok(mir::Value::Var(mir::VarRef(mir::VarTy::Local, id))),
                 Some(Either::Right(ids)) => {
-                    {
-                        let bb = self.bbs.get_mut(&bb).unwrap();
-                        for (_, var_id) in ids.iter() {
-                            bb.uses_var.insert(*var_id);
-                        }
-                    }
+                    // * Moved to resolve_ident_binding_and_add_usage
+                    // {
+                    //     let bb = self.bbs.get_mut(&bb).unwrap();
+                    //     for (_, var_id) in ids.iter() {
+                    //         bb.uses_var.insert(*var_id);
+                    //     }
+                    // }
 
                     let new_var =
                         self.add_assign_entry(None, ty.clone(), mir::VarKind::Temp, span.start, bb);
@@ -1013,7 +1066,21 @@ impl<'src> FnCodegen<'src> {
                     Ok(mir::Value::IntImm(0))
                 }
             }
-            ast::Literal::String { val } => todo!("Support strings"),
+            ast::Literal::String { val } => {
+                let s = val.as_bytes().to_vec();
+                let var_id = *self.global_var_counter;
+                *self.global_var_counter += 1;
+                self.pkg.global_var_table.insert(
+                    var_id,
+                    mir::GlobalVar {
+                        ty: mir::Ty::array_of(mir::Ty::byte(), Some(s.len())),
+                        name: None,
+                        binary_value: Some(var_id),
+                    },
+                );
+                self.pkg.static_values.insert(var_id, s);
+                Ok(mir::Value::Var(mir::VarRef(mir::VarTy::Global, var_id)))
+            }
         }
     }
 
@@ -1513,22 +1580,26 @@ impl<'src> FnCodegen<'src> {
                     },
                 )?;
             } else if expr_val_ty.is_array_of(&mir::Ty::byte()) {
-                todo!("std::put_str")
-                // let put_str = *self
-                //     .global_names
-                //     .get(crate::stdlib::STDLIB_PUT_DOUBLE)
-                //     .unwrap();
+                let (_, size) = expr_val_ty.get_array_of().unwrap();
+                if let Some(size) = size {
+                    let put_str = *self
+                        .global_names
+                        .get(crate::stdlib::STDLIB_PUT_DOUBLE)
+                        .unwrap();
 
-                // self.insert_ins(
-                //     bb,
-                //     mir::MirCode {
-                //         ins: mir::Ins::Call(
-                //             mir::VarRef(mir::VarTy::Global, put_str),
-                //             vec![expr_val],
-                //         ),
-                //         tgt: temp_var,
-                //     },
-                // )?;
+                    self.insert_ins(
+                        bb,
+                        mir::MirCode {
+                            ins: mir::Ins::Call(
+                                mir::VarRef(mir::VarTy::Global, put_str),
+                                vec![expr_val, mir::Value::IntImm(size as i32)],
+                            ),
+                            tgt: temp_var,
+                        },
+                    )?;
+                } else {
+                    return Err(CompileErrorVar::RequireSized("".into())).with_span(span);
+                }
             }
         }
         Ok(bb)

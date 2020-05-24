@@ -380,12 +380,13 @@ pub struct Func {
 pub struct GlobalVar {
     pub ty: Ty,
     pub name: Option<String>,
+    pub binary_value: Option<usize>,
 }
 
 #[derive(Debug, Clone)]
 pub struct MirPackage {
     pub entry_point: usize,
     pub global_var_table: HashMap<usize, GlobalVar>,
-    // pub ty_table: HashMap<TyRef, Ty>,
     pub func_table: HashMap<usize, Func>,
+    pub static_values: HashMap<usize, Vec<u8>>,
 }
