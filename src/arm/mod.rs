@@ -1,14 +1,54 @@
 pub mod codegen;
 mod util;
+use crate::mir;
+use once_cell::sync::Lazy;
+use std::collections::HashSet;
 
-pub type Reg = u8;
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
+pub struct Reg(u8);
 
-pub static VARIABLE_REGISTERS: &'static [u8] = &[4, 5, 6, 7, 8, 10, 11];
-pub static PARAM_REGISTERS: &'static [u8] = &[1, 2, 3, 4];
-pub static RESULT_REGISTERS: &'static [u8] = &[1, 2];
-pub static SCRATCH_REGISTERS: &'static [u8] = &[1, 2, 3, 4, 12];
-pub static SP_REGISTER: u8 = 13;
-pub static LINK_REGISTER: u8 = 14;
+pub type LazyRegSet = Lazy<Vec<Reg>>;
+
+pub static VARIABLE_REGISTERS: LazyRegSet = Lazy::new(|| {
+    (&[4, 5, 6, 7, 8, 10, 11])
+        .into_iter()
+        .map(|&v| Reg(v))
+        .collect()
+});
+pub static PARAM_REGISTERS: LazyRegSet =
+    Lazy::new(|| (&[1, 2, 3, 4]).into_iter().map(|&v| Reg(v)).collect());
+pub static RESULT_REGISTERS: LazyRegSet =
+    Lazy::new(|| (&[1, 2]).into_iter().map(|&v| Reg(v)).collect());
+pub static SCRATCH_REGISTERS: LazyRegSet =
+    Lazy::new(|| (&[1, 2, 3, 4, 12]).into_iter().map(|&v| Reg(v)).collect());
+pub static SP_REGISTER: Reg = Reg(13);
+pub static LINK_REGISTER: Reg = Reg(14);
+
+pub static DOUBLE_OFFSET: u8 = 16;
+pub static DOUBLE_REGISTERS: LazyRegSet = Lazy::new(|| {
+    (0u8..16u8)
+        .into_iter()
+        .map(|v| Reg(v + DOUBLE_OFFSET))
+        .collect()
+});
+
+impl mir::Ty {
+    pub(self) fn require_double_registers(&self) -> bool {
+        match self {
+            mir::Ty::Primitive(mir::PrimitiveTy::Float, 8) => true,
+            _ => false,
+        }
+    }
+    pub(self) fn register_count(&self) -> usize {
+        match self {
+            mir::Ty::Primitive(mir::PrimitiveTy::Float, _) => 1,
+            mir::Ty::Primitive(_, x) => ((*x + 3) / 4) as usize,
+            mir::Ty::Fn(..) | mir::Ty::Array(..) | mir::Ty::Ptr(..) => 1,
+            mir::Ty::Void => 0,
+            mir::Ty::RestParams => todo!("Not supported"),
+        }
+    }
+}
 
 pub struct ArmCode {
     op: ArmOp,

@@ -1,5 +1,11 @@
+use super::{
+    util::{CycleSolver, Interval},
+    *,
+};
 use crate::mir;
+use bimap::BiMap;
 use indexmap::IndexMap;
+use once_cell::sync::Lazy;
 use std::{
     cmp::{max, min},
     collections::{HashMap, HashSet, VecDeque},
@@ -139,7 +145,7 @@ impl<'src> FnCodegen<'src> {
     }
 }
 
-pub struct BasicBlkIntervals<'src> {
+struct BasicBlkIntervals<'src> {
     offset: usize,
     bb: &'src mir::BasicBlk,
     // bb_prev_vars: &'src HashSet<mir::VarId>,
@@ -167,6 +173,15 @@ impl<'src> BasicBlkIntervals<'src> {
         }
     }
 
+    pub fn get_collapsed_var_varref(&mut self, var: &mir::VarRef) -> mir::VarRef {
+        match var.0 {
+            mir::VarTy::Global => *var,
+            mir::VarTy::Local => {
+                let res = self.get_collapsed_var(var.1);
+                mir::VarRef(mir::VarTy::Local, res)
+            }
+        }
+    }
     fn get_collapsed_var_optional(&mut self, var: usize) -> Option<usize> {
         if let Some(&v) = self.var_collapse.get(&var) {
             let res = self.get_collapsed_var_optional(v);
@@ -320,46 +335,119 @@ impl<'src> BasicBlkIntervals<'src> {
         for var in self.bb_next_vars.iter().cloned() {
             self.interval_end(var, self_end + 1);
         }
+
+        // Sort the intervals by their starting point
+        self.intervals.sort_by(|_, v1, _, v2| v1.0.cmp(&v2.0))
     }
 }
 
-/// Represents an half-open half-close interval over MIR instructions.
-///
-/// `self.0` represents the place where the variable is first assigned,
-/// and `self.1` represents the place where the variable is last used.
-#[derive(Clone, Copy)]
-pub(super) struct Interval(pub usize, pub usize);
+/// This struct uses a Second-chance binpacking register allocation algorithm,
+/// described in <https://www.researchgate.net/publication/221302629>
+struct SecondChanceBinPackingRegAlloc<'src, 'b> {
+    // === Code ===
+    src: &'src FnCodegen<'b>,
 
-impl Interval {
-    pub fn point(pos: usize) -> Self {
-        Interval(pos, pos)
-    }
-
-    pub fn update_ending_pos(&mut self, pos: usize) {
-        self.1 = max(pos, self.1);
-    }
-
-    pub fn update_starting_pos(&mut self, pos: usize) {
-        self.0 = min(self.0, pos);
-    }
-
-    pub fn start(&self) -> usize {
-        self.0
-    }
-
-    pub fn end(&self) -> usize {
-        self.1
-    }
-
-    pub fn union(mut x: Self, y: Self) -> Self {
-        x.update_ending_pos(y.1);
-        x.update_starting_pos(y.0);
-        x
-    }
+    // === Register Allocation State ===
+    assignment: IndexMap<mir::VarId, Vec<(Interval, Reg)>>,
+    active: BiMap<mir::VarId, Reg>,
+    inactive: HashSet<mir::VarId>,
+    handled: HashSet<mir::VarId>,
+    // free: HashSet<Reg>,
+    spilled: IndexMap<mir::VarId, Vec<Interval>>,
+    all_used_reg: HashSet<Reg>,
 }
 
-impl std::fmt::Debug for Interval {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "[{}, {})", self.0, self.1)
+impl SecondChanceBinPackingRegAlloc<'_, '_> {
+    pub fn init(&mut self) {}
+
+    fn allocate_register(&mut self, var_id: mir::VarId, reg: Reg, pos: usize) {
+        let entry = self.assignment.entry(var_id);
+        match entry {
+            indexmap::map::Entry::Occupied(mut e) => {
+                // if a variable has an entry and needs to allocate again
+                // then it must be spilled somewhere else
+                let v = e.get_mut();
+                assert!(
+                    v.iter().all(|(interval, _)| !interval.is_inside_write(pos)),
+                    "No duplicate allocations"
+                );
+                let spilled = self.spilled.get_mut(&var_id).unwrap();
+                let new_interval = spilled.last_mut().unwrap().split(pos);
+                v.push((new_interval, reg));
+            }
+            indexmap::map::Entry::Vacant(e) => {
+                let spilled = self.spilled.get_mut(&var_id);
+                let interval = if let Some(intervals) = spilled {
+                    // this variable is located in the stack from the beginning
+                    intervals.last_mut().unwrap().split(pos)
+                } else {
+                    *self.src.live_intervals.get(&var_id).unwrap()
+                };
+                e.insert(vec![(interval, reg)]);
+            }
+        };
+        self.active.insert(var_id, reg);
+    }
+
+    fn spill_var(&mut self, var_id: mir::VarId, pos: usize) {
+        let entry = self.assignment.entry(var_id);
+        match entry {
+            indexmap::map::Entry::Occupied(mut entry) => {
+                // Spill a variable from its last assignment
+                let val = entry.get_mut();
+                let new_interval = val.last_mut().unwrap().0.split(pos);
+
+                self.spilled
+                    .entry(var_id)
+                    .and_modify(|intervals| intervals.push(new_interval))
+                    .or_insert_with(|| vec![new_interval]);
+            }
+            indexmap::map::Entry::Vacant(_) => panic!("The variable is not allocated!"),
+        }
+        self.active.remove_by_left(&var_id);
+    }
+
+    fn set_param_and_ret_registers(&mut self) {
+        let mut param_register_size = 0;
+        for (&idx, var) in &self.src.src.var_table {
+            if var.kind == mir::VarKind::Param {
+                // * we ARE iterating variables in the same way they are declared
+                let var_reg_size = var.ty.register_count();
+                if var.ty.require_double_registers() {
+                    todo!("Support doubles")
+                }
+                if param_register_size + var_reg_size < RESULT_REGISTERS.len() {
+                    // Allocate register
+                    assert!(var_reg_size == 1, "only int-s are supported");
+                    self.allocate_register(idx, PARAM_REGISTERS[param_register_size], 0);
+                    param_register_size += 1;
+                } else {
+                    // spill param onto stack
+                    self.spill_var(idx, 0);
+                }
+            } else if var.kind == mir::VarKind::Ret {
+                let var_reg_size = var.ty.register_count();
+                if var.ty.require_double_registers() {
+                    todo!("Support doubles")
+                }
+
+                assert!(var_reg_size == 1, "only int-s are supported");
+                self.allocate_register(idx, RESULT_REGISTERS[0], 0);
+            }
+        }
+    }
+
+    fn scan_body(&mut self) {
+        for bb in self.src.bb_arrangement.iter().cloned() {
+            let bb = self.src.src.bb.get(&bb).unwrap();
+        }
+    }
+
+    pub fn is_spilled(&self, var_id: mir::VarId, pos: usize) -> bool {
+        self.spilled.get(&var_id).map_or(false, |intervals| {
+            intervals
+                .iter()
+                .any(|interval| interval.is_inside_write(pos))
+        })
     }
 }

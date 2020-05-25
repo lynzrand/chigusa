@@ -4,6 +4,7 @@
 //! like LLVM-IR.
 
 use crate::prelude::*;
+use indexmap::IndexMap;
 use ryu::{Buffer, Float};
 use std::{
     cell::Ref,
@@ -399,8 +400,8 @@ pub struct Func {
     pub name: String,
 
     /// Variable Table
-    pub var_table: HashMap<usize, Var>,
-    pub bb: HashMap<usize, BasicBlk>,
+    pub var_table: IndexMap<usize, Var>,
+    pub bb: IndexMap<usize, BasicBlk>,
 }
 
 #[derive(Debug, Clone)]
@@ -413,7 +414,7 @@ pub struct GlobalVar {
 #[derive(Debug, Clone)]
 pub struct MirPackage {
     pub entry_point: usize,
-    pub global_var_table: HashMap<usize, GlobalVar>,
-    pub func_table: HashMap<usize, Func>,
-    pub static_values: HashMap<usize, Vec<u8>>,
+    pub global_var_table: IndexMap<usize, GlobalVar>,
+    pub func_table: IndexMap<usize, Func>,
+    pub static_values: IndexMap<usize, Vec<u8>>,
 }

@@ -5,6 +5,7 @@ use crate::minivm::{
 use crate::mir;
 use crate::prelude::*;
 use either::Either;
+use indexmap::IndexMap;
 use log::*;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
@@ -24,9 +25,9 @@ impl<'src> Codegen<'src> {
             src,
             pkg: mir::MirPackage {
                 entry_point: usize::max_value(),
-                global_var_table: HashMap::new(),
-                func_table: HashMap::new(),
-                static_values: HashMap::new(),
+                global_var_table: IndexMap::new(),
+                func_table: IndexMap::new(),
+                static_values: IndexMap::new(),
             },
             global_var_counter: 0,
             global_var_names: HashMap::new(),
@@ -331,7 +332,7 @@ pub struct FnCodegen<'src> {
     /// from following basic blocks
     var_bb_table: HashMap<String, HashMap<mir::BBId, mir::VarId>>,
     var_pos_table: HashMap<String, BTreeMap<Pos, mir::VarId>>,
-    var_table: HashMap<mir::VarId, mir::Var>,
+    var_table: IndexMap<mir::VarId, mir::Var>,
 
     /// The start position of each basic block. Code will find its basic block
     /// ID based on this value.
@@ -341,7 +342,7 @@ pub struct FnCodegen<'src> {
     /// How many basic block do we have now?
     bb_counter: usize,
     /// ID to block match
-    bbs: HashMap<mir::BBId, mir::BasicBlk>,
+    bbs: IndexMap<mir::BBId, mir::BasicBlk>,
 
     /// Break targets for basic block calculation
     break_target: Vec<mir::BBId>,
@@ -362,11 +363,11 @@ impl<'src> FnCodegen<'src> {
             var_id_counter: 0,
             bb_counter: 0,
             var_bb_table: HashMap::new(),
-            var_table: HashMap::new(),
+            var_table: IndexMap::new(),
             var_pos_table: HashMap::new(),
             bb_pos_table: BTreeMap::new(),
             break_target: Vec::new(),
-            bbs: HashMap::new(),
+            bbs: IndexMap::new(),
             root_scope,
             pkg,
             global_names,
@@ -394,19 +395,7 @@ impl<'src> FnCodegen<'src> {
                 init_bb,
             )?;
         }
-        {
-            // TODO: Return variable?
-            // variable table #0 is inserted with dummy variable. Return stuff
-            // is dealt in JumpInst::Return.
-            self.var_table.insert(
-                0,
-                mir::Var {
-                    ty: mir::Ty::Void,
-                    kind: mir::VarKind::Ret,
-                },
-            );
-            self.var_id_counter += 1;
-        }
+        //  no return variable; RETURN statements adds a return variable
         let mut params_ty = Vec::new();
         {
             // param variables
@@ -1445,7 +1434,9 @@ impl<'src> FnCodegen<'src> {
     ) -> CompileResult<mir::BBId> {
         let ret = if let Some(val) = ret_val {
             let val = self.gen_expr(&val.borrow(), bb, scope)?;
-            Some(val)
+            let val_ty = self.val_ty(&val).unwrap();
+            let val = self.add_assign_entry(None, val_ty, mir::VarKind::Ret, span.start, bb);
+            Some(mir::Value::Var(val))
         } else {
             None
         };
