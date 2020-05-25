@@ -26,6 +26,16 @@ pub type VarId = usize;
 #[derive(PartialEq, Copy, Clone)]
 pub struct VarRef(pub VarTy, pub VarId);
 
+impl VarRef {
+    pub fn get_local_id(&self) -> Option<usize> {
+        if self.0 == VarTy::Local {
+            Some(self.1)
+        } else {
+            None
+        }
+    }
+}
+
 impl Display for VarRef {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.0 {
@@ -54,7 +64,14 @@ pub enum Value {
 
 impl Value {
     pub fn is_assignable(&self) -> bool {
-        matches!(self, Value::Void)
+        matches!(self, Value::Var(_))
+    }
+
+    pub fn get_local_id(&self) -> Option<VarId> {
+        match self {
+            Value::Var(v) => v.get_local_id(),
+            _ => None,
+        }
     }
 }
 
@@ -205,6 +222,16 @@ pub enum JumpInst {
     Return(Option<Value>),
     Unreachable,
     Unknown,
+}
+
+impl JumpInst {
+    pub fn next_ids(&self) -> Box<[usize]> {
+        match self {
+            JumpInst::Jump(x) => Box::new([*x]),
+            JumpInst::Conditional(_, x, y) => Box::new([*x, *y]),
+            JumpInst::Return(_) | JumpInst::Unreachable | JumpInst::Unknown => Box::new([]),
+        }
+    }
 }
 
 impl Default for JumpInst {

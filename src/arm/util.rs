@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 /// Solve the cycles inside basic blocks
 pub struct CycleSolver<'src> {
     bb: &'src HashMap<usize, BasicBlk>,
-    pub counter: HashMap<usize, usize>,
+    pub counter: HashMap<usize, isize>,
     path: HashSet<usize>,
     pub visited: HashSet<usize>,
 }

@@ -90,7 +90,10 @@ fn main() {
         }
     };
 
-    eprintln!("{:#?}", mir);
+    // eprintln!("{:#?}", mir);
+
+    let mut asm_cg = chigusa::arm::codegen::Codegen::new(&mir);
+    asm_cg.gen();
 
     // if opt.emit == EmitOption::S0 {
     //     let mut f = File::create(&opt.output_file).expect("Failed to create output file");

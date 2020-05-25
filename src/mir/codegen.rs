@@ -794,6 +794,8 @@ impl<'src> FnCodegen<'src> {
         path: &mut Vec<mir::BBId>,
         res: &mut HashSet<(mir::BBId, mir::VarId)>,
     ) {
+        // TODO: Do we need break-through assignments?
+        // WARN: No. Related code commented.
         if vis.contains(&bb) {
             return;
         }
@@ -820,9 +822,10 @@ impl<'src> FnCodegen<'src> {
             if let Some(val) = val {
                 // path[1] is the direct successor basic block
                 res.insert((path[1], val));
-                for bb_id in path.iter() {
-                    self.bbs.get_mut(bb_id).unwrap().uses_var.insert(val);
-                }
+            // TODO: break-through assignment
+            // for bb_id in path.iter() {
+            //     self.bbs.get_mut(bb_id).unwrap().uses_var.insert(val);
+            // }
             } else {
                 self.resole_ident_binding_add_usage_by_bb(ident, id, vis, path, res);
             }
@@ -836,7 +839,8 @@ impl<'src> FnCodegen<'src> {
         pos: Pos,
         bb: mir::BBId,
     ) -> Option<Either<mir::VarId, HashSet<(mir::BBId, mir::VarId)>>> {
-        debug!("Try to find variable {} at {}, bb {}", ident, pos, bb);
+        // TODO: Do we need break-through assignments?
+        // WARN: No. Related code commented.
 
         let var_pos = self.var_pos_table.get(ident)?;
         let last_def = var_pos.range(..=pos).last();
@@ -853,21 +857,17 @@ impl<'src> FnCodegen<'src> {
                 );
 
                 if res.len() > 0 {
-                    debug!("Found phi (1): {:?}", &res);
                     Some(Either::Right(res))
                 } else {
-                    debug!("Found none (1)");
                     None
                 }
             }
             Some((pos, id)) => {
                 let last_bb = self.bb_pos_table.range(..=pos).last();
-                debug!("bb: expected: {}, found {:?}", bb, last_bb);
 
                 let same_bb = last_bb.map_or(false, |(_, last_id)| *last_id == bb);
 
                 if same_bb {
-                    debug!("found one: ${}", *id);
                     Some(either::Left(*id))
                 } else {
                     let mut res = HashSet::new();
@@ -880,10 +880,8 @@ impl<'src> FnCodegen<'src> {
                         &mut res,
                     );
                     if res.len() > 0 {
-                        debug!("Found phi (2): {:?}", &res);
                         Some(Either::Right(res))
                     } else {
-                        debug!("Found none (2)");
                         None
                     }
                 }
