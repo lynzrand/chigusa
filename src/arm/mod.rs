@@ -1,13 +1,14 @@
 pub mod codegen;
 mod util;
 use crate::mir;
+use indexmap::IndexSet;
 use once_cell::sync::Lazy;
 use std::collections::HashSet;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub struct Reg(u8);
 
-pub type LazyRegSet = Lazy<Vec<Reg>>;
+pub type LazyRegSet = Lazy<IndexSet<Reg>>;
 
 pub static VARIABLE_REGISTERS: LazyRegSet = Lazy::new(|| {
     (&[4, 5, 6, 7, 8, 10, 11])
@@ -16,11 +17,17 @@ pub static VARIABLE_REGISTERS: LazyRegSet = Lazy::new(|| {
         .collect()
 });
 pub static PARAM_REGISTERS: LazyRegSet =
-    Lazy::new(|| (&[1, 2, 3, 4]).into_iter().map(|&v| Reg(v)).collect());
+    Lazy::new(|| (&[0, 1, 2, 3]).into_iter().map(|&v| Reg(v)).collect());
 pub static RESULT_REGISTERS: LazyRegSet =
-    Lazy::new(|| (&[1, 2]).into_iter().map(|&v| Reg(v)).collect());
+    Lazy::new(|| (&[0, 1]).into_iter().map(|&v| Reg(v)).collect());
 pub static SCRATCH_REGISTERS: LazyRegSet =
-    Lazy::new(|| (&[1, 2, 3, 4, 12]).into_iter().map(|&v| Reg(v)).collect());
+    Lazy::new(|| (&[0, 1, 2, 3, 12]).into_iter().map(|&v| Reg(v)).collect());
+pub static SCRATCH_VARIABLE_ALLOWED_REGISTERS: LazyRegSet = Lazy::new(|| {
+    (&[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12])
+        .into_iter()
+        .map(|&v| Reg(v))
+        .collect()
+});
 pub static SP_REGISTER: Reg = Reg(13);
 pub static LINK_REGISTER: Reg = Reg(14);
 

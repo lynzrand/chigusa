@@ -1,4 +1,4 @@
-use crate::mir::*;
+use crate::{arm, mir::*};
 use indexmap::IndexMap;
 use std::{
     cmp::{max, min},
@@ -37,7 +37,7 @@ impl Interval {
     pub fn is_inside_write(&self, pos: usize) -> bool {
         pos >= self.0 && pos < self.1
     }
-    pub fn is_inside_read(&self, pos: usize) -> bool {
+    pub fn alive_for_reading(&self, pos: usize) -> bool {
         pos > self.0 && pos <= self.1
     }
 
@@ -56,6 +56,10 @@ impl Interval {
 
     pub fn intersects_with(&self, other: &Interval) -> bool {
         self.0 < other.1 || self.1 > other.0
+    }
+
+    pub fn len(&self) -> usize {
+        self.1 - self.0
     }
 }
 

@@ -378,12 +378,14 @@ impl Ty {
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum VarKind {
     Param,
     Ret,
     Local,
     Temp,
+    /// Special kind for function params and return values
+    FixedTemp,
     Dummy,
 }
 

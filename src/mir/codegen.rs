@@ -1287,18 +1287,32 @@ impl<'src> FnCodegen<'src> {
         for (param, param_ty) in op.params.iter().zip(func_ty.get_fn_params().unwrap()) {
             let val = self.gen_expr(&*param.borrow(), bb, scope.clone())?;
             let val_ty = self.val_ty(&val).expect("Value must have type");
-
             if val_ty != *param_ty {
                 return Err(CompileErrorVar::TypeMismatch).with_span(span);
             }
+            // Assign every value calculated into a temporary variable
+            let temp_var = self.add_assign_entry(
+                None,
+                val_ty,
+                mir::VarKind::FixedTemp,
+                param.borrow().span.start,
+                bb,
+            );
+            self.insert_ins(
+                bb,
+                mir::MirCode {
+                    ins: mir::Ins::Asn(val),
+                    tgt: temp_var,
+                },
+            )?;
 
-            params.push(val);
+            params.push(mir::Value::Var(temp_var));
         }
 
         let temp_var = self.add_assign_entry(
             None,
             func_ty.get_fn_ret().unwrap().borrow().clone(),
-            mir::VarKind::Temp,
+            mir::VarKind::FixedTemp,
             span.end,
             bb,
         );

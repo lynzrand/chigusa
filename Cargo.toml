@@ -33,6 +33,7 @@ arrayvec = "0.5"
 chigusa-minivm = { path = "crates/minivm" }
 r0vm = { path = "crates/r0vm" }
 ryu = "1.0.4"
+vec1 = "1.4.0"
 
 [features]
 # llvm_jit = ["inkwell"]
