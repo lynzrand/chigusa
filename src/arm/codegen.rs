@@ -35,6 +35,9 @@ pub struct FnCodegen<'src> {
     bb_start_pos: IndexMap<usize, usize>,
 
     reg_alloc: SecondChanceBinPackingRegAlloc<'src>,
+
+    code: Vec<ArmCode>,
+    labels: HashMap<String, usize>,
 }
 
 impl<'src> FnCodegen<'src> {
@@ -46,6 +49,8 @@ impl<'src> FnCodegen<'src> {
             // live_intervals: IndexMap::new(),
             // var_collapse: IndexMap::new(),
             reg_alloc: SecondChanceBinPackingRegAlloc::new(src),
+            code: vec![],
+            labels: HashMap::new(),
         }
     }
 
@@ -206,6 +211,7 @@ impl<'src> FnCodegen<'src> {
                     0,
                     self.get_var_interval(idx),
                 );
+                self.reg_alloc.pre_allocated.insert(idx);
             }
         }
     }
@@ -214,14 +220,38 @@ impl<'src> FnCodegen<'src> {
         *self.reg_alloc.live_intervals.get(&idx).unwrap()
     }
 
-    fn scan_body(&mut self) {
-        for bb in self.bb_arrangement.iter().cloned() {
+    fn gen_body_assembly(&mut self) {
+        for &bb in &self.bb_arrangement {
+            let &bb_offset = self.bb_start_pos.get(&bb).unwrap();
             let bb = self.src.bb.get(&bb).unwrap();
-            for inst in &bb.inst {}
+            for &_var in &bb.uses_var {
+                // TODO: pre-allocate?
+                // let _reg = self.reg_alloc.request_write_allocation(
+                //     var,
+                //     bb_offset,
+                //     self.reg_alloc.live_intervals.get(&var).unwrap().clone(),
+                // );
+                // * We assume that variables are always assigned before first
+                // * use, so that they are already allocated before loops
+            }
+            for (pos, inst) in bb
+                .inst
+                .iter()
+                .enumerate()
+                .map(|(pos, inst)| (pos + bb_offset, inst))
+            {
+                match &inst.ins {
+                    mir::Ins::TyCon(_) => {}
+                    mir::Ins::Asn(_) => {}
+                    mir::Ins::Bin(_, _, _) => {}
+                    mir::Ins::Una(_, _) => {}
+                    mir::Ins::Call(_, _) => {}
+                    mir::Ins::Phi(_) => {}
+                    mir::Ins::RestRead(_) => {}
+                }
+            }
         }
     }
-
-    pub fn assign_registers(&mut self) {}
 
     pub fn gen_assembly(&mut self) {}
 
@@ -445,6 +475,10 @@ struct SecondChanceBinPackingRegAlloc<'src> {
     pub var_collapse: IndexMap<usize, usize>,
 
     scratch_register_counter: usize,
+
+    // === Temporary data ===
+    pub just_spilled: VecDeque<(mir::VarId, Reg)>,
+    pub just_revived: VecDeque<(mir::VarId, Reg)>,
 }
 
 impl<'src> SecondChanceBinPackingRegAlloc<'src> {
@@ -459,6 +493,8 @@ impl<'src> SecondChanceBinPackingRegAlloc<'src> {
             live_intervals: IndexMap::new(),
             var_collapse: IndexMap::new(),
             scratch_register_counter: usize::max_value(),
+            just_spilled: VecDeque::new(),
+            just_revived: VecDeque::new(),
         }
     }
 
@@ -481,6 +517,10 @@ impl<'src> SecondChanceBinPackingRegAlloc<'src> {
                 );
                 let spilled = self.spilled.get_mut(&var_id).unwrap();
                 let new_interval = spilled.last_mut().split(pos);
+
+                // ! This is a revive outside Self::revive() function.
+                self.just_revived.push_back((var_id, reg));
+
                 v.push((new_interval, reg));
             }
             indexmap::map::Entry::Vacant(e) => {
@@ -517,7 +557,8 @@ impl<'src> SecondChanceBinPackingRegAlloc<'src> {
             }
             indexmap::map::Entry::Vacant(_) => panic!("The variable is not allocated!"),
         }
-        self.active.remove_by_left(&var_id);
+        let result = self.active.remove_by_left(&var_id).unwrap();
+        self.just_spilled.push_back(result);
     }
 
     fn scan_and_desctivate(&mut self, pos: usize) {
@@ -631,7 +672,7 @@ impl<'src> SecondChanceBinPackingRegAlloc<'src> {
 
     /// Request to allocate a register for reading the variable, or return the
     /// register already allocated for it
-    pub fn request_read_allocation(&mut self, var_id: mir::VarId, pos: usize) -> Reg {
+    pub fn alloc_read(&mut self, var_id: mir::VarId, pos: usize) -> Reg {
         let last_allocation = *self
             .assignment
             .get(&var_id)
@@ -644,20 +685,19 @@ impl<'src> SecondChanceBinPackingRegAlloc<'src> {
             // The value might be spilled
             let new_interval = self.revive(var_id, pos);
             let reg = self.find_allocate_or_spill(var_id, &*VARIABLE_REGISTERS, new_interval, pos);
+
+            // Revived
+            self.just_revived.push_back((var_id, reg));
+
             self.allocate_register(var_id, reg, pos, new_interval);
 
             reg
         }
     }
 
+    // var_kind: mir::VarKind,
     /// Request to allocate a register
-    pub fn request_write_allocation(
-        &mut self,
-        var_id: mir::VarId,
-        // var_kind: mir::VarKind,
-        pos: usize,
-        interval: Interval,
-    ) -> Reg {
+    pub fn alloc_write(&mut self, var_id: mir::VarId, pos: usize) -> Reg {
         let last_allocation = self.assignment.entry(var_id);
         match last_allocation {
             indexmap::map::Entry::Occupied(e) => {
@@ -669,11 +709,16 @@ impl<'src> SecondChanceBinPackingRegAlloc<'src> {
                     let interval = self.revive(var_id, pos);
                     let reg =
                         self.find_allocate_or_spill(var_id, &*VARIABLE_REGISTERS, interval, pos);
+
+                    // Revived
+                    self.just_revived.push_back((var_id, reg));
+
                     reg
                 }
             }
             indexmap::map::Entry::Vacant(_v) => {
                 // variable is not yet allocated
+                let &interval = self.live_intervals.get(&var_id).unwrap();
                 let reg = self.find_allocate_or_spill(var_id, &*VARIABLE_REGISTERS, interval, pos);
                 reg
             }
@@ -685,7 +730,7 @@ impl<'src> SecondChanceBinPackingRegAlloc<'src> {
     ///
     /// The number of scratch registers must be less than the total number of
     /// registers; If no register could be allocated, the method panics.
-    pub fn request_scratch_register(&mut self, pos: usize) -> Reg {
+    pub fn alloc_scratch(&mut self, pos: usize) -> Reg {
         let var_id = self.scratch_register_counter;
         self.scratch_register_counter -= 1;
 
@@ -706,4 +751,239 @@ impl<'src> SecondChanceBinPackingRegAlloc<'src> {
     pub fn force_free_register(&mut self, reg: Reg, pos: usize) {
         self.spill_reg(reg, pos)
     }
+}
+
+struct InstructionGen<'src, 'b> {
+    alloc: &'src mut SecondChanceBinPackingRegAlloc<'b>,
+    codes: &'src mut Vec<ArmCode>,
+    code_labels: &'src BiMap<String, usize>,
+    static_values: &'src mut HashMap<String, StaticData>,
+    func: &'src mir::Func,
+    pkg: &'src mir::MirPackage,
+    pos: usize,
+}
+
+impl<'src, 'b> InstructionGen<'src, 'b> {
+    fn get_ty(&self, var: mir::VarId) -> Option<&mir::Ty> {
+        self.func.var_table.get(&var).map(|var| &var.ty)
+    }
+
+    fn get_global_ty(&self, var: usize) -> Option<&mir::Ty> {
+        self.pkg.global_var_table.get(&var).map(|var| &var.ty)
+    }
+
+    fn val_ty(&self, val: &mir::Value) -> Option<mir::Ty> {
+        match val {
+            mir::Value::IntImm(_) => Some(mir::Ty::int()),
+            mir::Value::FloatImm(_) => Some(mir::Ty::double()),
+            mir::Value::Var(v) => match v.0 {
+                mir::VarTy::Local => self.get_ty(v.1),
+                mir::VarTy::Global => self.get_global_ty(v.1),
+            }
+            .map(|ty| ty.clone()),
+            // TODO: Support register values?
+            // mir::Value::Reg(_) => None,
+            mir::Value::Void => Some(mir::Ty::Void),
+        }
+    }
+
+    pub fn gen_inst(&mut self, inst: &mir::MirCode) {
+        let tgt_val = inst.tgt;
+        let reg = match tgt_val.0 {
+            mir::VarTy::Global => {
+                self.alloc.alloc_scratch(self.pos);
+                todo!("Global variable")
+            }
+            mir::VarTy::Local => self.alloc.alloc_write(tgt_val.1, self.pos),
+        };
+        match &inst.ins {
+            mir::Ins::TyCon(src_val) => self.gen_ty_con(reg, tgt_val, *src_val),
+            mir::Ins::Asn(_) => {}
+            mir::Ins::Bin(_, _, _) => {}
+            mir::Ins::Una(_, _) => {}
+            mir::Ins::Call(_, _) => {}
+            mir::Ins::Phi(_) => {}
+            mir::Ins::RestRead(_) => {}
+        }
+    }
+
+    fn gen_ty_con(&mut self, dest: Reg, dest_val: mir::VarRef, src_val: mir::Value) {
+        todo!("Type conversion")
+    }
+
+    /// Assign immediate to a scratch register
+    fn scratch_int_imm(&mut self, num: i32) -> Reg {
+        let label_name = format!("VAL__{}${}", &self.func.name, self.pos);
+        self.static_values
+            .insert(label_name.clone(), StaticData::Word(vec![num as u32]));
+        let reg = self.alloc.alloc_scratch(self.pos);
+
+        self.codes.push(ArmCode::LdR(
+            reg,
+            MemoryAccess::Label(Label::Name(label_name)),
+        ));
+        reg
+    }
+
+    fn scratch_int_imm_or_direct(&mut self, num: i32) -> ArmOperand {
+        if num > (1 << 10 - 1) || num < (-1 << 10) {
+            ArmOperand::Reg(self.scratch_int_imm(num))
+        } else {
+            ArmOperand::Imm(num)
+        }
+    }
+
+    fn scratch_global_read(&mut self, var_id: mir::VarId) -> Reg {
+        todo!("Read global value")
+    }
+
+    fn gen_value_reg(&mut self, val: mir::Value) -> Reg {
+        match val {
+            mir::Value::IntImm(i) => self.scratch_int_imm(i),
+            mir::Value::FloatImm(_) => todo!("Support floats"),
+            mir::Value::Var(v) => match v.0 {
+                mir::VarTy::Global => self.scratch_global_read(v.1),
+                mir::VarTy::Local => self.alloc.alloc_read(v.1, self.pos),
+            },
+            mir::Value::Void => panic!("Requesting register for void value"),
+        }
+    }
+
+    fn gen_value_operand(&mut self, val: mir::Value) -> ArmOperand {
+        match val {
+            mir::Value::IntImm(i) => self.scratch_int_imm_or_direct(i),
+            mir::Value::FloatImm(_) => todo!("Support floats"),
+            mir::Value::Var(v) => match v.0 {
+                mir::VarTy::Global => ArmOperand::Reg(self.scratch_global_read(v.1)),
+                mir::VarTy::Local => ArmOperand::Reg(self.alloc.alloc_read(v.1, self.pos)),
+            },
+            mir::Value::Void => panic!("Requesting register for void value"),
+        }
+    }
+
+    fn gen_assign(&mut self, dest: Reg, src_val: mir::Value) {
+        match src_val {
+            mir::Value::Void => {
+                return;
+            }
+            src_val @ _ => {
+                let operand = self.gen_value_operand(src_val);
+                if let ArmOperand::Reg(r) = operand {
+                    if r == dest {
+                        return;
+                    }
+                }
+                self.codes.push(ArmCode::Mov(dest, operand));
+            }
+        }
+    }
+
+    fn gen_cmp(&mut self, dest: Reg, op: mir::BinOp, lhs: Reg, rhs: ArmOperand) {
+        self.codes.push(ArmCode::Cmp(lhs, rhs));
+        self.codes.push(ArmCode::Mov(dest, ArmOperand::Imm(0)));
+        self.codes.push(ArmCode::CMov(
+            match op {
+                mir::BinOp::Lt => Conditional::Lt,
+                mir::BinOp::Gt => Conditional::Gt,
+                mir::BinOp::Eq => Conditional::Eq,
+                mir::BinOp::Neq => Conditional::Ne,
+                mir::BinOp::Lte => Conditional::Le,
+                mir::BinOp::Gte => Conditional::Ge,
+                _ => panic!("Not a comparasion"),
+            },
+            dest,
+            ArmOperand::Imm(1),
+        ));
+    }
+
+    fn gen_binary(&mut self, dest: Reg, op: mir::BinOp, mut lhs: mir::Value, mut rhs: mir::Value) {
+        let val_ty = self.val_ty(&lhs).expect("No type information");
+        if val_ty.is_int() {
+            if op == mir::BinOp::Sub {
+                // Reverse subtraction stuff
+                let mut rev_sub = false;
+                if lhs.is_int() && !rhs.is_int() {
+                    std::mem::swap(&mut lhs, &mut rhs);
+                    rev_sub = true;
+                }
+                let lhs = self.gen_value_reg(lhs);
+                let rhs = self.gen_value_operand(rhs);
+                if !rev_sub {
+                    self.codes
+                        .push(ArmCode::Sub(NumericOperand { dest, lhs, rhs }))
+                } else {
+                    self.codes
+                        .push(ArmCode::Rsb(NumericOperand { dest, lhs, rhs }))
+                }
+            } else {
+                let lhs = self.gen_value_reg(lhs);
+                let rhs = self.gen_value_operand(rhs);
+                let arm_code = match op {
+                    mir::BinOp::Add => ArmCode::Add(NumericOperand { dest, lhs, rhs }),
+                    // mir::BinOp::Sub => {ArmCode::Sub(NumericOperand{dest,lhs,rhs})}
+                    mir::BinOp::Mul => ArmCode::Mul(NumericOperand { dest, lhs, rhs }),
+                    mir::BinOp::Div => ArmCode::Div(NumericOperand { dest, lhs, rhs }),
+                    mir::BinOp::And => ArmCode::And(NumericOperand { dest, lhs, rhs }),
+                    mir::BinOp::Or => ArmCode::Orr(NumericOperand { dest, lhs, rhs }),
+                    mir::BinOp::Lt
+                    | mir::BinOp::Gt
+                    | mir::BinOp::Eq
+                    | mir::BinOp::Neq
+                    | mir::BinOp::Lte
+                    | mir::BinOp::Gte => {
+                        self.gen_cmp(dest, op, lhs, rhs);
+                        return;
+                    }
+                    _ => unreachable!(),
+                };
+                self.codes.push(arm_code);
+            }
+        } else {
+            unimplemented!("Binary operation of other types ")
+        }
+    }
+
+    fn gen_unary(&mut self, dest: Reg, op: mir::UnaOp, val: mir::Value) {
+        let val_ty = self.val_ty(&val).expect("No type information");
+        if val_ty.is_int() {
+            match op {
+                mir::UnaOp::Pos => {
+                    let operand = self.gen_value_operand(val);
+                    if let ArmOperand::Reg(r) = operand {
+                        if r == dest {
+                            return;
+                        }
+                    }
+                    self.codes.push(ArmCode::Mov(dest, operand));
+                }
+                mir::UnaOp::Neg => {
+                    let operand = self.gen_value_reg(val);
+                    self.codes.push(ArmCode::Rsb(NumericOperand {
+                        dest,
+                        lhs: operand,
+                        rhs: ArmOperand::Imm(0),
+                    }));
+                }
+            };
+        } else {
+            unimplemented!("Binary operation of other types ")
+        }
+    }
+
+    fn gen_call(&mut self, dest: Reg, dest_val: mir::VarRef, params: &Vec<mir::Value>) {
+        todo!("Type conversion")
+    }
+
+    fn gen_rest_read(&mut self, dest: Reg, dest_val: mir::VarRef) {
+        todo!("Variadic function is not supported")
+    }
+}
+
+fn val_both_int_immediate(lhs: &mir::Value, rhs: &mir::Value) -> Option<(i32, i32)> {
+    if let mir::Value::IntImm(l) = lhs {
+        if let mir::Value::IntImm(r) = rhs {
+            return Some((*l, *r));
+        }
+    }
+    None
 }

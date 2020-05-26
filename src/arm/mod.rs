@@ -57,60 +57,122 @@ impl mir::Ty {
     }
 }
 
-pub struct ArmCode {
-    op: ArmOp,
+#[derive(Debug, Clone)]
+pub enum Label {
+    Name(String),
+    LocalNum(usize),
 }
 
-pub enum ArmOp {
+/// Second operand for ARM instruction
+#[derive(Debug, Clone)]
+pub enum ArmOperand {
+    Reg(Reg),
+    Imm(i32),
+}
+
+#[derive(Debug, Clone)]
+pub struct NumericOperand {
+    pub dest: Reg,
+    pub lhs: Reg,
+    pub rhs: ArmOperand,
+}
+
+#[derive(Debug, Clone)]
+pub enum MemoryAccess {
+    Register(Reg, isize),
+    Label(Label),
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum Conditional {
+    /// Equal
+    Eq,
+    /// Not equal
+    Ne,
+    /// Carry
+    Cs,
+    /// No Carry
+    Cc,
+    /// Minus, Negative
+    Mi,
+    /// Plus, Positive or zero
+    Pl,
+    /// Overflow
+    Vs,
+    /// No overflow
+    Vc,
+    /// Unsigned Greater
+    Hi,
+    /// Unsigned Less
+    Ls,
+    /// Greater or equal
+    Ge,
+    /// Less than
+    Lt,
+    /// Greater than
+    Gt,
+    /// Less or equal
+    Le,
+    /// Always or None
+    Al,
+}
+
+#[derive(Debug, Clone)]
+pub enum ArmCode {
     // Branching
     /// Branch
-    B,
-    /// Conditional Branch if Non-Zero
-    Cbnz,
-    /// Conditional Branch if Zero
-    Cbz,
+    B(Conditional, Label),
     /// Call
-    Bl,
+    Bl(Label),
 
     // Data Processing
-    Add,
-    Sub,
-    Mul,
-    Div,
+    Add(NumericOperand),
+    Sub(NumericOperand),
+    Mul(NumericOperand),
+    Div(NumericOperand),
     /// Reverse Subtract
-    Rsb,
-    And,
-    Orr,
+    Rsb(NumericOperand),
+    And(NumericOperand),
+    Orr(NumericOperand),
     /// Xor
-    Eor,
-    Mov,
+    Eor(NumericOperand),
+    Mov(Reg, ArmOperand),
+    /// Conditional move. The same instruction as Mov, but adds a condition
+    /// since it's useful
+    CMov(Conditional, Reg, ArmOperand),
 
     // Floating Point Data Processing
-    VAdd,
-    VSub,
-    VMul,
-    VDiv,
-    VMov,
+    VAdd(NumericOperand),
+    VSub(NumericOperand),
+    VMul(NumericOperand),
+    VDiv(NumericOperand),
+    VMov(Reg, ArmOperand),
 
     // Comparative
     /// Compare
-    Cmp,
+    Cmp(Reg, ArmOperand),
     /// Compare Negative
-    Cmn,
+    Cmn(Reg, ArmOperand),
+    /// Test AND
+    Tst(Reg, ArmOperand),
     /// Test
-    Tst,
-    /// Test
-    Teq,
+    Teq(Reg, ArmOperand),
 
     // Load and Store
-    LdR,
-    StR,
-    LdRD,
-    StRD,
+    LdR(Reg, MemoryAccess),
+    StR(Reg, MemoryAccess),
+    LdRD(Reg, MemoryAccess),
+    StRD(Reg, MemoryAccess),
 
-    Push,
-    Pop,
+    Push(Reg),
+    Pop(Reg),
 
-    VLdR,
-    VStR,
+    VLdR(Reg, MemoryAccess),
+    VStR(Reg, MemoryAccess),
+}
+
+pub enum StaticData {
+    Byte(Vec<u8>),
+    Word(Vec<u32>),
+    AsciiZ(String),
 }

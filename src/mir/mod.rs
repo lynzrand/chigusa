@@ -54,7 +54,7 @@ impl Debug for VarRef {
 
 // #[derive(Debug, Eq, PartialEq, Copy, Clone)]
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Copy, PartialEq)]
 pub enum Value {
     IntImm(i32),
     FloatImm(f64),
@@ -73,6 +73,10 @@ impl Value {
             Value::Var(v) => v.get_local_id(),
             _ => None,
         }
+    }
+
+    pub fn is_int(&self) -> bool {
+        matches!(self, Value::IntImm(_))
     }
 }
 
