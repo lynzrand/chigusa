@@ -1,7 +1,17 @@
+// #include <stdio.h>
+
+// void scan(int x) {
+//   printf("%d", x);
+//   x = x + 1;
+// }
+
+// void print(int x) {
+//   x = x + 1;
+// }
+
 int main() {
   // bb0
-  int x, y;
-  int result = 1;
+  int x, y, result = 1;
   scan(x);
   scan(y);
   while (x > 0) {

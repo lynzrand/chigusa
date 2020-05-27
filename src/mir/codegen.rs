@@ -57,8 +57,8 @@ impl<'src> Codegen<'src> {
             match &*symbol {
                 ast::SymbolDef::Var { typ, .. } => {
                     let typ = typ.borrow();
-                    if let ast::TypeDef::Function(f) = &*typ {
-                        self.gen_fn(name, f)?;
+                    if let ty @ ast::TypeDef::Function(_) = &*typ {
+                        self.gen_fn(name, ty)?;
                     }
                 }
                 ast::SymbolDef::Typ { .. } => {}
@@ -121,10 +121,15 @@ impl<'src> Codegen<'src> {
         Ok(())
     }
 
-    fn gen_fn(&mut self, name: &str, func: &ast::FunctionType) -> CompileResult<()> {
+    fn gen_fn(&mut self, name: &str, ty: &ast::TypeDef) -> CompileResult<()> {
+        let func = if let ast::TypeDef::Function(f) = ty {
+            f
+        } else {
+            unreachable!()
+        };
         if func.is_extern {
             assert!(func.body.is_none());
-            self.gen_extern_fn(name, func)
+            self.gen_extern_fn(name, ty)
         } else {
             assert!(func.body.is_some());
             let f = self.gen_non_extern_fn(name, func)?;
@@ -135,8 +140,20 @@ impl<'src> Codegen<'src> {
         }
     }
 
-    fn gen_extern_fn(&mut self, name: &str, func: &ast::FunctionType) -> CompileResult<()> {
+    fn gen_extern_fn(&mut self, name: &str, ty: &ast::TypeDef) -> CompileResult<()> {
         // TODO: noop?
+
+        let ty = resolve_ty(ty, &self.src.blk.scope.borrow())?;
+        self.pkg.func_table.insert(
+            *self.global_var_names.get(name).unwrap(),
+            mir::Func {
+                is_extern: true,
+                ty,
+                name: name.into(),
+                var_table: IndexMap::new(),
+                bb: IndexMap::new(),
+            },
+        );
         Ok(())
     }
 
@@ -431,6 +448,7 @@ impl<'src> FnCodegen<'src> {
         };
         // result
         Ok(mir::Func {
+            is_extern: false,
             name: self.name.to_owned(),
             ty: self_ty,
             var_table: self.var_table,
@@ -672,7 +690,6 @@ impl<'src> FnCodegen<'src> {
     ) -> CompileResult<()> {
         let name = &scan.name;
         let (name, ty) = self.get_var_name_and_ty(name, scope.clone())?;
-        debug!("Scan statement: name {} type {:?}", &name, &ty);
         self.add_assign_entry(Some(&name), ty, mir::VarKind::Local, span.end, bb);
 
         Ok(())

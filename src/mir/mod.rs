@@ -402,8 +402,9 @@ pub struct Var {
 #[derive(Debug, Clone)]
 pub struct Func {
     // this: VarRef,
-    pub ty: Ty,
     pub name: String,
+    pub ty: Ty,
+    pub is_extern: bool,
 
     /// Variable Table
     pub var_table: IndexMap<usize, Var>,

@@ -34,11 +34,19 @@ impl Interval {
         self.1
     }
 
-    pub fn is_inside_write(&self, pos: usize) -> bool {
-        pos >= self.0 && pos < self.1
+    pub fn alive_for_writing(&self, pos: usize) -> bool {
+        if self.0 == self.1 {
+            true
+        } else {
+            pos >= self.0 && pos < self.1
+        }
     }
     pub fn alive_for_reading(&self, pos: usize) -> bool {
-        pos > self.0 && pos <= self.1
+        if self.0 == self.1 {
+            true
+        } else {
+            pos > self.0 && pos <= self.1
+        }
     }
 
     pub fn union(mut x: Self, y: Self) -> Self {
@@ -48,7 +56,12 @@ impl Interval {
     }
 
     pub fn split(&mut self, pos: usize) -> Self {
-        assert!(pos >= self.0 && pos <= self.1);
+        assert!(
+            pos >= self.0 && pos <= self.1,
+            "Splitting at {} while self is {:?}",
+            pos,
+            self
+        );
         let old_end = self.1;
         self.1 = pos;
         Interval(pos, old_end)
