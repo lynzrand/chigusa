@@ -11,7 +11,8 @@ use structopt::StructOpt;
 
 fn main() {
     let mut opt: ParserConfig = ParserConfig::from_args();
-    cute_log::init_with_max_level(opt.verbosity).unwrap();
+    // cute_log::init_with_max_level(opt.verbosity).unwrap();
+    simplelog::SimpleLogger::init(opt.verbosity, simplelog::Config::default()).unwrap();
 
     if opt.output_assembly {
         opt.emit = EmitOption::S0;
@@ -92,13 +93,17 @@ fn main() {
 
     // eprintln!("{:#?}", mir);
 
-    let mut asm_cg = chigusa::arm::codegen::Codegen::new(&mir);
-    asm_cg.gen();
+    let asm_cg = chigusa::arm::codegen::Codegen::new(&mir);
+    let code = asm_cg.gen();
 
-    // if opt.emit == EmitOption::S0 {
-    //     let mut f = File::create(&opt.output_file).expect("Failed to create output file");
-    //     write!(f, "{}", s0).expect("Failed to write");
-    // } else {
+    if opt.emit == EmitOption::S0 {
+        let mut f = File::create(&opt.output_file).expect("Failed to create output file");
+        log::info!(
+            "Writing to output file: {}",
+            opt.output_file.canonicalize().unwrap().to_str().unwrap()
+        );
+        write!(f, "{:?}", code).expect("Failed to write");
+    }
     //     // Emit O0
     //     let mut f = File::create(&opt.output_file).expect("Failed to create output file");
     //     s0.write_binary(&mut f).expect("Failed to write");

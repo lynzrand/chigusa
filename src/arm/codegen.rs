@@ -32,21 +32,28 @@ macro_rules! pre_alloc_reg {
 
 pub struct Codegen<'src> {
     src: &'src mir::MirPackage,
+    dst: ArmPackage,
 }
 
 impl<'src> Codegen<'src> {
     pub fn new(src: &'src mir::MirPackage) -> Self {
-        Codegen { src }
+        Codegen {
+            src,
+            dst: ArmPackage { functions: vec![] },
+        }
     }
-    pub fn gen(&mut self) {
+    pub fn gen(mut self) -> ArmPackage {
         for (id, f) in &self.src.func_table {
             if f.is_extern {
                 continue;
             }
-            let mut fc = FnCodegen::new(&self.src, f);
+            let fc = FnCodegen::new(&self.src, f);
             let code = fc.gen();
-            log::debug!("{:#?}", code);
+            self.dst.functions.push(code);
+            // log::debug!("{:#?}", code);
         }
+
+        self.dst
     }
 }
 
@@ -142,14 +149,20 @@ impl<'src> FnCodegen<'src> {
                     // noop
                 }
                 mir::JumpInst::Unreachable | mir::JumpInst::Unknown => {
-                    if self.src.name == "_start" {
-                        // special treatment
-                    } else {
+                    if !self.is_start() && !self.is_void() {
                         panic!("Reaches unreachable or uninitialized block!")
                     }
                 }
             }
         }
+    }
+
+    fn is_start(&self) -> bool {
+        self.src.name == "main"
+    }
+
+    fn is_void(&self) -> bool {
+        !self.src.ty.get_fn_ret().unwrap().borrow().is_assignable()
     }
 
     fn calc_bb_starting_points(&mut self) {
@@ -182,7 +195,7 @@ impl<'src> FnCodegen<'src> {
 
             bb_interval_scanner.scan_intervals();
         }
-        // log::debug!("{:#?}", self);
+        log::debug!("live intervals: {:#?}", self.reg_alloc.live_intervals);
     }
 
     pub fn get_collapsed_var_varref(&mut self, var: &mir::VarRef) -> mir::VarRef {
@@ -222,7 +235,7 @@ impl<'src> FnCodegen<'src> {
                 if var.ty.require_double_registers() {
                     todo!("Support doubles")
                 }
-                if param_register_size + var_reg_size < RESULT_REGISTERS.len() {
+                if param_register_size + var_reg_size <= RESULT_REGISTERS.len() {
                     // Allocate register
                     assert!(var_reg_size == 1, "only int-s are supported");
                     self.reg_alloc.allocate_register(
@@ -238,7 +251,8 @@ impl<'src> FnCodegen<'src> {
                     param_register_size += 1;
                 } else {
                     // spill param onto stack
-                    self.reg_alloc.alloc_param(id, (id - 4) * 4);
+                    self.reg_alloc
+                        .alloc_param(id, (param_register_size - 4) * 4);
                 }
             } else if var.kind == mir::VarKind::Ret {
                 let var_reg_size = var.ty.register_count();
@@ -283,13 +297,14 @@ impl<'src> FnCodegen<'src> {
                                     x.0 == mir::VarTy::Local,
                                     "Function param is not a local variable!"
                                 );
+                                let var_id = self.get_collapsed_var(x.1);
                                 if idx < 4 {
-                                    let interval = get_interval!(self, self.get_collapsed_var(x.1));
+                                    let interval = get_interval!(self, var_id);
                                     pre_alloc_reg!(
                                         self,
-                                        pos,
+                                        interval.start(),
                                         PreAllocEntry {
-                                            id: x.1,
+                                            id: var_id,
                                             reg: *PARAM_REGISTERS.get_index(idx).unwrap(),
                                             interval,
                                             volatile: false,
@@ -297,7 +312,7 @@ impl<'src> FnCodegen<'src> {
                                     );
                                 } else {
                                     // Allocate to stack
-                                    self.reg_alloc.alloc_caller(x.1, (param_size - idx) * 4);
+                                    self.reg_alloc.alloc_caller(var_id, (param_size - idx) * 4);
                                 }
                             } else {
                                 panic!("Function param is not a variable!")
@@ -345,20 +360,10 @@ impl<'src> FnCodegen<'src> {
             {
                 log::trace!("{} : {}", pos, inst);
 
-                if let Some(entries) = self.pre_alloc.get_mut(&pos) {
-                    for entry in entries.drain(..) {
-                        self.reg_alloc.allocate_register(
-                            entry.id,
-                            entry.reg,
-                            pos,
-                            entry.interval,
-                            entry.volatile,
-                        );
-                    }
-                }
                 let mut inst_gen = InstructionGen {
                     alloc: &mut self.reg_alloc,
                     codes: &mut self.code,
+                    pre_alloc: &mut self.pre_alloc,
                     static_values: &mut self.static_values,
                     func: &self.src,
                     pkg: &self.pkg,
@@ -412,6 +417,7 @@ impl<'src> FnCodegen<'src> {
                         let mut inst_gen = InstructionGen {
                             alloc: &mut self.reg_alloc,
                             codes: &mut self.code,
+                            pre_alloc: &mut self.pre_alloc,
                             static_values: &mut self.static_values,
                             func: &self.src,
                             pkg: &self.pkg,
@@ -438,7 +444,17 @@ impl<'src> FnCodegen<'src> {
                     ));
                 }
                 mir::JumpInst::Unreachable => panic!("Reaches unreachable basic block!"),
-                mir::JumpInst::Unknown => panic!("Reaches uninitialized basic block!"),
+                mir::JumpInst::Unknown => {
+                    if self.is_start() {
+                    } else if self.is_void() {
+                        self.code.push(ArmCode::B(
+                            Conditional::Al,
+                            format_function_end(&self.src.name),
+                        ));
+                    } else {
+                        panic!("Reaches uninitialized basic block!")
+                    }
+                }
             }
         }
     }
@@ -471,6 +487,7 @@ impl<'src> FnCodegen<'src> {
                 }
             })
             .max()
+            .map(|x| x + 4)
             .unwrap_or(0) as usize;
 
         let mut final_code = Vec::new();
@@ -483,6 +500,10 @@ impl<'src> FnCodegen<'src> {
         }));
 
         final_code.append(&mut self.code);
+
+        if self.is_start() {
+            final_code.push(ArmCode::Bl("__chigusa_main".into()));
+        }
 
         final_code.push(ArmCode::_Label(format_function_end(&self.src.name)));
         final_code.push(ArmCode::Mov(SP_REGISTER, ArmOperand::Reg(FP_REGISTER)));
@@ -502,6 +523,7 @@ impl<'src> FnCodegen<'src> {
         ArmFunction {
             name: self.src.name.clone(),
             code: self.code,
+            static_values: self.static_values,
         }
     }
 }
@@ -804,6 +826,21 @@ impl<'src> RegStackAlloc<'src> {
         res
     }
 
+    pub fn force_allocate_register(
+        &mut self,
+        var_id: mir::VarId,
+        reg: Reg,
+        pos: usize,
+        val_interval: Interval,
+        volatile: bool,
+    ) {
+        log::trace!("force-allocating ${} to {:?} at {}", var_id, reg, pos);
+        if self.active.get_by_right(&reg).is_some() {
+            self.force_free_register(reg, pos);
+        }
+        self.allocate_register(var_id, reg, pos, val_interval, volatile);
+    }
+
     pub fn allocate_register(
         &mut self,
         var_id: mir::VarId,
@@ -819,9 +856,13 @@ impl<'src> RegStackAlloc<'src> {
                 // if a variable has an entry and needs to allocate again
                 // then it must be spilled somewhere else
                 let v = e.get_mut();
+                if v.last().0.alive_for_writing(pos) && v.last().1 == reg {
+                    // The allocated register is the same as the current register
+                    return;
+                }
                 assert!(
                     v.iter()
-                        .all(|(interval, _)| !interval.alive_for_writing(pos)),
+                        .all(|(interval, r)| !interval.alive_for_writing(pos)),
                     "No duplicate allocations"
                 );
                 let (spilled, loc) = self.spilled.get_mut(&var_id).unwrap();
@@ -855,6 +896,7 @@ impl<'src> RegStackAlloc<'src> {
     }
 
     fn spill_reg(&mut self, reg: Reg, pos: usize) {
+        log::trace!("spilling {:?} at {}", reg, pos);
         let var_id = self.active.get_by_right(&reg);
         if let Some(&var_id) = var_id {
             self.spill_var(var_id, pos);
@@ -869,6 +911,7 @@ impl<'src> RegStackAlloc<'src> {
             indexmap::map::Entry::Occupied(mut entry) => {
                 // Spill a variable from its last assignment
                 let val = entry.get_mut();
+
                 let new_interval = val.last_mut().0.split(pos);
 
                 // allocate memory slot for variable
@@ -882,20 +925,59 @@ impl<'src> RegStackAlloc<'src> {
                     .or_insert_with(|| (vec1![new_interval], stack_pos));
 
                 let result = self.active.remove_by_left(&var_id).unwrap();
+                log::trace!("${} assignments: {:?}", var_id, val);
                 self.just_spilled.push_back((result.0, result.1, stack_pos));
             }
             indexmap::map::Entry::Vacant(_) => panic!("The variable is not allocated!"),
         }
     }
 
-    fn scan_and_desctivate(&mut self, pos: usize) {
-        for variable in self.active.left_values().cloned().collect::<Vec<_>>() {
+    fn scan_and_deactivate_read(&mut self, pos: usize) {
+        log::trace!(
+            "Scan for active variables (read) @{}: {:?}",
+            pos,
+            self.active
+        );
+        let active_vars = self.active.left_values().cloned().collect::<Vec<_>>();
+        for variable in active_vars {
             let is_active = self
                 .live_intervals
                 .get(&variable)
-                .map_or(false, |interval| interval.alive_for_reading(pos));
+                .map_or(false, |interval| interval.alive_for_either(pos));
             if !is_active {
                 self.active.remove_by_left(&variable);
+                log::trace!(
+                    "deactivating variable {}: {} vs {:?}",
+                    variable,
+                    pos,
+                    self.live_intervals.get(&variable),
+                );
+            } else {
+            }
+        }
+    }
+
+    fn scan_and_deactivate_write(&mut self, pos: usize) {
+        log::trace!(
+            "Scan for active variables (write) @{}: {:?}",
+            pos,
+            self.active
+        );
+        let active_vars = self.active.left_values().cloned().collect::<Vec<_>>();
+        for variable in active_vars {
+            let is_active = self
+                .live_intervals
+                .get(&variable)
+                .map_or(false, |interval| interval.alive_for_writing(pos));
+            if !is_active {
+                self.active.remove_by_left(&variable);
+                log::trace!(
+                    "deactivating variable {}: {} vs {:?}",
+                    variable,
+                    pos,
+                    self.live_intervals.get(&variable),
+                );
+            } else {
             }
         }
     }
@@ -989,10 +1071,10 @@ impl<'src> RegStackAlloc<'src> {
     fn revive(&mut self, var_id: mir::VarId, pos: usize) -> (Interval, StackLoc) {
         log::trace!("reviving ${} at {}", var_id, pos);
 
-        let (spill_intervals, loc) = self
-            .spilled
-            .get_mut(&var_id)
-            .expect(&format!("The variable {} is not spilled", var_id));
+        let (spill_intervals, loc) = self.spilled.get_mut(&var_id).expect(&format!(
+            "The variable {} is not spilled at {}",
+            var_id, pos
+        ));
 
         let last_spill = spill_intervals.last_mut();
         assert!(
@@ -1011,15 +1093,14 @@ impl<'src> RegStackAlloc<'src> {
     /// Request to allocate a register for reading the variable, or return the
     /// register already allocated for it
     pub fn alloc_read(&mut self, var_id: mir::VarId, pos: usize) -> Reg {
-        self.scan_and_desctivate(pos);
+        self.scan_and_deactivate_read(pos);
+
+        if let Some(&x) = self.active.get_by_left(&var_id) {
+            return x;
+        }
 
         let last_allocation = self.assignment.get(&var_id);
-        log::debug!(
-            "Allocate for reading: ${}@{}, alloc: {:?}",
-            var_id,
-            pos,
-            &last_allocation
-        );
+        log::debug!("Allocate for reading: ${}@{}", var_id, pos);
 
         if last_allocation.is_some()
             && last_allocation
@@ -1029,18 +1110,21 @@ impl<'src> RegStackAlloc<'src> {
                 .0
                 .alive_for_reading(pos)
         {
-            last_allocation.unwrap().last().1
+            panic!("Inconsistent variable live period: variable not in active set but has live interval {:?}",last_allocation);
+            let reg = last_allocation.unwrap().last().1;
+            log::debug!("Allocate for reading: ${}@{} -> {:?}", var_id, pos, reg);
+            reg
         } else {
             // The value might be spilled
-            let (new_interval, stack_loc) = self.revive(var_id, pos);
-            let reg = self.find_allocate_or_spill(var_id, &*VARIABLE_REGISTERS, new_interval, pos);
-
             let is_volatile = self.is_volatile(var_id);
 
             // Revived
+            let (new_interval, stack_loc) = self.revive(var_id, pos);
+            let reg = self.find_allocate_or_spill(var_id, &*VARIABLE_REGISTERS, new_interval, pos);
             self.just_revived.push_back((var_id, reg, stack_loc));
 
             self.allocate_register(var_id, reg, pos, new_interval, is_volatile);
+            log::debug!("Allocated: ${}@{} for {:?}", var_id, pos, new_interval);
 
             reg
         }
@@ -1050,13 +1134,18 @@ impl<'src> RegStackAlloc<'src> {
     /// Request to allocate a register, returns the register and whether needs
     /// to write back
     pub fn alloc_write(&mut self, var_id: mir::VarId, pos: usize) -> (Reg, bool) {
-        self.scan_and_desctivate(pos);
+        self.scan_and_deactivate_write(pos);
 
         let volatile = self.is_volatile(var_id);
+
+        if let Some(&x) = self.active.get_by_left(&var_id) {
+            return (x, volatile);
+        }
+
         let last_allocation = self.assignment.entry(var_id);
 
         log::debug!(
-            "Allocate for reading: ${}@{}, alloc: {:?}",
+            "Allocate for writing: ${}@{}, alloc: {:?}",
             var_id,
             pos,
             &last_allocation
@@ -1066,7 +1155,7 @@ impl<'src> RegStackAlloc<'src> {
             indexmap::map::Entry::Occupied(e) => {
                 let alloc = e.get();
                 let last_allocation = alloc.last();
-                if last_allocation.0.alive_for_reading(pos) {
+                if last_allocation.0.alive_for_writing(pos) {
                     last_allocation.1
                 } else {
                     // variable is spilled
@@ -1104,7 +1193,7 @@ impl<'src> RegStackAlloc<'src> {
     /// The number of scratch registers must be less than the total number of
     /// registers; If no register could be allocated, the method panics.
     pub fn alloc_scratch(&mut self, pos: usize) -> Reg {
-        self.scan_and_desctivate(pos);
+        self.scan_and_deactivate_read(pos);
 
         let var_id = self.scratch_register_counter;
         self.scratch_register_counter -= 1;
@@ -1124,13 +1213,13 @@ impl<'src> RegStackAlloc<'src> {
 
     ///
     pub fn force_free_register(&mut self, reg: Reg, pos: usize) {
-        self.scan_and_desctivate(pos);
+        self.scan_and_deactivate_write(pos);
         self.spill_reg(reg, pos)
     }
 
     /// Try to allocate the variable to register or memory without using it
     pub fn try_alloc_local(&mut self, var_id: mir::VarId, pos: usize) {
-        self.scan_and_desctivate(pos);
+        self.scan_and_deactivate_read(pos);
 
         if let Some(_) = self.active.get_by_left(&var_id) {
             //  noop
@@ -1163,18 +1252,13 @@ impl<'src> RegStackAlloc<'src> {
         }
     }
 
-    // /// Get or set the allocation of a local variable, position not defined
-    // pub fn alloc_local_stack(&mut self, var_id: mir::VarId) -> StackLoc {
-    //     match self.spilled.entry(var_id) {
-    //         indexmap::map::Entry::Occupied(entry) => entry.get().1,
-    //         indexmap::map::Entry::Vacant(entry) => {
-    //             let pos = self.stack_alloc_counter;
-    //             self.stack_alloc_counter += 4;
-    //             entry.insert((StackBase::SP, pos));
-    //             (StackBase::SP, pos)
-    //         }
-    //     }
-    // }
+    /// Get or set the allocation of a local variable, position not defined
+    pub fn get_stack_pos(&mut self, var_id: mir::VarId) -> Option<StackLoc> {
+        match self.spilled.entry(var_id) {
+            indexmap::map::Entry::Occupied(entry) => Some(entry.get().1),
+            indexmap::map::Entry::Vacant(entry) => None,
+        }
+    }
 
     /// Allocate a variable as this function's param, positioned at `%fp - Offset`
     pub fn alloc_param(&mut self, var_id: mir::VarId, offset: usize) -> StackLoc {
@@ -1214,6 +1298,7 @@ impl<'src> RegStackAlloc<'src> {
 struct InstructionGen<'src, 'b> {
     alloc: &'src mut RegStackAlloc<'b>,
     codes: &'src mut Vec<ArmCode>,
+    pre_alloc: &'src mut HashMap<usize, Vec<PreAllocEntry>>,
     static_values: &'src mut HashMap<String, StaticData>,
     func: &'src mir::Func,
     pkg: &'src mir::MirPackage,
@@ -1244,16 +1329,26 @@ impl<'src, 'b> InstructionGen<'src, 'b> {
         }
     }
 
-    pub fn gen_inst(&mut self, inst: &mir::MirCode) {
-        let tgt_val = inst.tgt;
-        let (dest, volatile) = match tgt_val.0 {
+    fn get_dest(&mut self, dest: mir::VarRef) -> (Reg, bool) {
+        if let Some(entries) = self.pre_alloc.get_mut(&self.pos) {
+            for entry in entries.drain(..) {
+                self.alloc.force_allocate_register(
+                    entry.id,
+                    entry.reg,
+                    self.pos,
+                    entry.interval,
+                    entry.volatile,
+                );
+            }
+        }
+        match dest.0 {
             mir::VarTy::Global => {
                 let reg = self.alloc.alloc_scratch(self.pos);
                 todo!("Global variable");
                 (reg, true)
             }
             mir::VarTy::Local => {
-                let var_id = self.alloc.get_collapsed_var(tgt_val.1);
+                let var_id = self.alloc.get_collapsed_var(dest.1);
                 let var_ty = self.get_ty(var_id).unwrap();
                 if var_ty.is_assignable() {
                     self.alloc.alloc_write(var_id, self.pos)
@@ -1261,23 +1356,50 @@ impl<'src, 'b> InstructionGen<'src, 'b> {
                     (Reg(255), false)
                 }
             }
-        };
-        match &inst.ins {
-            mir::Ins::TyCon(src_val) => self.gen_ty_con(dest, tgt_val, *src_val),
-            mir::Ins::Asn(val) => self.gen_assign(dest, *val),
-            mir::Ins::Bin(op, l, r) => self.gen_binary(dest, *op, *l, *r),
-            mir::Ins::Una(op, v) => self.gen_unary(dest, *op, *v),
-            mir::Ins::Call(f, params) => self.gen_call(dest, *f, params),
-            mir::Ins::Phi(_) => {}
-            mir::Ins::RestRead(_) => {}
         }
-        if volatile {
-            // write back
+    }
+
+    fn write_back(&mut self, volatile: bool, reg: Reg, dest: mir::VarRef) {
+        if !volatile {
+            return;
+        }
+        log::trace!("Write back variable {:?} from {:?}", dest, reg);
+
+        // Write the volatile value back
+        if dest.0 == mir::VarTy::Local {
+            let mem = self.alloc.get_stack_pos(dest.1);
+            if let Some(mem) = mem {
+                self.codes.push(ArmCode::StR(reg, mem.into()));
+            }
+        } else {
+            // let mem = self
+            todo!("Support global values")
+        }
+    }
+
+    pub fn gen_inst(&mut self, inst: &mir::MirCode) {
+        // if matches!(inst.ins, mir::Ins::Phi(_)) {
+        //     return;
+        // }
+        let tgt_val = inst.tgt;
+
+        match &inst.ins {
+            mir::Ins::TyCon(src_val) => self.gen_ty_con(tgt_val, tgt_val, *src_val),
+            mir::Ins::Asn(val) => self.gen_assign(tgt_val, *val),
+            mir::Ins::Bin(op, l, r) => self.gen_binary(tgt_val, *op, *l, *r),
+            mir::Ins::Una(op, v) => self.gen_unary(tgt_val, *op, *v),
+            mir::Ins::Call(f, params) => self.gen_call(tgt_val, *f, params),
+            mir::Ins::RestRead(..) => panic!("Not implemented"),
+            mir::Ins::Phi(..) => {
+                assert!(tgt_val.0 == mir::VarTy::Local);
+                self.alloc
+                    .alloc_read(self.alloc.get_collapsed_var(tgt_val.1), self.pos);
+            }
         }
         self.spill_and_revive();
     }
 
-    fn gen_ty_con(&mut self, dest: Reg, dest_val: mir::VarRef, src_val: mir::Value) {
+    fn gen_ty_con(&mut self, dest: mir::VarRef, dest_val: mir::VarRef, src_val: mir::Value) {
         todo!("Type conversion")
     }
 
@@ -1287,6 +1409,8 @@ impl<'src, 'b> InstructionGen<'src, 'b> {
         self.static_values
             .insert(label_name.clone(), StaticData::Word(vec![num as u32]));
         let reg = self.alloc.alloc_scratch(self.pos);
+
+        self.spill_and_revive();
 
         self.codes
             .push(ArmCode::LdR(reg, MemoryAccess::Label(label_name)));
@@ -1347,19 +1471,21 @@ impl<'src, 'b> InstructionGen<'src, 'b> {
         }
     }
 
-    fn gen_assign(&mut self, dest: Reg, src_val: mir::Value) {
+    fn gen_assign(&mut self, dest_val: mir::VarRef, src_val: mir::Value) {
         match src_val {
             mir::Value::Void => {
                 return;
             }
             src_val @ _ => {
                 let operand = self.gen_value_operand(src_val);
+                let (dest, volatile) = self.get_dest(dest_val);
                 if let ArmOperand::Reg(r) = operand {
                     if r == dest {
                         return;
                     }
                 }
                 self.codes.push(ArmCode::Mov(dest, operand));
+                self.write_back(volatile, dest, dest_val);
             }
         }
     }
@@ -1382,7 +1508,13 @@ impl<'src, 'b> InstructionGen<'src, 'b> {
         ));
     }
 
-    fn gen_binary(&mut self, dest: Reg, op: mir::BinOp, mut lhs: mir::Value, mut rhs: mir::Value) {
+    fn gen_binary(
+        &mut self,
+        dest_val: mir::VarRef,
+        op: mir::BinOp,
+        mut lhs: mir::Value,
+        mut rhs: mir::Value,
+    ) {
         let val_ty = self.val_ty(&lhs).expect("No type information");
         if val_ty.is_int() {
             if op == mir::BinOp::Sub {
@@ -1394,6 +1526,7 @@ impl<'src, 'b> InstructionGen<'src, 'b> {
                 }
                 let lhs = self.gen_value_reg(lhs);
                 let rhs = self.gen_value_operand(rhs);
+                let (dest, volatile) = self.get_dest(dest_val);
                 if !rev_sub {
                     self.codes
                         .push(ArmCode::Sub(NumericOperand { dest, lhs, rhs }))
@@ -1401,14 +1534,21 @@ impl<'src, 'b> InstructionGen<'src, 'b> {
                     self.codes
                         .push(ArmCode::Rsb(NumericOperand { dest, lhs, rhs }))
                 }
+                self.write_back(volatile, dest, dest_val);
             } else {
                 let lhs = self.gen_value_reg(lhs);
-                let rhs = self.gen_value_operand(rhs);
+                let rhs = if matches!(&op, mir::BinOp::Mul | mir::BinOp::Div) {
+                    ArmOperand::Reg(self.gen_value_reg(rhs))
+                } else {
+                    self.gen_value_operand(rhs)
+                };
+                let (dest, volatile) = self.get_dest(dest_val);
+
                 let arm_code = match op {
                     mir::BinOp::Add => ArmCode::Add(NumericOperand { dest, lhs, rhs }),
                     // mir::BinOp::Sub => {ArmCode::Sub(NumericOperand{dest,lhs,rhs})}
                     mir::BinOp::Mul => ArmCode::Mul(NumericOperand { dest, lhs, rhs }),
-                    mir::BinOp::Div => ArmCode::Div(NumericOperand { dest, lhs, rhs }),
+                    mir::BinOp::Div => ArmCode::SDiv(NumericOperand { dest, lhs, rhs }),
                     mir::BinOp::And => ArmCode::And(NumericOperand { dest, lhs, rhs }),
                     mir::BinOp::Or => ArmCode::Orr(NumericOperand { dest, lhs, rhs }),
                     mir::BinOp::Lt
@@ -1418,37 +1558,43 @@ impl<'src, 'b> InstructionGen<'src, 'b> {
                     | mir::BinOp::Lte
                     | mir::BinOp::Gte => {
                         self.gen_cmp(dest, op, lhs, rhs);
+                        self.write_back(volatile, dest, dest_val);
                         return;
                     }
                     _ => unreachable!(),
                 };
                 self.codes.push(arm_code);
+                self.write_back(volatile, dest, dest_val);
             }
         } else {
             unimplemented!("Binary operation of other types ")
         }
     }
 
-    fn gen_unary(&mut self, dest: Reg, op: mir::UnaOp, val: mir::Value) {
+    fn gen_unary(&mut self, dest_val: mir::VarRef, op: mir::UnaOp, val: mir::Value) {
         let val_ty = self.val_ty(&val).expect("No type information");
         if val_ty.is_int() {
             match op {
                 mir::UnaOp::Pos => {
                     let operand = self.gen_value_operand(val);
+                    let (dest, volatile) = self.get_dest(dest_val);
                     if let ArmOperand::Reg(r) = operand {
                         if r == dest {
                             return;
                         }
                     }
                     self.codes.push(ArmCode::Mov(dest, operand));
+                    self.write_back(volatile, dest, dest_val);
                 }
                 mir::UnaOp::Neg => {
                     let operand = self.gen_value_reg(val);
+                    let (dest, volatile) = self.get_dest(dest_val);
                     self.codes.push(ArmCode::Rsb(NumericOperand {
                         dest,
                         lhs: operand,
                         rhs: ArmOperand::Imm(0),
                     }));
+                    self.write_back(volatile, dest, dest_val);
                 }
             };
         } else {
@@ -1456,14 +1602,14 @@ impl<'src, 'b> InstructionGen<'src, 'b> {
         }
     }
 
-    fn gen_call(&mut self, dest: Reg, dest_val: mir::VarRef, params: &Vec<mir::Value>) {
+    fn gen_call(&mut self, dest_val: mir::VarRef, func: mir::VarRef, params: &Vec<mir::Value>) {
         // parameters are already set
-        assert!(dest_val.0 == mir::VarTy::Global);
+        assert!(func.0 == mir::VarTy::Global);
         assert!(params
             .iter()
             .all(|param| matches!(param, mir::Value::Var(mir::VarRef(mir::VarTy::Local, _)))));
 
-        let func_info = self.pkg.func_table.get(&dest_val.1).unwrap();
+        let func_info = self.pkg.func_table.get(&func.1).unwrap();
         let func_name = func_info.name.clone();
         let has_return_value = func_info.ty.get_fn_ret().unwrap().borrow().is_assignable();
 
@@ -1473,7 +1619,6 @@ impl<'src, 'b> InstructionGen<'src, 'b> {
                 self.alloc.force_free_register(Reg((i) as u8), self.pos);
             }
         } else {
-            self.spill_and_revive();
             // ramp up stack size; we have used the red zone to store params
             self.codes.push(ArmCode::Add(NumericOperand {
                 dest: SP_REGISTER,
@@ -1481,9 +1626,10 @@ impl<'src, 'b> InstructionGen<'src, 'b> {
                 rhs: ArmOperand::Imm((param_count - 4) as i32),
             }));
         }
+        self.spill_and_revive();
 
         if has_return_value {
-            self.alloc.force_free_register(dest, self.pos);
+            self.alloc.force_free_register(Reg(0), self.pos);
         }
 
         self.codes.push(ArmCode::Bl(func_name));
@@ -1496,10 +1642,12 @@ impl<'src, 'b> InstructionGen<'src, 'b> {
                 rhs: ArmOperand::Imm(-((param_count - 4) as i32)),
             }));
         }
+        let (dest, volatile) = self.get_dest(dest_val);
 
-        if has_return_value {
+        if has_return_value && dest != Reg(0) {
             self.codes.push(ArmCode::Mov(dest, ArmOperand::Reg(Reg(0))));
         }
+        self.write_back(volatile, dest, dest_val);
     }
 
     fn gen_rest_read(&mut self, dest: Reg, dest_val: mir::VarRef) {

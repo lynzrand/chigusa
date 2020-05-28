@@ -3,7 +3,7 @@ mod util;
 use crate::mir;
 use indexmap::IndexSet;
 use once_cell::sync::Lazy;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Ord, PartialOrd)]
 pub struct Reg(u8);
@@ -114,7 +114,7 @@ pub enum MemoryAccess {
 impl std::fmt::Debug for MemoryAccess {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            MemoryAccess::Register(reg, i) => write!(f, "[{:?}, {}]", reg, i),
+            MemoryAccess::Register(reg, i) => write!(f, "[{:?}, #{}]", reg, i),
             MemoryAccess::Label(l) => write!(f, "{}", l),
         }
     }
@@ -212,7 +212,7 @@ pub enum ArmCode {
     Add(NumericOperand),
     Sub(NumericOperand),
     Mul(NumericOperand),
-    Div(NumericOperand),
+    SDiv(NumericOperand),
     /// Reverse Subtract
     Rsb(NumericOperand),
     And(NumericOperand),
@@ -270,7 +270,7 @@ impl std::fmt::Debug for ArmCode {
             ArmCode::Add(op) => write!(f, "\tadd\t{:?}", op),
             ArmCode::Sub(op) => write!(f, "\tsub\t{:?}", op),
             ArmCode::Mul(op) => write!(f, "\tmul\t{:?}", op),
-            ArmCode::Div(op) => write!(f, "\tdiv\t{:?}", op),
+            ArmCode::SDiv(op) => write!(f, "\tsdiv\t{:?}", op),
             ArmCode::Rsb(op) => write!(f, "\trsb\t{:?}", op),
             ArmCode::And(op) => write!(f, "\tand\t{:?}", op),
             ArmCode::Orr(op) => write!(f, "\torr\t{:?}", op),
@@ -337,15 +337,80 @@ impl std::fmt::Debug for ArmCode {
     }
 }
 
-#[derive(Debug)]
 pub enum StaticData {
     Byte(Vec<u8>),
     Word(Vec<u32>),
     AsciiZ(String),
 }
 
-#[derive(Debug)]
+impl std::fmt::Debug for StaticData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            StaticData::Byte(b) => {
+                write!(f, "\t.byte\t")?;
+                for (idx, b) in b.iter().enumerate() {
+                    if idx != 0 {
+                        write!(f, ",")?;
+                    }
+                    write!(f, "{}", b)?;
+                }
+                Ok(())
+            }
+            StaticData::Word(w) => {
+                write!(f, "\t.word\t")?;
+                for (idx, b) in w.iter().enumerate() {
+                    if idx != 0 {
+                        write!(f, ",")?;
+                    }
+                    write!(f, "{}", b)?;
+                }
+                Ok(())
+            }
+            StaticData::AsciiZ(s) => {
+                write!(f, "\t.asciz\t")?;
+                write!(f, "{}", s.escape_unicode())?;
+                Ok(())
+            }
+        }
+    }
+}
+
 pub struct ArmFunction {
     name: String,
     code: Vec<ArmCode>,
+    static_values: HashMap<String, StaticData>,
+}
+
+impl std::fmt::Debug for ArmFunction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "\t.globl\t{}", self.name)?;
+        writeln!(f, "{}:", self.name)?;
+        writeln!(f, "\t.fnstart")?;
+        for line in &self.code {
+            writeln!(f, "{:?}", line)?;
+        }
+        writeln!(f, "\t.fnend")?;
+        for (key, val) in &self.static_values {
+            writeln!(f, "{}:", key)?;
+            writeln!(f, "\t{:?}", val)?;
+        }
+        Ok(())
+    }
+}
+
+pub struct ArmPackage {
+    functions: Vec<ArmFunction>,
+}
+
+impl std::fmt::Debug for ArmPackage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "\t.text")?;
+        writeln!(f)?;
+
+        for func in &self.functions {
+            writeln!(f, "{:?}", func);
+        }
+
+        Ok(())
+    }
 }

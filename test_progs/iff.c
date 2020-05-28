@@ -1,6 +1,4 @@
-void main() {
-  int x = 1;
-  int y = 1;
+void myprint(int x, int y) {
   if (x < y)
     print(1);
   if (x > y)
@@ -13,4 +11,11 @@ void main() {
     print(5);
   if (x != y)
     print(6);
+}
+
+void main() {
+  int x = 1;
+  int y = 2;
+
+  myprint(x, y);
 }

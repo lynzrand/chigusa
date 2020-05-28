@@ -35,18 +35,13 @@ impl Interval {
     }
 
     pub fn alive_for_writing(&self, pos: usize) -> bool {
-        if self.0 == self.1 {
-            true
-        } else {
-            pos >= self.0 && pos < self.1
-        }
+        pos == self.0 || (pos > self.0 && pos < self.1)
+    }
+    pub fn alive_for_either(&self, pos: usize) -> bool {
+        pos >= self.0 && pos <= self.1
     }
     pub fn alive_for_reading(&self, pos: usize) -> bool {
-        if self.0 == self.1 {
-            true
-        } else {
-            pos > self.0 && pos <= self.1
-        }
+        pos == self.1 || (pos > self.0 && pos < self.1)
     }
 
     pub fn union(mut x: Self, y: Self) -> Self {

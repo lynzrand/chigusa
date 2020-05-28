@@ -105,13 +105,13 @@ impl<'src> Codegen<'src> {
             is_extern: false,
         };
 
-        let entry_point = self.gen_non_extern_fn("_start", &entry_point_fn)?;
+        let entry_point = self.gen_non_extern_fn("main", &entry_point_fn)?;
 
         self.pkg.global_var_table.insert(
             entry_point_id,
             mir::GlobalVar {
                 ty: entry_point_ty,
-                name: "_start".to_owned().into(),
+                name: "main".to_owned().into(),
                 binary_value: None,
             },
         );
@@ -132,10 +132,16 @@ impl<'src> Codegen<'src> {
             self.gen_extern_fn(name, ty)
         } else {
             assert!(func.body.is_some());
+
             let f = self.gen_non_extern_fn(name, func)?;
-            self.pkg
-                .func_table
-                .insert(*self.global_var_names.get(name).unwrap(), f);
+            let key = *self.global_var_names.get(name).unwrap();
+            self.pkg.func_table.insert(key, f);
+
+            if name == "main" {
+                self.pkg.func_table.get_mut(&key).unwrap().name = "__chigusa_main".into();
+                self.global_var_names.insert("__chigusa_main".into(), key);
+            }
+
             Ok(())
         }
     }
@@ -423,10 +429,12 @@ impl<'src> FnCodegen<'src> {
                 .iter()
                 .zip(param_scope.defs.iter().take(self.src.params.len()))
             {
+                let scopt_depth = param_scope.id;
+                let name = format_ident(name, scopt_depth);
                 let param_ty = resolve_ty(&param_ty.borrow(), &self.root_scope.borrow())?;
                 params_ty.push(param_ty.clone());
                 self.add_assign_entry(
-                    Some(name),
+                    Some(&name),
                     param_ty,
                     mir::VarKind::Param,
                     self.src.body.as_ref().unwrap().span.unwrap().start,
@@ -1307,14 +1315,37 @@ impl<'src> FnCodegen<'src> {
             if val_ty != *param_ty {
                 return Err(CompileErrorVar::TypeMismatch).with_span(span);
             }
+
+            log::trace!("param {:?}", param);
+
             // Assign every value calculated into a temporary variable
+            // if value itself is a variable then reassign it
             let temp_var = self.add_assign_entry(
                 None,
-                val_ty,
+                val_ty.clone(),
                 mir::VarKind::FixedTemp,
                 param.borrow().span.start,
                 bb,
             );
+            let val = if matches!(val, mir::Value::Var(_)) {
+                let temp_var_1 = self.add_assign_entry(
+                    None,
+                    val_ty,
+                    mir::VarKind::FixedTemp,
+                    param.borrow().span.start,
+                    bb,
+                );
+                self.insert_ins(
+                    bb,
+                    mir::MirCode {
+                        ins: mir::Ins::Asn(val),
+                        tgt: temp_var_1,
+                    },
+                )?;
+                mir::Value::Var(temp_var_1)
+            } else {
+                mir::Value::Var(temp_var)
+            };
             self.insert_ins(
                 bb,
                 mir::MirCode {
@@ -1326,7 +1357,7 @@ impl<'src> FnCodegen<'src> {
             params.push(mir::Value::Var(temp_var));
         }
 
-        let temp_var = self.add_assign_entry(
+        let res_var = self.add_assign_entry(
             None,
             func_ty.get_fn_ret().unwrap().borrow().clone(),
             mir::VarKind::FixedTemp,
@@ -1338,11 +1369,11 @@ impl<'src> FnCodegen<'src> {
             bb,
             mir::MirCode {
                 ins: mir::Ins::Call(mir::VarRef(mir::VarTy::Global, func_id), params),
-                tgt: temp_var,
+                tgt: res_var,
             },
         )?;
 
-        Ok(mir::Value::Var(temp_var))
+        Ok(mir::Value::Var(res_var))
     }
 
     fn gen_blk(
@@ -1553,20 +1584,52 @@ impl<'src> FnCodegen<'src> {
                     expr.span.end,
                     bb,
                 );
+                let space_char = self.add_assign_entry(
+                    None,
+                    mir::Ty::Void,
+                    mir::VarKind::Dummy,
+                    expr.span.end,
+                    bb,
+                );
+
+                self.insert_ins(
+                    bb,
+                    mir::MirCode {
+                        ins: mir::Ins::Asn(mir::Value::IntImm(' ' as i32)),
+                        tgt: space_char,
+                    },
+                )?;
                 self.insert_ins(
                     bb,
                     mir::MirCode {
                         ins: mir::Ins::Call(
                             mir::VarRef(mir::VarTy::Global, put_char),
-                            vec![mir::Value::IntImm(b' ' as i32)],
+                            vec![mir::Value::Var(space_char)],
                         ),
                         tgt: temp_var,
                     },
                 )?;
             }
 
-            let temp_var =
+            let temp_var_1 = self.add_assign_entry(
+                None,
+                expr_val_ty.clone(),
+                mir::VarKind::FixedTemp,
+                expr.span.start,
+                bb,
+            );
+            self.insert_ins(
+                bb,
+                mir::MirCode {
+                    ins: mir::Ins::Asn(expr_val),
+                    tgt: temp_var_1,
+                },
+            )?;
+            let expr_val = mir::Value::Var(temp_var_1);
+
+            let res_var =
                 self.add_assign_entry(None, mir::Ty::Void, mir::VarKind::Dummy, expr.span.end, bb);
+
             if expr_val_ty.is_int() {
                 let put_int = *self
                     .global_names
@@ -1580,7 +1643,7 @@ impl<'src> FnCodegen<'src> {
                             mir::VarRef(mir::VarTy::Global, put_int),
                             vec![expr_val],
                         ),
-                        tgt: temp_var,
+                        tgt: res_var,
                     },
                 )?;
             } else if expr_val_ty.is_double() {
@@ -1596,7 +1659,7 @@ impl<'src> FnCodegen<'src> {
                             mir::VarRef(mir::VarTy::Global, put_double),
                             vec![expr_val],
                         ),
-                        tgt: temp_var,
+                        tgt: res_var,
                     },
                 )?;
             } else if expr_val_ty.is_array_of(&mir::Ty::byte()) {
@@ -1607,20 +1670,58 @@ impl<'src> FnCodegen<'src> {
                         .get(crate::stdlib::STDLIB_PUT_DOUBLE)
                         .unwrap();
 
+                    let temp_var_2 = self.add_assign_entry(
+                        None,
+                        mir::Ty::int(),
+                        mir::VarKind::FixedTemp,
+                        expr.span.start,
+                        bb,
+                    );
+
+                    self.insert_ins(
+                        bb,
+                        mir::MirCode {
+                            ins: mir::Ins::Asn(mir::Value::IntImm(size as i32)),
+                            tgt: temp_var_2,
+                        },
+                    )?;
                     self.insert_ins(
                         bb,
                         mir::MirCode {
                             ins: mir::Ins::Call(
                                 mir::VarRef(mir::VarTy::Global, put_str),
-                                vec![expr_val, mir::Value::IntImm(size as i32)],
+                                vec![expr_val, mir::Value::Var(temp_var_2)],
                             ),
-                            tgt: temp_var,
+                            tgt: res_var,
                         },
                     )?;
                 } else {
                     return Err(CompileErrorVar::RequireSized("".into())).with_span(span);
                 }
             }
+        }
+        {
+            let temp_var =
+                self.add_assign_entry(None, mir::Ty::Void, mir::VarKind::Dummy, span.end, bb);
+            let line_feed =
+                self.add_assign_entry(None, mir::Ty::int(), mir::VarKind::Dummy, span.end, bb);
+            self.insert_ins(
+                bb,
+                mir::MirCode {
+                    ins: mir::Ins::Asn(mir::Value::IntImm(b'\n' as i32)),
+                    tgt: line_feed,
+                },
+            )?;
+            self.insert_ins(
+                bb,
+                mir::MirCode {
+                    ins: mir::Ins::Call(
+                        mir::VarRef(mir::VarTy::Global, put_char),
+                        vec![mir::Value::Var(line_feed)],
+                    ),
+                    tgt: temp_var,
+                },
+            )?;
         }
         Ok(bb)
     }
