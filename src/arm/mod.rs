@@ -408,7 +408,7 @@ impl std::fmt::Debug for ArmPackage {
         writeln!(f)?;
 
         for func in &self.functions {
-            writeln!(f, "{:?}", func);
+            writeln!(f, "{:?}", func)?;
         }
 
         Ok(())

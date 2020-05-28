@@ -1,5 +1,6 @@
 void myprint(int x, int y) {
-  if (x < y)
+  int z = x * y;
+  if (z > 12)
     print(1);
   if (x > y)
     print(2);
@@ -14,8 +15,8 @@ void myprint(int x, int y) {
 }
 
 void main() {
-  int x = 1;
-  int y = 2;
+  int x = 4;
+  int y = 9;
 
   myprint(x, y);
 }

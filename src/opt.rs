@@ -21,7 +21,7 @@ fn parse_verbosity(input: &str) -> Result<log::LevelFilter, &'static str> {
 #[structopt(
     name = "chigusa",
     about = r"
-A compiler that parses c0 grammar and compiles it into o0 binary format.
+A compiler that parses c0 grammar and compiles it into ARMv7 assembly.
 
 C0: https://github.com/BUAA-SE-Compiling/c0-handbook
 O0: https://github.com/BUAA-SE-Compiling/c0-vm-standards
@@ -52,26 +52,22 @@ pub struct ParserConfig {
     /// Emit result explanation:
     /// - Token: Direct result from lexer (tokenizer)
     /// - AST: Abstract Syntax Tree, direct result from parser (analyzer)
-    /// - s0: C0 assembly file
-    /// - o0: C0 binary file
-    #[structopt(long, default_value = "o0", parse(try_from_str = EmitOption::parse))]
+    /// - Mir: Mid-level Intermediate Language
+    /// - ASM: ARM Assembly
+    #[structopt(long, default_value = "asm", parse(try_from_str = EmitOption::parse))]
     pub emit: EmitOption,
 
-    /// Emit C0 assembly file, same as `--emit s0`
-    #[structopt(short = "s", long = "s0")]
+    /// Emit C0 assembly file, same as `--emit asm`
+    #[structopt(short = "S", long = "asm")]
     pub output_assembly: bool,
-
-    /// Emit C0 binary file, same as `--emit o0`
-    #[structopt(short = "c", long = "o0")]
-    pub output_binary: bool,
 }
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum EmitOption {
     Token,
     Ast,
-    S0,
-    O0,
+    Mir,
+    Asm,
 }
 
 impl EmitOption {
@@ -79,9 +75,9 @@ impl EmitOption {
         match s {
             "token" => Ok(EmitOption::Token),
             "ast" => Ok(EmitOption::Ast),
-            "s0" => Ok(EmitOption::S0),
-            "o0" => Ok(EmitOption::O0),
-            _ => Err("Bad emit option. Allowed are: token, ast, s0, o0"),
+            "mir" => Ok(EmitOption::Mir),
+            "asm" => Ok(EmitOption::Asm),
+            _ => Err("Bad emit option. Allowed are: token, ast, mir, asm"),
         }
     }
 }

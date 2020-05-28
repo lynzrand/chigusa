@@ -15,10 +15,7 @@ fn main() {
     simplelog::SimpleLogger::init(opt.verbosity, simplelog::Config::default()).unwrap();
 
     if opt.output_assembly {
-        opt.emit = EmitOption::S0;
-    }
-    if opt.output_binary {
-        opt.emit = EmitOption::O0;
+        opt.emit = EmitOption::Asm;
     }
 
     let mut input = String::new();
@@ -91,12 +88,15 @@ fn main() {
         }
     };
 
-    // eprintln!("{:#?}", mir);
+    if opt.emit == EmitOption::Mir {
+        write_output(&opt, mir);
+        return;
+    }
 
     let asm_cg = chigusa::arm::codegen::Codegen::new(&mir);
     let code = asm_cg.gen();
 
-    if opt.emit == EmitOption::S0 {
+    if opt.emit == EmitOption::Asm {
         let mut f = File::create(&opt.output_file).expect("Failed to create output file");
         log::info!(
             "Writing to output file: {}",

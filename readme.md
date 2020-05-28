@@ -23,6 +23,10 @@ The official C0 and O0 format standards (Chinese):
 - O0 spec: https://github.com/BUAA-SE-Compiling/c0-vm-standards
 - O0 virtual machine: https://github.com/BUAA-SE-Compiling/c0-vm-cpp
 
+## Building
+
+**Use Rust nightly-2020-05-14 toolchain to build!**
+
 ## Usage
 
 ```sh
