@@ -3,13 +3,16 @@ use mir::Ty;
 // Standard library function names
 
 pub const STDLIB_SCAN_CHAR: &'static str = "__std_scan_char";
-pub const STDLIB_SCAN_INT: &'static str = "__std_scan_int";
+pub const STDLIB_SCAN_INT: &'static str = "getint";
 pub const STDLIB_SCAN_DOUBLE: &'static str = "__std_scan_double";
 
 pub const STDLIB_PUT_CHAR: &'static str = "__std_put_char";
-pub const STDLIB_PUT_INT: &'static str = "__std_put_int";
+pub const STDLIB_PUT_INT: &'static str = "putint";
 pub const STDLIB_PUT_DOUBLE: &'static str = "__std_put_double";
 pub const STDLIB_PUT_STR: &'static str = "__std_put_str";
+
+pub const STDLIB_START_TIME: &'static str = "starttime";
+pub const STDLIB_STOP_TIME: &'static str = "stoptime";
 
 // Standard library function types
 pub fn scan_char_ty() -> Ty {
@@ -113,6 +116,14 @@ pub mod c0 {
                     var: PrimitiveTypeVar::SignedInt,
                 })),
             }))],
+            return_type: Ptr::new(TypeDef::Unit),
+            body: None,
+            is_extern: true,
+        })
+    }
+    pub fn starttime_ty() -> TypeDef {
+        TypeDef::Function(FunctionType {
+            params: vec![],
             return_type: Ptr::new(TypeDef::Unit),
             body: None,
             is_extern: true,

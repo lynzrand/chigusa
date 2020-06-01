@@ -262,6 +262,26 @@ where
                 },
             )
             .unwrap();
+        scope
+            .insert_def(
+                stdlib::STDLIB_STOP_TIME,
+                SymbolDef::Var {
+                    typ: Ptr::new(stdlib::c0::starttime_ty()),
+                    is_const: false,
+                    decl_span: Span::zero(),
+                },
+            )
+            .unwrap();
+        scope
+            .insert_def(
+                stdlib::STDLIB_START_TIME,
+                SymbolDef::Var {
+                    typ: Ptr::new(stdlib::c0::starttime_ty()),
+                    is_const: false,
+                    decl_span: Span::zero(),
+                },
+            )
+            .unwrap();
     }
 
     fn p_program(&mut self) -> ParseResult<Program> {

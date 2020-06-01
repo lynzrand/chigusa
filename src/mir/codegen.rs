@@ -1497,8 +1497,15 @@ impl<'src> FnCodegen<'src> {
         let ret = if let Some(val) = ret_val {
             let val = self.gen_expr(&val.borrow(), bb, scope)?;
             let val_ty = self.val_ty(&val).unwrap();
-            let val = self.add_assign_entry(None, val_ty, mir::VarKind::Ret, span.start, bb);
-            Some(mir::Value::Var(val))
+            let reg = self.add_assign_entry(None, val_ty, mir::VarKind::Ret, span.start, bb);
+            self.insert_ins(
+                bb,
+                mir::MirCode {
+                    tgt: reg,
+                    ins: mir::Ins::Asn(val),
+                },
+            )?;
+            Some(mir::Value::Var(reg))
         } else {
             None
         };
@@ -1700,29 +1707,29 @@ impl<'src> FnCodegen<'src> {
                 }
             }
         }
-        {
-            let temp_var =
-                self.add_assign_entry(None, mir::Ty::Void, mir::VarKind::Dummy, span.end, bb);
-            let line_feed =
-                self.add_assign_entry(None, mir::Ty::int(), mir::VarKind::Dummy, span.end, bb);
-            self.insert_ins(
-                bb,
-                mir::MirCode {
-                    ins: mir::Ins::Asn(mir::Value::IntImm(b'\n' as i32)),
-                    tgt: line_feed,
-                },
-            )?;
-            self.insert_ins(
-                bb,
-                mir::MirCode {
-                    ins: mir::Ins::Call(
-                        mir::VarRef(mir::VarTy::Global, put_char),
-                        vec![mir::Value::Var(line_feed)],
-                    ),
-                    tgt: temp_var,
-                },
-            )?;
-        }
+        // {
+        //     let temp_var =
+        //         self.add_assign_entry(None, mir::Ty::Void, mir::VarKind::Dummy, span.end, bb);
+        //     let line_feed =
+        //         self.add_assign_entry(None, mir::Ty::int(), mir::VarKind::Dummy, span.end, bb);
+        //     self.insert_ins(
+        //         bb,
+        //         mir::MirCode {
+        //             ins: mir::Ins::Asn(mir::Value::IntImm(b'\n' as i32)),
+        //             tgt: line_feed,
+        //         },
+        //     )?;
+        //     self.insert_ins(
+        //         bb,
+        //         mir::MirCode {
+        //             ins: mir::Ins::Call(
+        //                 mir::VarRef(mir::VarTy::Global, put_char),
+        //                 vec![mir::Value::Var(line_feed)],
+        //             ),
+        //             tgt: temp_var,
+        //         },
+        //     )?;
+        // }
         Ok(bb)
     }
 }

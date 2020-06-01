@@ -15,7 +15,11 @@ use vec1::{vec1, Vec1};
 
 macro_rules! get_interval {
     ($self_:expr, $idx:expr) => {
-        *$self_.reg_alloc.live_intervals.get(&$idx).unwrap()
+        *$self_
+            .reg_alloc
+            .live_intervals
+            .get(&$self_.get_collapsed_var($idx))
+            .unwrap()
     };
 }
 
@@ -176,6 +180,9 @@ impl<'src> FnCodegen<'src> {
     pub fn scan_intervals(&mut self) {
         self.arrange_basic_blocks();
         self.calc_bb_starting_points();
+
+        log::debug!("BB arrangement is {:?}", self.bb_arrangement);
+
         for bb_id in self.bb_arrangement.iter().cloned() {
             let bb = self.src.bb.get(&bb_id).unwrap();
             let offset = *self.bb_start_pos.get(&bb_id).unwrap();
@@ -261,7 +268,7 @@ impl<'src> FnCodegen<'src> {
                 }
 
                 assert!(var_reg_size == 1, "only int-s are supported");
-
+                log::trace!("set return value {}", id);
                 let interval = get_interval!(self, id);
                 pre_alloc_reg!(
                     self,
